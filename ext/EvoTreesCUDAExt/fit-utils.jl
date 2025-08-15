@@ -147,6 +147,7 @@ end
     feats::AbstractVector{Int32},
     @Const(hL),
     @Const(hR),
+    @Const(nodes_sum),
     @Const(active_nodes),
     lambda::T,
     min_weight::T,
@@ -168,8 +169,8 @@ end
         b_best = Int32(0)
         f_best = Int32(0)
         
-        p_g1 = hR[1, nbins, 1, node]
-        p_g2 = hR[2, nbins, 1, node]
+        p_g1 = nodes_sum[1, node]
+        p_g2 = nodes_sum[2, node]
         gain_p = p_g1^2 / (p_g2 + lambda)
         
         feat_start = (tid - 1) * feats_per_thread + 1
@@ -229,7 +230,7 @@ end
 end
 
 function update_hist_gpu!(
-    h∇, hL, hR, gains, bins, feats, ∇, x_bin, nidx, js, depth, active_nodes_gpu, params
+    h∇, hL, hR, gains, bins, feats, ∇, x_bin, nidx, js, depth, active_nodes_gpu, nodes_sum_gpu, params
 )
     backend = KernelAbstractions.get_backend(h∇)
     n_nodes_level = 2^(depth - 1)
@@ -268,7 +269,7 @@ function update_hist_gpu!(
     
     kernel_find_split! = find_best_split_kernel_parallel!(backend, 32)
     kernel_find_split!(
-        gains, bins, feats, hL, hR, active_nodes,
+        gains, bins, feats, hL, hR, nodes_sum_gpu, active_nodes,
         params.lambda, params.min_weight;
         ndrange = (length(active_nodes), 1)
     )
@@ -276,4 +277,3 @@ function update_hist_gpu!(
     KernelAbstractions.synchronize(backend)
     return nothing
 end
-

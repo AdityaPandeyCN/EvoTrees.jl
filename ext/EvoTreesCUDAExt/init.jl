@@ -64,7 +64,7 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes{L}, ::Type{<:EvoTrees.GPU}
 
     # initialize gradients
     ∇ = CUDA.zeros(T, 2 * K + 1, nobs)
-    h∇ = CUDA.zeros(Float32, 2 * K + 1, maximum(featbins), length(featbins), 2^(params.max_depth - 1) - 1)
+    h∇ = CUDA.zeros(Float32, 2 * K + 1, maximum(featbins), length(featbins), 2^params.max_depth - 1)
     h∇L = CUDA.zero(h∇)
     h∇R = CUDA.zero(h∇)
     @assert (length(y) == length(w) && minimum(w) > 0)

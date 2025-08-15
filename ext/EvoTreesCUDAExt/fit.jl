@@ -45,26 +45,35 @@ function grow_tree!(
     tree_split_gpu = KernelAbstractions.zeros(backend, Bool, length(tree.split))
     tree_cond_bin_gpu = KernelAbstractions.zeros(backend, UInt32, length(tree.cond_bin))
     tree_feat_gpu = KernelAbstractions.zeros(backend, Int32, length(tree.feat))
-    tree_gain_gpu = KernelAbstractions.zeros(backend, K, length(tree.gain))
-    tree_pred_gpu = KernelAbstractions.zeros(backend, K, length(tree.pred))
+    tree_gain_gpu = KernelAbstractions.zeros(backend, Float64, length(tree.gain))
+    tree_pred_gpu = KernelAbstractions.zeros(backend, Float32, length(tree.pred))
 
     max_nodes_total = 2^(params.max_depth + 1)
-    nodes_sum_gpu = KernelAbstractions.zeros(backend, K, 3, max_nodes_total)
-    nodes_gain_gpu = KernelAbstractions.zeros(backend, K, max_nodes_total)
+    nodes_sum_gpu = KernelAbstractions.zeros(backend, Float64, 3, max_nodes_total)
+    nodes_gain_gpu = KernelAbstractions.zeros(backend, Float64, max_nodes_total)
 
     max_nodes_level = 2^params.max_depth
     anodes_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level)
     n_next_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level * 2)
     n_next_active_gpu = CuArray([0])
 
-    best_gain_gpu = KernelAbstractions.zeros(backend, K, max_nodes_level)
+    best_gain_gpu = KernelAbstractions.zeros(backend, Float64, max_nodes_level)
     best_bin_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level)
     best_feat_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level)
     
     nidx .= 1
-    CUDA.mapreducedim!(x -> (x[1], x[2], K(1.0)), +, view(nodes_sum_gpu, :, 1:1), view(∇, :, is_gpu), dims=2)
-    get_gain_gpu!(backend)(nodes_gain_gpu, nodes_sum_gpu, [1], params.lambda; ndrange=1)
-    anodes_gpu[1] = 1
+    
+    nsamples = Float32(length(is_gpu))
+    root_sums_cpu = zeros(Float64, 3)
+    root_sums_cpu[1] = sum(view(∇, 1, is_gpu))
+    root_sums_cpu[2] = sum(view(∇, 2, is_gpu))
+    root_sums_cpu[3] = nsamples
+    copyto!(view(nodes_sum_gpu, :, 1), root_sums_cpu)
+
+    get_gain_gpu!(backend)(nodes_gain_gpu, nodes_sum_gpu, CuArray([1]), params.lambda; ndrange=1)
+    
+    copyto!(view(anodes_gpu, 1:1), [1])
+    
     n_active = 1
 
     for depth in 1:params.max_depth
@@ -79,7 +88,7 @@ function grow_tree!(
             h∇, h∇L, h∇R,
             view_gain, view_bin, view_feat,
             ∇, x_bin, nidx, js_gpu,
-            depth, active_nodes, params
+            depth, active_nodes, nodes_sum_gpu, params
         )
 
         n_next_active_gpu .= 0
@@ -249,4 +258,3 @@ function grow_otree!(
     end
     return nothing
 end
-
