@@ -99,43 +99,47 @@ end
 ) where {T}
     n_idx, feat = @index(Global, NTuple)
     tid = @index(Local)
-    shmem = @localmem T (3, 256)
+    
+    # FIX: Correct shared memory declaration - separate arrays instead of 2D
+    shmem_g1 = @localmem T 256
+    shmem_g2 = @localmem T 256
+    shmem_g3 = @localmem T 256
 
     @inbounds if n_idx <= length(active_nodes) && feat <= size(h∇, 3)
         node = active_nodes[n_idx]
         nbins = size(h∇, 2)
 
         if tid <= nbins
-            shmem[1, tid] = h∇[1, tid, feat, node]
-            shmem[2, tid] = h∇[2, tid, feat, node]
-            shmem[3, tid] = h∇[3, tid, feat, node]
+            shmem_g1[tid] = h∇[1, tid, feat, node]
+            shmem_g2[tid] = h∇[2, tid, feat, node]
+            shmem_g3[tid] = h∇[3, tid, feat, node]
         else
-            shmem[1, tid] = zero(T)
-            shmem[2, tid] = zero(T)
-            shmem[3, tid] = zero(T)
+            shmem_g1[tid] = zero(T)
+            shmem_g2[tid] = zero(T)
+            shmem_g3[tid] = zero(T)
         end
         @synchronize()
 
         offset = 1
         while offset < nbins
             if tid > offset
-                shmem[1, tid] += shmem[1, tid - offset]
-                shmem[2, tid] += shmem[2, tid - offset]
-                shmem[3, tid] += shmem[3, tid - offset]
+                shmem_g1[tid] += shmem_g1[tid - offset]
+                shmem_g2[tid] += shmem_g2[tid - offset]
+                shmem_g3[tid] += shmem_g3[tid - offset]
             end
             offset <<= 1
             @synchronize()
         end
 
         if tid <= nbins
-            hL[1, tid, feat, node] = shmem[1, tid]
-            hL[2, tid, feat, node] = shmem[2, tid]
-            hL[3, tid, feat, node] = shmem[3, tid]
+            hL[1, tid, feat, node] = shmem_g1[tid]
+            hL[2, tid, feat, node] = shmem_g2[tid]
+            hL[3, tid, feat, node] = shmem_g3[tid]
 
             if tid == nbins
-                hR[1, nbins, feat, node] = shmem[1, tid]
-                hR[2, nbins, feat, node] = shmem[2, tid]
-                hR[3, nbins, feat, node] = shmem[3, tid]
+                hR[1, nbins, feat, node] = shmem_g1[tid]
+                hR[2, nbins, feat, node] = shmem_g2[tid]
+                hR[3, nbins, feat, node] = shmem_g3[tid]
             end
         end
     end
@@ -155,6 +159,7 @@ end
     n_idx, _ = @index(Global, NTuple)
     tid = @index(Local)
     
+    # FIX: Correct shared memory declaration - separate arrays
     shmem_gains = @localmem T 32
     shmem_bins = @localmem Int32 32
     shmem_feats = @localmem Int32 32
@@ -277,3 +282,4 @@ function update_hist_gpu!(
     KernelAbstractions.synchronize(backend)
     return nothing
 end
+
