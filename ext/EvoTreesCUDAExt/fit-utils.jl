@@ -1,15 +1,8 @@
-%%writefile /content/EvoTrees.jl/ext/EvoTreesCUDAExt/fit-utils.jl
 using KernelAbstractions
+using CUDA
 using Atomix
 
-@kernel function update_nodes_idx_kernel!(
-    nidx::AbstractVector{T},
-    @Const(is),
-    @Const(x_bin),
-    @Const(cond_feats),
-    @Const(cond_bins),
-    @Const(feattypes),
-) where {T<:Unsigned}
+@kernel function update_nodes_idx_kernel!(nidx::AbstractVector{T}, @Const(is), @Const(x_bin), @Const(cond_feats), @Const(cond_bins), @Const(feattypes)) where {T<:Unsigned}
     gidx = @index(Global)
     @inbounds if gidx <= length(is)
         obs = is[gidx]
@@ -28,13 +21,7 @@ using Atomix
     end
 end
 
-@kernel function hist_kernel!(
-    h∇::AbstractArray{T,4},
-    @Const(∇),
-    @Const(x_bin),
-    @Const(nidx),
-    @Const(js),
-) where {T}
+@kernel function hist_kernel!(h∇::AbstractArray{T,4}, @Const(∇), @Const(x_bin), @Const(nidx), @Const(js)) where {T}
     i, j = @index(Global, NTuple)
     @inbounds if i <= size(x_bin, 1) && j <= length(js)
         node = nidx[i]
@@ -50,14 +37,7 @@ end
     end
 end
 
-@kernel function hist_kernel_selective!(
-    h∇::AbstractArray{T,4},
-    @Const(∇),
-    @Const(x_bin),
-    @Const(nidx),
-    @Const(js),
-    @Const(target_nodes),
-) where {T}
+@kernel function hist_kernel_selective!(h∇::AbstractArray{T,4}, @Const(∇), @Const(x_bin), @Const(nidx), @Const(js), @Const(target_nodes)) where {T}
     i, j = @index(Global, NTuple)
     @inbounds if i <= size(x_bin, 1) && j <= length(js)
         node = nidx[i]
@@ -73,169 +53,224 @@ end
     end
 end
 
-@kernel function subtract_hist_kernel!(
-    h∇::AbstractArray{T,4},
-    @Const(parent_nodes),
-    @Const(left_nodes),
-    @Const(right_nodes),
-) where {T}
+@kernel function subtract_hist_kernel!(h∇::AbstractArray{T,4}, @Const(parent_nodes), @Const(left_nodes), @Const(right_nodes)) where {T}
     idx, feat, bin = @index(Global, NTuple)
-    
     @inbounds if idx <= length(parent_nodes) && feat <= size(h∇, 3) && bin <= size(h∇, 2)
         parent = parent_nodes[idx]
         left = left_nodes[idx]
         right = right_nodes[idx]
-        
-        h∇[1, bin, feat, right] = h∇[1, bin, feat, parent] - h∇[1, bin, feat, left]
-        h∇[2, bin, feat, right] = h∇[2, bin, feat, parent] - h∇[2, bin, feat, left]
-        h∇[3, bin, feat, right] = h∇[3, bin, feat, parent] - h∇[3, bin, feat, left]
+        if parent > 0 && left > 0 && right > 0
+            h∇[1, bin, feat, right] = h∇[1, bin, feat, parent] - h∇[1, bin, feat, left]
+            h∇[2, bin, feat, right] = h∇[2, bin, feat, parent] - h∇[2, bin, feat, left]
+            h∇[3, bin, feat, right] = h∇[3, bin, feat, parent] - h∇[3, bin, feat, left]
+        end
     end
 end
 
-# Simplified scan kernel without shared memory issues
-@kernel function scan_hist_kernel!(
-    hL::AbstractArray{T,4},
-    hR::AbstractArray{T,4},
-    @Const(h∇),
-    @Const(active_nodes),
-) where {T}
+@kernel function scan_and_find_best_split_for_feature_kernel!(gains_feats::AbstractMatrix{T}, bins_feats::AbstractMatrix{Int32}, @Const(h∇), @Const(nodes_sum), @Const(active_nodes), lambda::T, min_weight::T) where {T}
     n_idx, feat = @index(Global, NTuple)
-    tid = @index(Local)
-    
-    nbins = size(h∇, 2)
-    
+    tid = @index(Local, Linear)
+    nbins = @groupsize()[1]
+
+    @localmem shmem_g1::Vector{T} nbins
+    @localmem shmem_g2::Vector{T} nbins
+    @localmem shmem_g3::Vector{T} nbins
+    @localmem g_best_sh::Vector{T} nbins
+    @localmem b_best_sh::Vector{Int32} nbins
+
+    g_best_sh[tid] = T(-Inf)
+    b_best_sh[tid] = Int32(0)
+
     @inbounds if n_idx <= length(active_nodes) && feat <= size(h∇, 3)
         node = active_nodes[n_idx]
-        
-        if tid <= nbins
-            # Compute prefix sum directly
-            sum_g1 = zero(T)
-            sum_g2 = zero(T)
-            sum_g3 = zero(T)
-            
-            for i in 1:tid
-                sum_g1 += h∇[1, i, feat, node]
-                sum_g2 += h∇[2, i, feat, node]
-                sum_g3 += h∇[3, i, feat, node]
-            end
-            
-            hL[1, tid, feat, node] = sum_g1
-            hL[2, tid, feat, node] = sum_g2
-            hL[3, tid, feat, node] = sum_g3
-            
-            if tid == nbins
-                hR[1, nbins, feat, node] = sum_g1
-                hR[2, nbins, feat, node] = sum_g2
-                hR[3, nbins, feat, node] = sum_g3
-            end
-        end
+        shmem_g1[tid] = h∇[1, tid, feat, node]
+        shmem_g2[tid] = h∇[2, tid, feat, node]
+        shmem_g3[tid] = h∇[3, tid, feat, node]
+    else
+        shmem_g1[tid] = zero(T); shmem_g2[tid] = zero(T); shmem_g3[tid] = zero(T)
     end
-end
+    @synchronize()
 
-@kernel function find_best_split_kernel_parallel!(
-    gains::AbstractVector{T},
-    bins::AbstractVector{Int32},
-    feats::AbstractVector{Int32},
-    @Const(hL),
-    @Const(hR),
-    @Const(nodes_sum),
-    @Const(active_nodes),
-    lambda::T,
-    min_weight::T,
-) where {T}
-    n_idx = @index(Global)
-    
-    @inbounds if n_idx <= length(active_nodes)
+    d = 1
+    while d < nbins
+        @synchronize()
+        if tid > d
+            shmem_g1[tid] += shmem_g1[tid - d]
+            shmem_g2[tid] += shmem_g2[tid - d]
+            shmem_g3[tid] += shmem_g3[tid - d]
+        end
+        d *= 2
+    end
+    @synchronize()
+
+    @inbounds if n_idx <= length(active_nodes) && feat <= size(h∇, 3)
         node = active_nodes[n_idx]
-        nbins = size(hL, 2)
-        nfeats = size(hL, 3)
-        
-        g_best = T(-Inf)
-        b_best = Int32(0)
-        f_best = Int32(0)
-        
         p_g1 = nodes_sum[1, node]
         p_g2 = nodes_sum[2, node]
-        gain_p = p_g1^2 / (p_g2 + lambda)
-        
-        for f in 1:nfeats
-            p_w = hR[3, nbins, f, node]
-            for b in 1:(nbins - 1)
-                l_w = hL[3, b, f, node]
-                r_w = p_w - l_w
-                if l_w >= min_weight && r_w >= min_weight
-                    l_g1 = hL[1, b, f, node]
-                    l_g2 = hL[2, b, f, node]
-                    r_g1 = p_g1 - l_g1
-                    r_g2 = p_g2 - l_g2
-                    gain_l = l_g1^2 / (l_g2 + lambda)
-                    gain_r = r_g1^2 / (r_g2 + lambda)
-                    g = gain_l + gain_r - gain_p
-                    if g > g_best
-                        g_best = g
-                        b_best = Int32(b)
-                        f_best = Int32(f)
-                    end
-                end
+        p_w = shmem_g3[nbins]
+        gain_p = p_g1^2 / (p_g2 + lambda + 1e-8)
+
+        b = tid
+        if b < nbins
+            l_w = shmem_g3[b]
+            r_w = p_w - l_w
+            if l_w >= min_weight && r_w >= min_weight
+                l_g1 = shmem_g1[b]; l_g2 = shmem_g2[b]
+                r_g1 = p_g1 - l_g1; r_g2 = p_g2 - l_g2
+                gain_l = l_g1^2 / (l_g2 + lambda + 1e-8)
+                gain_r = r_g1^2 / (r_g2 + lambda + 1e-8)
+                g_best_sh[tid] = gain_l + gain_r - gain_p
+                b_best_sh[tid] = Int32(b)
             end
         end
-        
-        gains[n_idx] = g_best
-        bins[n_idx] = b_best
-        feats[n_idx] = f_best
+    end
+    @synchronize()
+
+    stride = nbins ÷ 2
+    while stride > 0
+        @synchronize()
+        if tid <= stride && g_best_sh[tid] < g_best_sh[tid + stride]
+            g_best_sh[tid] = g_best_sh[tid + stride]
+            b_best_sh[tid] = b_best_sh[tid + stride]
+        end
+        stride ÷= 2
+    end
+
+    @inbounds if tid == 1 && n_idx <= length(active_nodes) && feat <= size(h∇, 3)
+        gains_feats[n_idx, feat] = g_best_sh[1]
+        bins_feats[n_idx, feat] = b_best_sh[1]
     end
 end
 
-@kernel function fill_active_nodes_kernel!(active_nodes::AbstractVector{Int32}, offset::Int32)
-    idx = @index(Global)
-    @inbounds active_nodes[idx] = idx + offset
+@kernel function reduce_across_features_kernel!(gains::AbstractVector{T}, bins::AbstractVector{Int32}, feats::AbstractVector{Int32}, @Const(gains_feats), @Const(bins_feats), @Const(active_nodes)) where {T}
+    n_idx, tid = @index(Global, NTuple)
+    tid = @index(Local, Linear)
+    block_size = @groupsize()[1]
+    nfeats = size(gains_feats, 2)
+
+    @localmem g_best_sh::Vector{T} block_size
+    @localmem b_best_sh::Vector{Int32} block_size
+    @localmem f_best_sh::Vector{Int32} block_size
+
+    g_best_sh[tid] = T(-Inf)
+    b_best_sh[tid] = Int32(0)
+    f_best_sh[tid] = Int32(0)
+
+    @inbounds if n_idx <= length(active_nodes)
+        for f in tid:block_size:nfeats
+            g = gains_feats[n_idx, f]
+            if g > g_best_sh[tid]
+                g_best_sh[tid] = g
+                b_best_sh[tid] = bins_feats[n_idx, f]
+                f_best_sh[tid] = Int32(f)
+            end
+        end
+    end
+    @synchronize()
+
+    stride = block_size ÷ 2
+    while stride > 0
+        @synchronize()
+        if tid <= stride && g_best_sh[tid] < g_best_sh[tid + stride]
+            g_best_sh[tid] = g_best_sh[tid + stride]
+            b_best_sh[tid] = b_best_sh[tid + stride]
+            f_best_sh[tid] = f_best_sh[tid + stride]
+        end
+        stride ÷= 2
+    end
+
+    @inbounds if tid == 1 && n_idx <= length(active_nodes)
+        gains[n_idx] = g_best_sh[1]
+        bins[n_idx] = b_best_sh[1]
+        feats[n_idx] = f_best_sh[1]
+    end
 end
 
-function update_hist_gpu!(
-    h∇, hL, hR, gains, bins, feats, ∇, x_bin, nidx, js, depth, active_nodes_gpu, nodes_sum_gpu, params
-)
+function update_hist_gpu!(h∇, gains, bins, feats, ∇, x_bin, nidx, js, depth, active_nodes, nodes_sum_gpu, params, gains_feats, bins_feats)
     backend = KernelAbstractions.get_backend(h∇)
     n_nodes_level = 2^(depth - 1)
-    dnodes = n_nodes_level:(2^depth - 1)
-    
-    active_nodes = view(active_nodes_gpu, 1:n_nodes_level)
-    offset = Int32(2^(depth - 1) - 1)
-    kernel_fill! = fill_active_nodes_kernel!(backend)
-    kernel_fill!(active_nodes, offset; ndrange = n_nodes_level)
     
     if depth == 1
+        dnodes = 1:1
         h∇[:, :, :, dnodes] .= 0
         kernel_hist! = hist_kernel!(backend)
-        kernel_hist!(h∇, ∇, x_bin, nidx, js; ndrange = (size(x_bin, 1), length(js)))
+        kernel_hist!(h∇, ∇, x_bin, nidx, js; ndrange=(size(x_bin, 1), length(js)))
     else
-        left_nodes = CuArray(collect(dnodes[1:2:end]))
-        right_nodes = CuArray(collect(dnodes[2:2:end]))
-        parent_nodes = CuArray(collect((n_nodes_level ÷ 2):(n_nodes_level - 1)))
-        
+        dnodes = n_nodes_level:(2^depth - 1)
+        left_nodes = CuArray(dnodes[1:2:end])
+        right_nodes = CuArray(dnodes[2:2:end])
+        parent_nodes = CuArray(div.(dnodes, 2))
         h∇[:, :, :, left_nodes] .= 0
-        
+
         kernel_hist_selective! = hist_kernel_selective!(backend)
-        kernel_hist_selective!(h∇, ∇, x_bin, nidx, js, left_nodes; 
-                                ndrange = (size(x_bin, 1), length(js)))
-        
+        kernel_hist_selective!(h∇, ∇, x_bin, nidx, js, left_nodes; ndrange=(size(x_bin, 1), length(js)))
+
         kernel_subtract! = subtract_hist_kernel!(backend)
-        kernel_subtract!(h∇, parent_nodes, left_nodes, right_nodes; 
-                        ndrange = (length(parent_nodes), size(h∇, 3), size(h∇, 2)))
+        kernel_subtract!(h∇, parent_nodes, left_nodes, right_nodes; ndrange=(length(parent_nodes), size(h∇, 3), size(h∇, 2)))
     end
-    
+
     nbins = size(h∇, 2)
-    # Use nbins threads per node for the scan
-    kernel_scan! = scan_hist_kernel!(backend, nbins)
-    kernel_scan!(hL, hR, h∇, active_nodes; ndrange = (length(active_nodes), size(h∇, 3)))
-    
-    # Single thread per node for finding best split
-    kernel_find_split! = find_best_split_kernel_parallel!(backend)
-    kernel_find_split!(
-        gains, bins, feats, hL, hR, nodes_sum_gpu, active_nodes,
-        params.lambda, params.min_weight;
-        ndrange = length(active_nodes)
-    )
-    
+
+    # Shared memory for log-time prefix scan (max 256 bins)
+    shmem_g1 = @localmem T 256
+    shmem_g2 = @localmem T 256
+    shmem_g3 = @localmem T 256
+
+    # Active check
+    node_valid = (n_idx <= length(active_nodes)) && (feat <= size(h∇, 3))
+
+    # Load to shared memory or zero-fill
+    if tid <= nbins && node_valid
+        node = active_nodes[n_idx]
+        shmem_g1[tid] = h∇[1, tid, feat, node]
+        shmem_g2[tid] = h∇[2, tid, feat, node]
+        shmem_g3[tid] = h∇[3, tid, feat, node]
+    else
+        shmem_g1[tid] = zero(T)
+        shmem_g2[tid] = zero(T)
+        shmem_g3[tid] = zero(T)
+    end
+    @synchronize()
+
+    # Inclusive prefix scan (Blelloch) in shared memory
+    offset = 1
+    while offset < nbins
+        if tid > offset && tid <= nbins
+            shmem_g1[tid] += shmem_g1[tid - offset]
+            shmem_g2[tid] += shmem_g2[tid - offset]
+            shmem_g3[tid] += shmem_g3[tid - offset]
+        end
+        offset <<= 1
+        @synchronize()
+    end
+
+    # Write results
+    if tid <= nbins && node_valid
+        node = active_nodes[n_idx]  # defined earlier
+        hL[1, tid, feat, node] = shmem_g1[tid]
+        hL[2, tid, feat, node] = shmem_g2[tid]
+        hL[3, tid, feat, node] = shmem_g3[tid]
+
+        if tid == nbins
+            hR[1, nbins, feat, node] = shmem_g1[tid]
+            hR[2, nbins, feat, node] = shmem_g2[tid]
+            hR[3, nbins, feat, node] = shmem_g3[tid]
+        end
+    end
+
+    nfeats = length(js)
+    num_active_nodes = length(active_nodes)
+
+    threads_per_block_scan = nbins
+    grid_size_scan = (num_active_nodes, nfeats)
+    kernel_scan_split! = scan_and_find_best_split_for_feature_kernel!(backend, threads_per_block_scan)
+    kernel_scan_split!(gains_feats, bins_feats, h∇, nodes_sum_gpu, active_nodes, params.lambda, params.min_weight; ndrange=grid_size_scan)
+
+    threads_per_block_reduce = min(256, nfeats)
+    grid_size_reduce = num_active_nodes
+    kernel_reduce! = reduce_across_features_kernel!(backend, threads_per_block_reduce)
+    kernel_reduce!(gains, bins, feats, gains_feats, bins_feats, active_nodes; ndrange=grid_size_reduce)
+
     KernelAbstractions.synchronize(backend)
     return nothing
 end
