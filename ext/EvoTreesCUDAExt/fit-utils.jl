@@ -37,11 +37,11 @@ end
     end
 end
 
-@kernel function hist_kernel_selective!(h∇::AbstractArray{T,4}, @Const(∇), @Const(x_bin), @Const(nidx), @Const(js), @Const(target_nodes)) where {T}
+@kernel function hist_kernel_selective!(h∇::AbstractArray{T,4}, @Const(∇), @Const(x_bin), @Const(nidx), @Const(js), @Const(target_mask)) where {T}
     i, j = @index(Global, NTuple)
     @inbounds if i <= size(x_bin, 1) && j <= length(js)
         node = nidx[i]
-        if node > 0 && node in target_nodes
+        if node > 0 && target_mask[node]
             jdx = js[j]
             bin = x_bin[i, jdx]
             if bin > 0 && bin <= size(h∇, 2)
@@ -67,16 +67,25 @@ end
     end
 end
 
-@kernel function scan_and_find_best_split_for_feature_kernel!(gains_feats::AbstractMatrix{T}, bins_feats::AbstractMatrix{Int32}, @Const(h∇), @Const(nodes_sum), @Const(active_nodes), lambda::T, min_weight::T) where {T}
+@kernel function scan_and_find_best_split_for_feature_kernel!(
+    gains_feats::AbstractMatrix{T}, 
+    bins_feats::AbstractMatrix{Int32}, 
+    @Const(h∇), 
+    @Const(nodes_sum), 
+    @Const(active_nodes), 
+    lambda::T, 
+    min_weight::T
+) where {T}
     n_idx, feat = @index(Global, NTuple)
     tid = @index(Local, Linear)
     nbins = @groupsize()[1]
 
-    @localmem shmem_g1::Vector{T} nbins
-    @localmem shmem_g2::Vector{T} nbins
-    @localmem shmem_g3::Vector{T} nbins
-    @localmem g_best_sh::Vector{T} nbins
-    @localmem b_best_sh::Vector{Int32} nbins
+    # Correct syntax for localmem declaration
+    shmem_g1 = @localmem T (256,)
+    shmem_g2 = @localmem T (256,)
+    shmem_g3 = @localmem T (256,)
+    g_best_sh = @localmem T (256,)
+    b_best_sh = @localmem Int32 (256,)
 
     g_best_sh[tid] = T(-Inf)
     b_best_sh[tid] = Int32(0)
@@ -87,10 +96,13 @@ end
         shmem_g2[tid] = h∇[2, tid, feat, node]
         shmem_g3[tid] = h∇[3, tid, feat, node]
     else
-        shmem_g1[tid] = zero(T); shmem_g2[tid] = zero(T); shmem_g3[tid] = zero(T)
+        shmem_g1[tid] = zero(T)
+        shmem_g2[tid] = zero(T)
+        shmem_g3[tid] = zero(T)
     end
     @synchronize()
 
+    # Parallel prefix sum (scan)
     d = 1
     while d < nbins
         @synchronize()
@@ -115,8 +127,10 @@ end
             l_w = shmem_g3[b]
             r_w = p_w - l_w
             if l_w >= min_weight && r_w >= min_weight
-                l_g1 = shmem_g1[b]; l_g2 = shmem_g2[b]
-                r_g1 = p_g1 - l_g1; r_g2 = p_g2 - l_g2
+                l_g1 = shmem_g1[b]
+                l_g2 = shmem_g2[b]
+                r_g1 = p_g1 - l_g1
+                r_g2 = p_g2 - l_g2
                 gain_l = l_g1^2 / (l_g2 + lambda + T(1e-8))
                 gain_r = r_g1^2 / (r_g2 + lambda + T(1e-8))
                 g_best_sh[tid] = gain_l + gain_r - gain_p
@@ -126,12 +140,15 @@ end
     end
     @synchronize()
 
+    # Parallel reduction to find best split
     stride = nbins ÷ 2
     while stride > 0
         @synchronize()
-        if tid <= stride && g_best_sh[tid] < g_best_sh[tid + stride]
-            g_best_sh[tid] = g_best_sh[tid + stride]
-            b_best_sh[tid] = b_best_sh[tid + stride]
+        if tid <= stride && tid + stride <= nbins
+            if g_best_sh[tid] < g_best_sh[tid + stride]
+                g_best_sh[tid] = g_best_sh[tid + stride]
+                b_best_sh[tid] = b_best_sh[tid + stride]
+            end
         end
         stride ÷= 2
     end
@@ -142,15 +159,23 @@ end
     end
 end
 
-@kernel function reduce_across_features_kernel!(gains::AbstractVector{T}, bins::AbstractVector{Int32}, feats::AbstractVector{Int32}, @Const(gains_feats), @Const(bins_feats), @Const(active_nodes)) where {T}
-    n_idx, tid = @index(Global, NTuple)
+@kernel function reduce_across_features_kernel!(
+    gains::AbstractVector{T}, 
+    bins::AbstractVector{Int32}, 
+    feats::AbstractVector{Int32}, 
+    @Const(gains_feats), 
+    @Const(bins_feats), 
+    @Const(active_nodes)
+) where {T}
+    n_idx = @index(Group, Linear)
     tid = @index(Local, Linear)
     block_size = @groupsize()[1]
     nfeats = size(gains_feats, 2)
 
-    @localmem g_best_sh::Vector{T} block_size
-    @localmem b_best_sh::Vector{Int32} block_size
-    @localmem f_best_sh::Vector{Int32} block_size
+    # Correct syntax for localmem
+    g_best_sh = @localmem T (256,)
+    b_best_sh = @localmem Int32 (256,)
+    f_best_sh = @localmem Int32 (256,)
 
     g_best_sh[tid] = T(-Inf)
     b_best_sh[tid] = Int32(0)
@@ -168,13 +193,16 @@ end
     end
     @synchronize()
 
+    # Parallel reduction
     stride = block_size ÷ 2
     while stride > 0
         @synchronize()
-        if tid <= stride && g_best_sh[tid] < g_best_sh[tid + stride]
-            g_best_sh[tid] = g_best_sh[tid + stride]
-            b_best_sh[tid] = b_best_sh[tid + stride]
-            f_best_sh[tid] = f_best_sh[tid + stride]
+        if tid <= stride && tid + stride <= block_size
+            if g_best_sh[tid] < g_best_sh[tid + stride]
+                g_best_sh[tid] = g_best_sh[tid + stride]
+                b_best_sh[tid] = b_best_sh[tid + stride]
+                f_best_sh[tid] = f_best_sh[tid + stride]
+            end
         end
         stride ÷= 2
     end
@@ -202,28 +230,37 @@ function update_hist_gpu!(h∇, gains, bins, feats, ∇, x_bin, nidx, js, depth,
         parent_nodes = CuArray(div.(dnodes, 2))
         h∇[:, :, :, left_nodes] .= 0
 
+        # Build boolean mask of target nodes
+        target_mask = CUDA.zeros(Bool, size(h∇, 4))
+        target_mask[left_nodes] .= true
+
         kernel_hist_selective! = hist_kernel_selective!(backend)
-        kernel_hist_selective!(h∇, ∇, x_bin, nidx, js, left_nodes; ndrange=(size(x_bin, 1), length(js)))
+        kernel_hist_selective!(h∇, ∇, x_bin, nidx, js, target_mask; ndrange=(size(x_bin, 1), length(js)))
 
         kernel_subtract! = subtract_hist_kernel!(backend)
         kernel_subtract!(h∇, parent_nodes, left_nodes, right_nodes; ndrange=(length(parent_nodes), size(h∇, 3), size(h∇, 2)))
     end
 
     nbins = size(h∇, 2)
-
     nfeats = length(js)
     num_active_nodes = length(active_nodes)
 
-    threads_per_block_scan = nbins
-    grid_size_scan = (num_active_nodes, nfeats)
-    kernel_scan_split! = scan_and_find_best_split_for_feature_kernel!(backend, threads_per_block_scan)
-    local Tloc = eltype(gains_feats)
-    kernel_scan_split!(gains_feats, bins_feats, h∇, nodes_sum_gpu, active_nodes, Tloc(params.lambda), Tloc(params.min_weight); ndrange=grid_size_scan)
+    # Launch scan kernel with proper workgroup configuration
+    threads_per_block_scan = min(256, nbins)
+    kernel_scan_split! = scan_and_find_best_split_for_feature_kernel!(backend, (threads_per_block_scan, 1))
+    kernel_scan_split!(
+        gains_feats, bins_feats, h∇, nodes_sum_gpu, active_nodes, 
+        params.lambda, params.min_weight; 
+        ndrange=(num_active_nodes, nfeats)
+    )
 
+    # Launch reduction kernel with proper workgroup configuration
     threads_per_block_reduce = min(256, nfeats)
-    grid_size_reduce = num_active_nodes
     kernel_reduce! = reduce_across_features_kernel!(backend, threads_per_block_reduce)
-    kernel_reduce!(gains, bins, feats, gains_feats, bins_feats, active_nodes; ndrange=grid_size_reduce)
+    kernel_reduce!(
+        gains, bins, feats, gains_feats, bins_feats, active_nodes; 
+        ndrange=(num_active_nodes * threads_per_block_reduce,)
+    )
 
     KernelAbstractions.synchronize(backend)
     return nothing
