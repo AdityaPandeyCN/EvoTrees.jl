@@ -3,7 +3,6 @@ using DataFrames
 using CSV
 using Statistics
 using StatsBase: sample
-using XGBoost
 using EvoTrees
 using BenchmarkTools
 using Random: seed!
@@ -146,3 +145,4 @@ for device in device_list
     path = joinpath(@__DIR__, "results", "regressor-$device.csv")
     CSV.write(path, df)
 end
+
