@@ -105,10 +105,10 @@ end
 
     @inbounds if n_idx <= length(active_nodes) && feat <= size(h∇, 3)
         node = active_nodes[n_idx]
-        p_g1 = nodes_sum[1, node]
-        p_g2 = nodes_sum[2, node]
+        p_g1 = T(nodes_sum[1, node])
+        p_g2 = T(nodes_sum[2, node])
         p_w = shmem_g3[nbins]
-        gain_p = p_g1^2 / (p_g2 + lambda + 1e-8)
+        gain_p = p_g1^2 / (p_g2 + lambda + T(1e-8))
 
         b = tid
         if b < nbins
@@ -117,8 +117,8 @@ end
             if l_w >= min_weight && r_w >= min_weight
                 l_g1 = shmem_g1[b]; l_g2 = shmem_g2[b]
                 r_g1 = p_g1 - l_g1; r_g2 = p_g2 - l_g2
-                gain_l = l_g1^2 / (l_g2 + lambda + 1e-8)
-                gain_r = r_g1^2 / (r_g2 + lambda + 1e-8)
+                gain_l = l_g1^2 / (l_g2 + lambda + T(1e-8))
+                gain_r = r_g1^2 / (r_g2 + lambda + T(1e-8))
                 g_best_sh[tid] = gain_l + gain_r - gain_p
                 b_best_sh[tid] = Int32(b)
             end
@@ -211,60 +211,14 @@ function update_hist_gpu!(h∇, gains, bins, feats, ∇, x_bin, nidx, js, depth,
 
     nbins = size(h∇, 2)
 
-    # Shared memory for log-time prefix scan (max 256 bins)
-    shmem_g1 = @localmem T 256
-    shmem_g2 = @localmem T 256
-    shmem_g3 = @localmem T 256
-
-    # Active check
-    node_valid = (n_idx <= length(active_nodes)) && (feat <= size(h∇, 3))
-
-    # Load to shared memory or zero-fill
-    if tid <= nbins && node_valid
-        node = active_nodes[n_idx]
-        shmem_g1[tid] = h∇[1, tid, feat, node]
-        shmem_g2[tid] = h∇[2, tid, feat, node]
-        shmem_g3[tid] = h∇[3, tid, feat, node]
-    else
-        shmem_g1[tid] = zero(T)
-        shmem_g2[tid] = zero(T)
-        shmem_g3[tid] = zero(T)
-    end
-    @synchronize()
-
-    # Inclusive prefix scan (Blelloch) in shared memory
-    offset = 1
-    while offset < nbins
-        if tid > offset && tid <= nbins
-            shmem_g1[tid] += shmem_g1[tid - offset]
-            shmem_g2[tid] += shmem_g2[tid - offset]
-            shmem_g3[tid] += shmem_g3[tid - offset]
-        end
-        offset <<= 1
-        @synchronize()
-    end
-
-    # Write results
-    if tid <= nbins && node_valid
-        node = active_nodes[n_idx]  # defined earlier
-        hL[1, tid, feat, node] = shmem_g1[tid]
-        hL[2, tid, feat, node] = shmem_g2[tid]
-        hL[3, tid, feat, node] = shmem_g3[tid]
-
-        if tid == nbins
-            hR[1, nbins, feat, node] = shmem_g1[tid]
-            hR[2, nbins, feat, node] = shmem_g2[tid]
-            hR[3, nbins, feat, node] = shmem_g3[tid]
-        end
-    end
-
     nfeats = length(js)
     num_active_nodes = length(active_nodes)
 
     threads_per_block_scan = nbins
     grid_size_scan = (num_active_nodes, nfeats)
     kernel_scan_split! = scan_and_find_best_split_for_feature_kernel!(backend, threads_per_block_scan)
-    kernel_scan_split!(gains_feats, bins_feats, h∇, nodes_sum_gpu, active_nodes, params.lambda, params.min_weight; ndrange=grid_size_scan)
+    local Tloc = eltype(gains_feats)
+    kernel_scan_split!(gains_feats, bins_feats, h∇, nodes_sum_gpu, active_nodes, Tloc(params.lambda), Tloc(params.min_weight); ndrange=grid_size_scan)
 
     threads_per_block_reduce = min(256, nfeats)
     grid_size_reduce = num_active_nodes

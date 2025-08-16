@@ -59,7 +59,12 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes{L}, ::Type{<:EvoTrees.GPU}
     end
 
     # model info
-    info = Dict(:fnames => fnames, :target_levels => target_levels, :edges => edges)
+    info = Dict(
+        :fnames => fnames,
+        :target_levels => target_levels,
+        :edges => edges,
+        :feattypes => feattypes,
+    )
     bias = [EvoTrees.Tree{L,K}(μ)]
     m = EvoTree{L,K}(bias, info)
 

@@ -15,37 +15,37 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.E
 end
 
 @kernel function sum_grads_kernel!(nodes_sum, @Const(∇), @Const(is))
-    tid = @index(Local, Linear)
-    i = @index(Group, Linear)
-    grid_size = @ndrange()[1]
+    tid_local = @index(Local, Linear)
+    tid_global = @index(Global, Linear)
+    total_threads = @ndrange()[1]
 
-    @localmem shmem_g1::Vector{Float64} 256
-    @localmem shmem_g2::Vector{Float64} 256
+    shmem_g1 = @localmem Float64 256
+    shmem_g2 = @localmem Float64 256
 
     g1, g2 = 0.0, 0.0
-    
-    # Grid-stride loop to sum over all observations assigned to this grid
-    for i_obs in i:grid_size:length(is)
+
+    # Grid-stride loop to sum over all observations assigned to this thread
+    for i_obs in tid_global:total_threads:length(is)
         idx = is[i_obs]
         g1 += ∇[1, idx]
         g2 += ∇[2, idx]
     end
 
-    shmem_g1[tid] = g1
-    shmem_g2[tid] = g2
+    shmem_g1[tid_local] = g1
+    shmem_g2[tid_local] = g2
     @synchronize()
 
     stride = 128
-    while stride > 0
-        if tid <= stride
-            shmem_g1[tid] += shmem_g1[tid + stride]
-            shmem_g2[tid] += shmem_g2[tid + stride]
+    while stride ≥ 1
+        if tid_local <= stride && (tid_local + stride) <= 256
+            shmem_g1[tid_local] += shmem_g1[tid_local + stride]
+            shmem_g2[tid_local] += shmem_g2[tid_local + stride]
         end
         @synchronize()
-        stride ÷= 2
+        stride >>>= 1
     end
 
-    if tid == 1
+    if tid_local == 1
         Atomix.@atomic nodes_sum[1, 1] += shmem_g1[1]
         Atomix.@atomic nodes_sum[2, 1] += shmem_g2[1]
     end
@@ -63,10 +63,10 @@ function grow_tree!(tree::EvoTrees.Tree{L,K}, params::EvoTrees.EvoTypes{L}, cach
     kernel_sum_grads! = sum_grads_kernel!(backend, 256)
     kernel_sum_grads!(cache.nodes_sum_gpu, cache.∇, is_gpu; ndrange=min(2048, length(is_gpu)))
     
-    nsamples = Float32(length(is_gpu))
+    nsamples = eltype(cache.nodes_sum_gpu)(length(is_gpu))
     CUDA.copyto!(view(cache.nodes_sum_gpu, 3, 1), CuArray([nsamples]))
 
-    get_gain_gpu!(backend)(cache.nodes_gain_gpu, cache.nodes_sum_gpu, CuArray([1]), params.lambda; ndrange=1)
+    get_gain_gpu!(backend)(cache.nodes_gain_gpu, cache.nodes_sum_gpu, CuArray(Int32[1]), eltype(cache.nodes_gain_gpu)(params.lambda); ndrange=1)
     CUDA.copyto!(view(cache.anodes_gpu, 1:1), CuArray([1]))
     
     cache.nidx .= 1
@@ -95,7 +95,7 @@ function grow_tree!(tree::EvoTrees.Tree{L,K}, params::EvoTrees.EvoTypes{L}, cach
             cache.nodes_sum_gpu, cache.nodes_gain_gpu,
             cache.n_next_gpu, cache.n_next_active_gpu,
             view_gain, view_bin, view_feat, active_nodes,
-            depth, params.max_depth, params.lambda, params.gamma;
+            depth, params.max_depth, eltype(cache.tree_gain_gpu)(params.lambda), eltype(cache.tree_gain_gpu)(params.gamma);
             ndrange = n_active
         )
         
@@ -154,7 +154,7 @@ end
         n_next[idx_base] = child_r
     else
         g, h = nodes_sum[1, node], nodes_sum[2, node]
-        tree_pred[node] = -g / (h + lambda + 1e-8)
+        tree_pred[node] = -g / (h + lambda + eltype(nodes_sum)(1e-8))
     end
 end
 
@@ -163,6 +163,6 @@ end
     @inbounds node = nodes[n_idx]
     @inbounds p1 = nodes_sum[1, node]
     @inbounds p2 = nodes_sum[2, node]
-    @inbounds nodes_gain[node] = p1^2 / (p2 + lambda + 1e-8)
+    @inbounds nodes_gain[node] = p1^2 / (p2 + lambda + eltype(nodes_gain)(1e-8))
 end
 
