@@ -1,3 +1,4 @@
+%%writefile /content/EvoTrees.jl/ext/EvoTreesCUDAExt/fit-utils.jl
 using KernelAbstractions
 using Atomix
 
@@ -91,6 +92,7 @@ end
     end
 end
 
+# Simplified scan kernel without shared memory issues
 @kernel function scan_hist_kernel!(
     hL::AbstractArray{T,4},
     hR::AbstractArray{T,4},
@@ -100,50 +102,31 @@ end
     n_idx, feat = @index(Global, NTuple)
     tid = @index(Local)
     
-    # FIX: Correct shared memory declaration - separate arrays instead of 2D
-    shmem_g1 = @localmem T 256
-    shmem_g2 = @localmem T 256
-    shmem_g3 = @localmem T 256
-
+    nbins = size(h∇, 2)
+    
     @inbounds if n_idx <= length(active_nodes) && feat <= size(h∇, 3)
         node = active_nodes[n_idx]
-        nbins = size(h∇, 2)
-
+        
         if tid <= nbins
-            shmem_g1[tid] = h∇[1, tid, feat, node]
-            shmem_g2[tid] = h∇[2, tid, feat, node]
-            shmem_g3[tid] = h∇[3, tid, feat, node]
-        else
-            shmem_g1[tid] = zero(T)
-            shmem_g2[tid] = zero(T)
-            shmem_g3[tid] = zero(T)
-        end
-        @synchronize()
-
-        offset = 1
-        # Only threads that correspond to real histogram bins participate in
-        # the inclusive prefix-scan.  This prevents threads with
-        # `tid > nbins` (they only exist because the work-group size is a power
-        # of two) from touching out-of-range shared–memory locations.
-        while offset < nbins
-            if tid > offset && tid <= nbins
-                shmem_g1[tid] += shmem_g1[tid - offset]
-                shmem_g2[tid] += shmem_g2[tid - offset]
-                shmem_g3[tid] += shmem_g3[tid - offset]
+            # Compute prefix sum directly
+            sum_g1 = zero(T)
+            sum_g2 = zero(T)
+            sum_g3 = zero(T)
+            
+            for i in 1:tid
+                sum_g1 += h∇[1, i, feat, node]
+                sum_g2 += h∇[2, i, feat, node]
+                sum_g3 += h∇[3, i, feat, node]
             end
-            offset <<= 1
-            @synchronize()
-        end
-
-        if tid <= nbins
-            hL[1, tid, feat, node] = shmem_g1[tid]
-            hL[2, tid, feat, node] = shmem_g2[tid]
-            hL[3, tid, feat, node] = shmem_g3[tid]
-
+            
+            hL[1, tid, feat, node] = sum_g1
+            hL[2, tid, feat, node] = sum_g2
+            hL[3, tid, feat, node] = sum_g3
+            
             if tid == nbins
-                hR[1, nbins, feat, node] = shmem_g1[tid]
-                hR[2, nbins, feat, node] = shmem_g2[tid]
-                hR[3, nbins, feat, node] = shmem_g3[tid]
+                hR[1, nbins, feat, node] = sum_g1
+                hR[2, nbins, feat, node] = sum_g2
+                hR[3, nbins, feat, node] = sum_g3
             end
         end
     end
@@ -160,19 +143,12 @@ end
     lambda::T,
     min_weight::T,
 ) where {T}
-    n_idx, _ = @index(Global, NTuple)
-    tid = @index(Local)
-    
-    # FIX: Correct shared memory declaration - separate arrays
-    shmem_gains = @localmem T 32
-    shmem_bins = @localmem Int32 32
-    shmem_feats = @localmem Int32 32
+    n_idx = @index(Global)
     
     @inbounds if n_idx <= length(active_nodes)
         node = active_nodes[n_idx]
         nbins = size(hL, 2)
         nfeats = size(hL, 3)
-        feats_per_thread = (nfeats + 31) ÷ 32
         
         g_best = T(-Inf)
         b_best = Int32(0)
@@ -182,10 +158,7 @@ end
         p_g2 = nodes_sum[2, node]
         gain_p = p_g1^2 / (p_g2 + lambda)
         
-        feat_start = (tid - 1) * feats_per_thread + 1
-        feat_end = min(tid * feats_per_thread, nfeats)
-        
-        for f in feat_start:feat_end
+        for f in 1:nfeats
             p_w = hR[3, nbins, f, node]
             for b in 1:(nbins - 1)
                 l_w = hL[3, b, f, node]
@@ -207,29 +180,9 @@ end
             end
         end
         
-        shmem_gains[tid] = g_best
-        shmem_bins[tid] = b_best
-        shmem_feats[tid] = f_best
-        @synchronize()
-        
-        stride = 16
-        while stride > 0
-            if tid <= stride && tid + stride <= 32
-                if shmem_gains[tid + stride] > shmem_gains[tid]
-                    shmem_gains[tid] = shmem_gains[tid + stride]
-                    shmem_bins[tid] = shmem_bins[tid + stride]
-                    shmem_feats[tid] = shmem_feats[tid + stride]
-                end
-            end
-            stride >>= 1
-            @synchronize()
-        end
-        
-        if tid == 1
-            gains[n_idx] = shmem_gains[1]
-            bins[n_idx] = shmem_bins[1]
-            feats[n_idx] = shmem_feats[1]
-        end
+        gains[n_idx] = g_best
+        bins[n_idx] = b_best
+        feats[n_idx] = f_best
     end
 end
 
@@ -271,18 +224,16 @@ function update_hist_gpu!(
     end
     
     nbins = size(h∇, 2)
-    @assert nbins <= 256 "Scan kernel requires nbins <= 256"
-    # Every thread in the work-group now corresponds to a real histogram bin.
-    # nbins is guaranteed (see the assert above) to be ≤ 256, so this is safe.
-    block_size = nbins
-    kernel_scan! = scan_hist_kernel!(backend, block_size)
+    # Use nbins threads per node for the scan
+    kernel_scan! = scan_hist_kernel!(backend, nbins)
     kernel_scan!(hL, hR, h∇, active_nodes; ndrange = (length(active_nodes), size(h∇, 3)))
     
-    kernel_find_split! = find_best_split_kernel_parallel!(backend, 32)
+    # Single thread per node for finding best split
+    kernel_find_split! = find_best_split_kernel_parallel!(backend)
     kernel_find_split!(
         gains, bins, feats, hL, hR, nodes_sum_gpu, active_nodes,
         params.lambda, params.min_weight;
-        ndrange = (length(active_nodes), 1)
+        ndrange = length(active_nodes)
     )
     
     KernelAbstractions.synchronize(backend)
