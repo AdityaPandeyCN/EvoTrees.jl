@@ -121,8 +121,12 @@ end
         @synchronize()
 
         offset = 1
+        # Only threads that correspond to real histogram bins participate in
+        # the inclusive prefix-scan.  This prevents threads with
+        # `tid > nbins` (they only exist because the work-group size is a power
+        # of two) from touching out-of-range shared–memory locations.
         while offset < nbins
-            if tid > offset
+            if tid > offset && tid <= nbins
                 shmem_g1[tid] += shmem_g1[tid - offset]
                 shmem_g2[tid] += shmem_g2[tid - offset]
                 shmem_g3[tid] += shmem_g3[tid - offset]
@@ -268,7 +272,9 @@ function update_hist_gpu!(
     
     nbins = size(h∇, 2)
     @assert nbins <= 256 "Scan kernel requires nbins <= 256"
-    block_size = min(nbins, 256)
+    # Every thread in the work-group now corresponds to a real histogram bin.
+    # nbins is guaranteed (see the assert above) to be ≤ 256, so this is safe.
+    block_size = nbins
     kernel_scan! = scan_hist_kernel!(backend, block_size)
     kernel_scan!(hL, hR, h∇, active_nodes; ndrange = (length(active_nodes), size(h∇, 3)))
     
