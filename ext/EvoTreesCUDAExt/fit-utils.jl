@@ -2,33 +2,46 @@ using KernelAbstractions
 using CUDA
 using Atomix
 
-@kernel function update_nodes_idx_kernel!(nidx::AbstractVector{T}, @Const(is), @Const(x_bin), @Const(cond_feats), @Const(cond_bins), @Const(feattypes)) where {T<:Unsigned}
+@kernel function update_nodes_idx_kernel!(
+    nidx::AbstractVector{UInt32}, 
+    @Const(is), 
+    @Const(x_bin), 
+    @Const(cond_feats), 
+    @Const(cond_bins), 
+    @Const(feattypes)
+)
     gidx = @index(Global)
     @inbounds if gidx <= length(is)
         obs = is[gidx]
         node = nidx[obs]
-        if node > 0
+        if node > zero(UInt32)
             feat = cond_feats[node]
             bin = cond_bins[node]
-            if bin == 0
-                nidx[obs] = zero(T)
+            if bin == zero(UInt32)
+                nidx[obs] = zero(UInt32)
             else
                 feattype = feattypes[feat]
                 is_left = feattype ? (x_bin[obs, feat] <= bin) : (x_bin[obs, feat] == bin)
-                nidx[obs] = (node << 1) + !is_left
+                nidx[obs] = (node << 1) + UInt32(!is_left)
             end
         end
     end
 end
 
-@kernel function hist_kernel!(h∇::AbstractArray{T,4}, @Const(∇), @Const(x_bin), @Const(nidx), @Const(js)) where {T}
+@kernel function hist_kernel!(
+    h∇::AbstractArray{T,4}, 
+    @Const(∇), 
+    @Const(x_bin), 
+    @Const(nidx), 
+    @Const(js)
+) where {T}
     i, j = @index(Global, NTuple)
     @inbounds if i <= size(x_bin, 1) && j <= length(js)
         node = nidx[i]
-        if node > 0
+        if node > zero(UInt32)
             jdx = js[j]
             bin = x_bin[i, jdx]
-            if bin > 0 && bin <= size(h∇, 2)
+            if bin > zero(eltype(x_bin)) && bin <= size(h∇, 2)
                 Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, i]
                 Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, i]
                 Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, i]
@@ -37,14 +50,21 @@ end
     end
 end
 
-@kernel function hist_kernel_selective!(h∇::AbstractArray{T,4}, @Const(∇), @Const(x_bin), @Const(nidx), @Const(js), @Const(target_mask)) where {T}
+@kernel function hist_kernel_selective!(
+    h∇::AbstractArray{T,4}, 
+    @Const(∇), 
+    @Const(x_bin), 
+    @Const(nidx), 
+    @Const(js), 
+    @Const(target_mask)
+) where {T}
     i, j = @index(Global, NTuple)
     @inbounds if i <= size(x_bin, 1) && j <= length(js)
         node = nidx[i]
-        if node > 0 && target_mask[node]
+        if node > zero(UInt32) && target_mask[node]
             jdx = js[j]
             bin = x_bin[i, jdx]
-            if bin > 0 && bin <= size(h∇, 2)
+            if bin > zero(eltype(x_bin)) && bin <= size(h∇, 2)
                 Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, i]
                 Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, i]
                 Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, i]
@@ -53,7 +73,12 @@ end
     end
 end
 
-@kernel function subtract_hist_kernel!(h∇::AbstractArray{T,4}, @Const(parent_nodes), @Const(left_nodes), @Const(right_nodes)) where {T}
+@kernel function subtract_hist_kernel!(
+    h∇::AbstractArray{T,4}, 
+    @Const(parent_nodes), 
+    @Const(left_nodes), 
+    @Const(right_nodes)
+) where {T}
     idx, feat, bin = @index(Global, NTuple)
     @inbounds if idx <= length(parent_nodes) && feat <= size(h∇, 3) && bin <= size(h∇, 2)
         parent = parent_nodes[idx]
@@ -80,7 +105,7 @@ end
     tid = @index(Local, Linear)
     nbins = @groupsize()[1]
 
-    # Correct syntax for localmem declaration
+    # Local memory declarations
     shmem_g1 = @localmem T (256,)
     shmem_g2 = @localmem T (256,)
     shmem_g3 = @localmem T (256,)
@@ -90,7 +115,7 @@ end
     g_best_sh[tid] = T(-Inf)
     b_best_sh[tid] = Int32(0)
 
-    @inbounds if n_idx <= length(active_nodes) && feat <= size(h∇, 3)
+    @inbounds if n_idx <= length(active_nodes) && feat <= size(h∇, 3) && tid <= size(h∇, 2)
         node = active_nodes[n_idx]
         shmem_g1[tid] = h∇[1, tid, feat, node]
         shmem_g2[tid] = h∇[2, tid, feat, node]
@@ -102,11 +127,11 @@ end
     end
     @synchronize()
 
-    # Parallel prefix sum (scan)
+    # Parallel prefix sum
     d = 1
     while d < nbins
         @synchronize()
-        if tid > d
+        if tid > d && tid <= nbins
             shmem_g1[tid] += shmem_g1[tid - d]
             shmem_g2[tid] += shmem_g2[tid - d]
             shmem_g3[tid] += shmem_g3[tid - d]
@@ -115,10 +140,10 @@ end
     end
     @synchronize()
 
-    @inbounds if n_idx <= length(active_nodes) && feat <= size(h∇, 3)
+    @inbounds if n_idx <= length(active_nodes) && feat <= size(h∇, 3) && tid <= nbins
         node = active_nodes[n_idx]
-        p_g1 = T(nodes_sum[1, node])
-        p_g2 = T(nodes_sum[2, node])
+        p_g1 = nodes_sum[1, node]
+        p_g2 = nodes_sum[2, node]
         p_w = shmem_g3[nbins]
         gain_p = p_g1^2 / (p_g2 + lambda + T(1e-8))
 
@@ -140,7 +165,7 @@ end
     end
     @synchronize()
 
-    # Parallel reduction to find best split
+    # Reduction to find best split
     stride = nbins ÷ 2
     while stride > 0
         @synchronize()
@@ -172,7 +197,6 @@ end
     block_size = @groupsize()[1]
     nfeats = size(gains_feats, 2)
 
-    # Correct syntax for localmem
     g_best_sh = @localmem T (256,)
     b_best_sh = @localmem Int32 (256,)
     f_best_sh = @localmem Int32 (256,)
@@ -183,17 +207,18 @@ end
 
     @inbounds if n_idx <= length(active_nodes)
         for f in tid:block_size:nfeats
-            g = gains_feats[n_idx, f]
-            if g > g_best_sh[tid]
-                g_best_sh[tid] = g
-                b_best_sh[tid] = bins_feats[n_idx, f]
-                f_best_sh[tid] = Int32(f)
+            if f <= nfeats
+                g = gains_feats[n_idx, f]
+                if g > g_best_sh[tid]
+                    g_best_sh[tid] = g
+                    b_best_sh[tid] = bins_feats[n_idx, f]
+                    f_best_sh[tid] = Int32(f)
+                end
             end
         end
     end
     @synchronize()
 
-    # Parallel reduction
     stride = block_size ÷ 2
     while stride > 0
         @synchronize()
@@ -214,55 +239,59 @@ end
     end
 end
 
-function update_hist_gpu!(h∇, gains, bins, feats, ∇, x_bin, nidx, js, depth, active_nodes, nodes_sum_gpu, params, gains_feats, bins_feats)
+function update_hist_gpu!(h∇, gains, bins, feats, ∇, x_bin, nidx, js, depth, active_nodes, nodes_sum_gpu, gpu_params, gains_feats, bins_feats)
     backend = KernelAbstractions.get_backend(h∇)
     n_nodes_level = 2^(depth - 1)
     
+    # Clear histograms for current level
     if depth == 1
         dnodes = 1:1
         h∇[:, :, :, dnodes] .= 0
         kernel_hist! = hist_kernel!(backend)
         kernel_hist!(h∇, ∇, x_bin, nidx, js; ndrange=(size(x_bin, 1), length(js)))
+        KernelAbstractions.synchronize(backend)
     else
         dnodes = n_nodes_level:(2^depth - 1)
-        left_nodes = CuArray(dnodes[1:2:end])
-        right_nodes = CuArray(dnodes[2:2:end])
-        parent_nodes = CuArray(div.(dnodes, 2))
+        left_nodes = CuArray(Int32.(dnodes[1:2:end]))
+        right_nodes = CuArray(Int32.(dnodes[2:2:end]))
+        parent_nodes = CuArray(Int32.(div.(dnodes, 2)))
         h∇[:, :, :, left_nodes] .= 0
 
-        # Build boolean mask of target nodes
         target_mask = CUDA.zeros(Bool, size(h∇, 4))
         target_mask[left_nodes] .= true
 
         kernel_hist_selective! = hist_kernel_selective!(backend)
         kernel_hist_selective!(h∇, ∇, x_bin, nidx, js, target_mask; ndrange=(size(x_bin, 1), length(js)))
+        KernelAbstractions.synchronize(backend)
 
         kernel_subtract! = subtract_hist_kernel!(backend)
         kernel_subtract!(h∇, parent_nodes, left_nodes, right_nodes; ndrange=(length(parent_nodes), size(h∇, 3), size(h∇, 2)))
+        KernelAbstractions.synchronize(backend)
     end
 
     nbins = size(h∇, 2)
     nfeats = length(js)
     num_active_nodes = length(active_nodes)
 
-    # Launch scan kernel with proper workgroup configuration
+    # Launch scan kernel
     threads_per_block_scan = min(256, nbins)
     kernel_scan_split! = scan_and_find_best_split_for_feature_kernel!(backend, (threads_per_block_scan, 1))
     kernel_scan_split!(
         gains_feats, bins_feats, h∇, nodes_sum_gpu, active_nodes, 
-        params.lambda, params.min_weight; 
+        gpu_params.lambda, gpu_params.min_weight;  # Use pre-converted params!
         ndrange=(num_active_nodes, nfeats)
     )
+    KernelAbstractions.synchronize(backend)
 
-    # Launch reduction kernel with proper workgroup configuration
+    # Launch reduction kernel
     threads_per_block_reduce = min(256, nfeats)
     kernel_reduce! = reduce_across_features_kernel!(backend, threads_per_block_reduce)
     kernel_reduce!(
         gains, bins, feats, gains_feats, bins_feats, active_nodes; 
         ndrange=(num_active_nodes * threads_per_block_reduce,)
     )
-
     KernelAbstractions.synchronize(backend)
+    
     return nothing
 end
 
