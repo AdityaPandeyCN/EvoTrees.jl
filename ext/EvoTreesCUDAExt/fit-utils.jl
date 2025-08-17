@@ -289,6 +289,20 @@ end
     end
 end
 
+@kernel function write_nodes_sum_from_scan!(nodes_sum, @Const(hR), @Const(active_nodes))
+    n_idx = @index(Global)
+    @inbounds if n_idx <= length(active_nodes)
+        node = active_nodes[n_idx]
+        if node > 0
+            nbins = size(hR, 2)
+            # use feature index 1 as totals are identical across features
+            nodes_sum[1, node] = hR[1, nbins, 1, node]
+            nodes_sum[2, node] = hR[2, nbins, 1, node]
+            nodes_sum[3, node] = hR[3, nbins, 1, node]
+        end
+    end
+end
+
 function update_hist_gpu!(
     h∇, hL, hR, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes_gpu, nodes_sum_gpu, params
 )
@@ -334,7 +348,12 @@ function update_hist_gpu!(
     hR .= 0
     kernel_scan_serial! = scan_hist_kernel_serial!(backend)
     kernel_scan_serial!(hL, hR, h∇, active_nodes; ndrange = (length(active_nodes), size(h∇, 3)))
-        KernelAbstractions.synchronize(backend)
+    KernelAbstractions.synchronize(backend)
+
+    # Populate node sums for the active nodes based on scanned histograms
+    kernel_write_nodes_sum! = write_nodes_sum_from_scan!(backend)
+    kernel_write_nodes_sum!(nodes_sum_gpu, hR, active_nodes; ndrange = length(active_nodes))
+    KernelAbstractions.synchronize(backend)
         
     # Find best split per active node at this depth
     kernel_find_split! = find_best_split_kernel_parallel!(backend)

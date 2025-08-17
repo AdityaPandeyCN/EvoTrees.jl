@@ -45,7 +45,7 @@ function grow_tree!(
     is_gpu = KernelAbstractions.adapt(backend, is)
 
     tree_split_gpu = KernelAbstractions.zeros(backend, Bool, length(tree.split))
-    tree_cond_bin_gpu = KernelAbstractions.zeros(backend, UInt32, length(tree.cond_bin))
+    tree_cond_bin_gpu = KernelAbstractions.zeros(backend, UInt8, length(tree.cond_bin))
     tree_feat_gpu = KernelAbstractions.zeros(backend, Int32, length(tree.feat))
     tree_gain_gpu = KernelAbstractions.zeros(backend, Float64, length(tree.gain))
     tree_pred_gpu = KernelAbstractions.zeros(backend, Float32, length(tree.pred))
@@ -156,7 +156,7 @@ end
     n_idx = @index(Global)
     node = active_nodes[n_idx]
 
-    @inbounds if depth < max_depth && best_gain[n_idx] > nodes_gain[node] + gamma
+    @inbounds if depth < max_depth && best_gain[n_idx] > gamma
         tree_split[node] = true
         tree_cond_bin[node] = best_bin[n_idx]
         tree_feat[node] = best_feat[n_idx]
