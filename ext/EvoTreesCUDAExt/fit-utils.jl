@@ -121,28 +121,29 @@ end
     @Const(active_nodes),
 ) where {T}
     n_idx, feat, bin = @index(Global, NTuple)
-    
+
     nbins = size(h∇, 2)
-    
+
     @inbounds if n_idx <= length(active_nodes) && feat <= size(h∇, 3) && bin <= nbins
         node = active_nodes[n_idx]
-        
-        # Parallel prefix sum - each thread handles one bin
+
+        # Parallel prefix sum – each thread handles one bin
         sum_g1 = h∇[1, bin, feat, node]
         sum_g2 = h∇[2, bin, feat, node]
         sum_g3 = h∇[3, bin, feat, node]
-        
-        # Only accumulate previous bins (not sequential!)
+
+        # Accumulate previous bin (results from previous pass are in hL)
         if bin > 1
-            sum_g1 += hL[1, bin-1, feat, node]
-            sum_g2 += hL[2, bin-1, feat, node]  
-            sum_g3 += hL[3, bin-1, feat, node]
+            sum_g1 += hL[1, bin - 1, feat, node]
+            sum_g2 += hL[2, bin - 1, feat, node]
+            sum_g3 += hL[3, bin - 1, feat, node]
         end
-        
+
         hL[1, bin, feat, node] = sum_g1
         hL[2, bin, feat, node] = sum_g2
         hL[3, bin, feat, node] = sum_g3
-        
+
+        # Store total for right-side histogram when we reach last bin
         if bin == nbins
             hR[1, nbins, feat, node] = sum_g1
             hR[2, nbins, feat, node] = sum_g2
@@ -266,4 +267,3 @@ function update_hist_gpu!(
     KernelAbstractions.synchronize(backend)
     return nothing
 end
-

@@ -17,6 +17,7 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.E
         cache.h∇L,
         cache.h∇R,
         cache.x_bin,
+        cache.feattypes_gpu,
     )
     push!(evotree.trees, tree)
     EvoTrees.predict!(cache.pred, tree, cache.x_bin, cache.feattypes_gpu)
@@ -36,6 +37,7 @@ function grow_tree!(
     h∇L::CuArray,
     h∇R::CuArray,
     x_bin::CuMatrix,
+    feattypes_gpu::CuVector{Bool},
 ) where {L,K}
 
     backend = KernelAbstractions.get_backend(x_bin)
@@ -79,26 +81,39 @@ function grow_tree!(
     for depth in 1:params.max_depth
         !iszero(n_active) || break
         
-        active_nodes = view(anodes_gpu, 1:n_active)
-        view_gain = view(best_gain_gpu, 1:n_active)
-        view_bin = view(best_bin_gpu, 1:n_active)
-        view_feat = view(best_feat_gpu, 1:n_active)
+        n_nodes_level = 2^(depth - 1)
+        active_nodes_full = view(anodes_gpu, 1:n_nodes_level)
+        # Reset to 0 to avoid stale indices, then copy active ones
+        active_nodes_full .= 0
+        if n_active > 0
+            copyto!(view(active_nodes_full, 1:n_active), view(anodes_gpu, 1:n_active))
+        end
+
+        view_gain = view(best_gain_gpu, 1:n_nodes_level)
+        view_bin  = view(best_bin_gpu, 1:n_nodes_level)
+        view_feat = view(best_feat_gpu, 1:n_nodes_level)
         
         update_hist_gpu!(
             h∇, h∇L, h∇R,
             view_gain, view_bin, view_feat,
             ∇, x_bin, nidx, js_gpu,
-            depth, active_nodes, nodes_sum_gpu, params
+            depth, active_nodes_full, nodes_sum_gpu, params
         )
 
         n_next_active_gpu .= 0
+        view_gain_act  = view(view_gain, 1:n_active)
+        view_bin_act   = view(view_bin, 1:n_active)
+        view_feat_act  = view(view_feat, 1:n_active)
+
+        active_nodes_act = view(active_nodes_full, 1:n_active)
+
         apply_splits_kernel!(backend)(
             tree_split_gpu, tree_cond_bin_gpu, tree_feat_gpu, tree_gain_gpu, tree_pred_gpu,
             nodes_sum_gpu, nodes_gain_gpu,
             n_next_gpu, n_next_active_gpu,
-            view_gain, view_bin, view_feat,
+            view_gain_act, view_bin_act, view_feat_act,
             h∇L,
-            active_nodes,
+            active_nodes_act,
             depth, params.max_depth, params.lambda, params.gamma;
             ndrange = n_active
         )
@@ -110,7 +125,7 @@ function grow_tree!(
 
         if depth < params.max_depth && n_active > 0
             update_nodes_idx_kernel!(backend)(
-                nidx, is_gpu, x_bin, tree_feat_gpu, tree_cond_bin_gpu, params.feattypes_gpu;
+                nidx, is_gpu, x_bin, tree_feat_gpu, tree_cond_bin_gpu, feattypes_gpu;
                 ndrange = length(is_gpu)
             )
         end
@@ -170,7 +185,11 @@ end
         n_next[idx_base] = child_r
     else
         g, h, w = nodes_sum[1, node], nodes_sum[2, node], nodes_sum[3, node]
-        tree_pred[node] = -g / (h + lambda)
+        if w == 0.0 || (h + lambda) == 0.0
+            tree_pred[node] = 0.0f0  # neutral prediction
+        else
+            tree_pred[node] = -g / (h + lambda)
+        end
     end
 end
 
