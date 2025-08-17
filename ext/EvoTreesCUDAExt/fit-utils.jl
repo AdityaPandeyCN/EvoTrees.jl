@@ -308,9 +308,9 @@ function update_hist_gpu!(
     left_nodes_buf, right_nodes_buf, target_mask_buf
 )
     backend = KernelAbstractions.get_backend(h∇)
-
+    
     n_active = length(active_nodes)
-
+    
     if depth == 1
         h∇ .= 0
         hist_is! = hist_kernel_is!(backend)
@@ -330,8 +330,8 @@ function update_hist_gpu!(
 
         hist_selective_mask_is! = hist_kernel_selective_mask_is!(backend)
         hist_selective_mask_is!(h∇, ∇, x_bin, nidx, js, target_mask_buf, is;
-                                 ndrange = (length(is), length(js)))
-
+                                       ndrange = (length(is), length(js)))
+        
         subtract_hist! = subtract_hist_kernel!(backend)
         subtract_hist!(h∇, parent_nodes, left_nodes_buf, right_nodes_buf;
                        ndrange = (n_active, size(h∇, 3), size(h∇, 2)))
@@ -351,7 +351,7 @@ function update_hist_gpu!(
         params.lambda + 1e-8, params.min_weight;
         ndrange = n_active
     )
-
+    
     KernelAbstractions.synchronize(backend)
     return nothing
 end

@@ -18,12 +18,12 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.E
         cache.h∇R,
         cache.x_bin,
         cache.feattypes_gpu,
-        cache.pred,
         cache.left_nodes_buf,
         cache.right_nodes_buf,
         cache.target_mask_buf,
     )
     push!(evotree.trees, tree)
+    EvoTrees.predict!(cache.pred, tree, cache.x_bin, cache.feattypes_gpu)
     cache[:info][:nrounds] += 1
     return nothing
 end
@@ -41,7 +41,6 @@ function grow_tree!(
     h∇R::CuArray,
     x_bin::CuMatrix,
     feattypes_gpu::CuVector{Bool},
-    pred_accum::CuMatrix,
     left_nodes_buf::CuArray{Int32},
     right_nodes_buf::CuArray{Int32},
     target_mask_buf::CuArray{UInt8},
@@ -106,7 +105,7 @@ function grow_tree!(
                 view_gain, view_bin, view_feat,
                 ∇, x_bin, nidx, js_gpu, is_gpu,
                 depth, view(active_nodes_full, 1:n_active), nodes_sum_gpu, params,
-                cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf
+                left_nodes_buf, right_nodes_buf, target_mask_buf
             )
         end
 
@@ -145,8 +144,7 @@ function grow_tree!(
     copyto!(tree.cond_bin, Array(tree_cond_bin_gpu))
     copyto!(tree.feat, Array(tree_feat_gpu))
     copyto!(tree.gain, Array(tree_gain_gpu))
-    # accumulate into pred_accum directly to avoid an extra kernel launch per tree
-    @. pred_accum += tree_pred_gpu
+
     copyto!(tree.pred, Array(tree_pred_gpu .* params.eta))
     
     for i in eachindex(tree.split)
