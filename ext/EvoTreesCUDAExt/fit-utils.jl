@@ -164,6 +164,7 @@ end
     min_weight::T,
 ) where {T}
     n_idx = @index(Global)
+    ϵ = T(1e-8)        # small constant to stabilise divisions
     
     @inbounds if n_idx <= length(active_nodes)
         node = active_nodes[n_idx]
@@ -176,7 +177,8 @@ end
         
         p_g1 = nodes_sum[1, node]
         p_g2 = nodes_sum[2, node]
-        gain_p = p_g1^2 / (p_g2 + lambda)
+        ϵ = T(1e-8)
+        gain_p = p_g1^2 / (p_g2 + lambda + ϵ)
         
         for f in 1:nfeats
             p_w = hR[3, nbins, f, node]
@@ -188,8 +190,8 @@ end
                     l_g2 = hL[2, b, f, node]
                     r_g1 = p_g1 - l_g1
                     r_g2 = p_g2 - l_g2
-                    gain_l = l_g1^2 / (l_g2 + lambda)
-                    gain_r = r_g1^2 / (r_g2 + lambda)
+                    gain_l = l_g1^2 / (l_g2 + lambda + ϵ)
+                    gain_r = r_g1^2 / (r_g2 + lambda + ϵ)
                     g = gain_l + gain_r - gain_p
                     if g > g_best
                         g_best = g
@@ -267,3 +269,4 @@ function update_hist_gpu!(
     KernelAbstractions.synchronize(backend)
     return nothing
 end
+
