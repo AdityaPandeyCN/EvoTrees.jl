@@ -108,45 +108,37 @@ end
         left = left_nodes[idx]
         right = right_nodes[idx]
         
-        h∇[1, bin, feat, right] = max(0.0, h∇[1, bin, feat, parent] - h∇[1, bin, feat, left])
-        h∇[2, bin, feat, right] = max(0.0, h∇[2, bin, feat, parent] - h∇[2, bin, feat, left])
-        h∇[3, bin, feat, right] = max(0.0, h∇[3, bin, feat, parent] - h∇[3, bin, feat, left])
+        h∇[1, bin, feat, right] = max(T(0), h∇[1, bin, feat, parent] - h∇[1, bin, feat, left])
+        h∇[2, bin, feat, right] = max(T(0), h∇[2, bin, feat, parent] - h∇[2, bin, feat, left])
+        h∇[3, bin, feat, right] = max(T(0), h∇[3, bin, feat, parent] - h∇[3, bin, feat, left])
     end
 end
 
-@kernel function scan_hist_kernel!(
+@kernel function scan_hist_kernel_serial!(
     hL::AbstractArray{T,4},
     hR::AbstractArray{T,4},
     @Const(h∇),
     @Const(active_nodes),
 ) where {T}
-    n_idx, feat, bin = @index(Global, NTuple)
-
+    n_idx, feat = @index(Global, NTuple)
+    
     nbins = size(h∇, 2)
-
-    @inbounds if n_idx <= length(active_nodes) && feat <= size(h∇, 3) && bin <= nbins
+    
+    @inbounds if n_idx <= length(active_nodes) && feat <= size(h∇, 3)
         node = active_nodes[n_idx]
-        
         if node > 0
-            sum_g1 = h∇[1, bin, feat, node]
-            sum_g2 = h∇[2, bin, feat, node]
-            sum_g3 = h∇[3, bin, feat, node]
-
-            if bin > 1
-                sum_g1 += hL[1, bin - 1, feat, node]
-                sum_g2 += hL[2, bin - 1, feat, node]
-                sum_g3 += hL[3, bin - 1, feat, node]
+            s1 = zero(T); s2 = zero(T); s3 = zero(T)
+            @inbounds for bin in 1:nbins
+                s1 += h∇[1, bin, feat, node]
+                s2 += h∇[2, bin, feat, node]
+                s3 += h∇[3, bin, feat, node]
+                hL[1, bin, feat, node] = s1
+                hL[2, bin, feat, node] = s2
+                hL[3, bin, feat, node] = s3
             end
-
-            hL[1, bin, feat, node] = sum_g1
-            hL[2, bin, feat, node] = sum_g2
-            hL[3, bin, feat, node] = sum_g3
-
-            if bin == nbins
-                hR[1, nbins, feat, node] = sum_g1
-                hR[2, nbins, feat, node] = sum_g2
-                hR[3, nbins, feat, node] = sum_g3
-            end
+            hR[1, nbins, feat, node] = s1
+            hR[2, nbins, feat, node] = s2
+            hR[3, nbins, feat, node] = s3
         end
     end
 end
@@ -221,23 +213,28 @@ function update_hist_gpu!(
     h∇, hL, hR, gains, bins, feats, ∇, x_bin, nidx, js, depth, active_nodes_gpu, nodes_sum_gpu, params
 )
     backend = KernelAbstractions.get_backend(h∇)
-    n_nodes_level = 2^(depth - 1)
-    dnodes = n_nodes_level:(2^depth - 1)
     
-    active_nodes = view(active_nodes_gpu, 1:n_nodes_level)
-    offset = Int32(2^(depth - 1) - 1)
-    kernel_fill! = fill_active_nodes_kernel!(backend)
-    kernel_fill!(active_nodes, offset; ndrange = n_nodes_level)
+    # Use the provided active nodes (1:n_active), with zeros meaning inactive
+    active_nodes = active_nodes_gpu
+    n_active = length(active_nodes)
     
     if depth == 1
+        # Root level: build parent histogram from scratch
         h∇ .= 0
         kernel_hist! = hist_kernel!(backend)
         kernel_hist!(h∇, ∇, x_bin, nidx, js; ndrange = (size(x_bin, 1), length(js)))
     else
-        left_nodes = CuArray(collect(dnodes[1:2:end]))
-        right_nodes = CuArray(collect(dnodes[2:2:end]))
-        parent_nodes = CuArray(collect((n_nodes_level ÷ 2):(n_nodes_level - 1)))
-        
+        # Build children histograms at current depth using selective accumulation for left children,
+        # then derive right children by subtraction from their parent hist
+        left_nodes = CuArray(similar(active_nodes))
+        right_nodes = CuArray(similar(active_nodes))
+        parent_nodes = active_nodes
+        @inbounds for i in eachindex(parent_nodes)
+            parent = parent_nodes[i]
+            left_nodes[i] = Int32(parent << 1)
+            right_nodes[i] = Int32((parent << 1) + 1)
+        end
+
         h∇[:, :, :, left_nodes] .= 0
         h∇[:, :, :, right_nodes] .= 0
 
@@ -247,19 +244,20 @@ function update_hist_gpu!(
         kernel_hist_selective_mask! = hist_kernel_selective_mask!(backend)
         kernel_hist_selective_mask!(h∇, ∇, x_bin, nidx, js, target_mask;
                                     ndrange = (size(x_bin, 1), length(js)))
-        
+
         kernel_subtract! = subtract_hist_kernel!(backend)
-        kernel_subtract!(h∇, parent_nodes, left_nodes, right_nodes; 
-                        ndrange = (length(parent_nodes), size(h∇, 3), size(h∇, 2)))
+        kernel_subtract!(h∇, parent_nodes, left_nodes, right_nodes;
+                         ndrange = (length(parent_nodes), size(h∇, 3), size(h∇, 2)))
     end
     
+    # Scan over the provided active nodes
     hL .= 0
     hR .= 0
-    nbins = size(h∇, 2)
-    kernel_scan! = scan_hist_kernel!(backend)
-    kernel_scan!(hL, hR, h∇, active_nodes; ndrange = (length(active_nodes), size(h∇, 3), nbins))
+    kernel_scan_serial! = scan_hist_kernel_serial!(backend)
+    kernel_scan_serial!(hL, hR, h∇, active_nodes; ndrange = (length(active_nodes), size(h∇, 3)))
     KernelAbstractions.synchronize(backend)
         
+    # Find best split per active node at this depth
     kernel_find_split! = find_best_split_kernel_parallel!(backend)
     kernel_find_split!(
         gains, bins, feats, hL, hR, nodes_sum_gpu, active_nodes,
