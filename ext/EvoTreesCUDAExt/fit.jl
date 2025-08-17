@@ -57,7 +57,7 @@ function grow_tree!(
     max_nodes_level = 2^params.max_depth
     anodes_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level)
     n_next_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level * 2)
-    n_next_active_gpu = CuArray([0])
+    n_next_active_gpu = KernelAbstractions.zeros(backend, Int32, 1)
 
     best_gain_gpu = KernelAbstractions.zeros(backend, Float64, max_nodes_level)
     best_bin_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level)
@@ -65,16 +65,15 @@ function grow_tree!(
     
     nidx .= 1
     
-    nsamples = Float32(length(is_gpu))
+    nsamples = Float64(length(is_gpu))
     root_sums_cpu = zeros(Float64, 3)
     root_sums_cpu[1] = sum(view(∇, 1, is_gpu))
     root_sums_cpu[2] = sum(view(∇, 2, is_gpu))
     root_sums_cpu[3] = nsamples
     copyto!(view(nodes_sum_gpu, :, 1), root_sums_cpu)
 
-    get_gain_gpu!(backend)(nodes_gain_gpu, nodes_sum_gpu, CuArray([1]), params.lambda; ndrange=1)
-    
     copyto!(view(anodes_gpu, 1:1), [1])
+    get_gain_gpu!(backend)(nodes_gain_gpu, nodes_sum_gpu, view(anodes_gpu, 1:1), params.lambda; ndrange=1)
     
     n_active = 1
 
@@ -95,7 +94,7 @@ function grow_tree!(
         update_hist_gpu!(
             h∇, h∇L, h∇R,
             view_gain, view_bin, view_feat,
-            ∇, x_bin, nidx, js_gpu,
+            ∇, x_bin, nidx, js_gpu, is_gpu,
             depth, active_nodes_full, nodes_sum_gpu, params
         )
 
