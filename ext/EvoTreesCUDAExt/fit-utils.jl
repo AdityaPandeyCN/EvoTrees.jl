@@ -72,6 +72,29 @@ end
     end
 end
 
+@kernel function hist_kernel_selective_mask!(
+    h∇::AbstractArray{T,4},
+    @Const(∇),
+    @Const(x_bin),
+    @Const(nidx),
+    @Const(js),
+    @Const(target_mask),
+) where {T}
+    i, j = @index(Global, NTuple)
+    @inbounds if i <= size(x_bin, 1) && j <= length(js)
+        node = nidx[i]
+        if node > 0 && target_mask[node] != 0
+            jdx = js[j]
+            bin = x_bin[i, jdx]
+            if bin > 0 && bin <= size(h∇, 2)
+                Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, i]
+                Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, i]
+                Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, i]
+            end
+        end
+    end
+end
+
 @kernel function subtract_hist_kernel!(
     h∇::AbstractArray{T,4},
     @Const(parent_nodes),
@@ -209,10 +232,14 @@ function update_hist_gpu!(
         parent_nodes = CuArray(collect((n_nodes_level ÷ 2):(n_nodes_level - 1)))
         
         h∇[:, :, :, left_nodes] .= 0
-        
-        kernel_hist_selective! = hist_kernel_selective!(backend)
-        kernel_hist_selective!(h∇, ∇, x_bin, nidx, js, left_nodes; 
-                                ndrange = (size(x_bin, 1), length(js)))
+
+        # Build a boolean mask for target nodes to eliminate costly "node in target_nodes" checks
+        target_mask = CUDA.zeros(UInt8, size(h∇, 4) + 1)
+        target_mask[left_nodes] .= 1
+
+        kernel_hist_selective_mask! = hist_kernel_selective_mask!(backend)
+        kernel_hist_selective_mask!(h∇, ∇, x_bin, nidx, js, target_mask;
+                                    ndrange = (size(x_bin, 1), length(js)))
         
         kernel_subtract! = subtract_hist_kernel!(backend)
         kernel_subtract!(h∇, parent_nodes, left_nodes, right_nodes; 
