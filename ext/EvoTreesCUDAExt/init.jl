@@ -105,6 +105,12 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes{L}, ::Type{<:EvoTrees.GPU}
     feattypes_gpu = CuArray(feattypes)
     monotone_constraints_gpu = CuArray(monotone_constraints)
 
+    # preallocate buffers used across depths
+    max_nodes_level = 2^params.max_depth
+    left_nodes_buf = CUDA.zeros(Int32, max_nodes_level)
+    right_nodes_buf = CUDA.zeros(Int32, max_nodes_level)
+    target_mask_buf = CUDA.zeros(UInt8, 2^(params.max_depth + 1))
+
     # build cache
     cache = (
         info=Dict(:nrounds => 0),
@@ -134,6 +140,9 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes{L}, ::Type{<:EvoTrees.GPU}
         cond_bins=cond_bins,
         cond_bins_gpu=cond_bins_gpu,
         monotone_constraints_gpu=monotone_constraints_gpu,
+        left_nodes_buf=left_nodes_buf,
+        right_nodes_buf=right_nodes_buf,
+        target_mask_buf=target_mask_buf,
     )
     return m, cache
 end

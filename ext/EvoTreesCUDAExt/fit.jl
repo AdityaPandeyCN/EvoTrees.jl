@@ -18,9 +18,12 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.E
         cache.h∇R,
         cache.x_bin,
         cache.feattypes_gpu,
+        cache.pred,
+        cache.left_nodes_buf,
+        cache.right_nodes_buf,
+        cache.target_mask_buf,
     )
     push!(evotree.trees, tree)
-    EvoTrees.predict!(cache.pred, tree, cache.x_bin, cache.feattypes_gpu)
     cache[:info][:nrounds] += 1
     return nothing
 end
@@ -38,6 +41,10 @@ function grow_tree!(
     h∇R::CuArray,
     x_bin::CuMatrix,
     feattypes_gpu::CuVector{Bool},
+    pred_accum::CuMatrix,
+    left_nodes_buf::CuArray{Int32},
+    right_nodes_buf::CuArray{Int32},
+    target_mask_buf::CuArray{UInt8},
 ) where {L,K}
 
     backend = KernelAbstractions.get_backend(x_bin)
@@ -48,7 +55,7 @@ function grow_tree!(
     tree_cond_bin_gpu = KernelAbstractions.zeros(backend, UInt8, length(tree.cond_bin))
     tree_feat_gpu = KernelAbstractions.zeros(backend, Int32, length(tree.feat))
     tree_gain_gpu = KernelAbstractions.zeros(backend, Float64, length(tree.gain))
-    tree_pred_gpu = KernelAbstractions.zeros(backend, Float32, length(tree.pred))
+    tree_pred_gpu = KernelAbstractions.zeros(backend, Float32, size(tree.pred, 1), length(tree.pred))
 
     max_nodes_total = 2^(params.max_depth + 1)
     nodes_sum_gpu = KernelAbstractions.zeros(backend, Float64, 3, max_nodes_total)
@@ -65,16 +72,18 @@ function grow_tree!(
     
     nidx .= 1
     
-    nsamples = Float64(length(is_gpu))
-    root_sums_cpu = zeros(Float64, 3)
-    root_sums_cpu[1] = sum(view(∇, 1, is_gpu))
-    root_sums_cpu[2] = sum(view(∇, 2, is_gpu))
-    root_sums_cpu[3] = nsamples
-    copyto!(view(nodes_sum_gpu, :, 1), root_sums_cpu)
-
-    copyto!(view(anodes_gpu, 1:1), [1])
+    # compute root sums on GPU from hist scan of depth 1
+    nsamples = Float32(length(is_gpu))
+    view(anodes_gpu, 1:1) .= 1
+    update_hist_gpu!(
+        h∇, h∇L, h∇R,
+        best_gain_gpu, best_bin_gpu, best_feat_gpu,
+        ∇, x_bin, nidx, js_gpu, is_gpu,
+        1, view(anodes_gpu, 1:1), nodes_sum_gpu, params,
+        left_nodes_buf, right_nodes_buf, target_mask_buf
+    )
     get_gain_gpu!(backend)(nodes_gain_gpu, nodes_sum_gpu, view(anodes_gpu, 1:1), params.lambda; ndrange=1)
-    
+
     n_active = 1
 
     for depth in 1:params.max_depth
@@ -91,12 +100,15 @@ function grow_tree!(
         view_bin  = view(best_bin_gpu, 1:n_nodes_level)
         view_feat = view(best_feat_gpu, 1:n_nodes_level)
         
-        update_hist_gpu!(
-            h∇, h∇L, h∇R,
-            view_gain, view_bin, view_feat,
-            ∇, x_bin, nidx, js_gpu, is_gpu,
-            depth, active_nodes_full, nodes_sum_gpu, params
-        )
+        if depth > 1
+            update_hist_gpu!(
+                h∇, h∇L, h∇R,
+                view_gain, view_bin, view_feat,
+                ∇, x_bin, nidx, js_gpu, is_gpu,
+                depth, view(active_nodes_full, 1:n_active), nodes_sum_gpu, params,
+                cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf
+            )
+        end
 
         n_next_active_gpu .= 0
         view_gain_act  = view(view_gain, 1:n_active)
@@ -133,7 +145,9 @@ function grow_tree!(
     copyto!(tree.cond_bin, Array(tree_cond_bin_gpu))
     copyto!(tree.feat, Array(tree_feat_gpu))
     copyto!(tree.gain, Array(tree_gain_gpu))
-    copyto!(tree.pred, Array(tree_pred_gpu))
+    # accumulate into pred_accum directly to avoid an extra kernel launch per tree
+    @. pred_accum += tree_pred_gpu
+    copyto!(tree.pred, Array(tree_pred_gpu .* params.eta))
     
     for i in eachindex(tree.split)
         if tree.split[i]
@@ -181,12 +195,17 @@ end
         idx_base = Atomix.@atomic n_next_active[1] += 2
         n_next[idx_base - 1] = child_l
         n_next[idx_base] = child_r
+
+        # compute leaf prediction at this split for both children
+        ϵ = 1e-8
+        tree_pred[1, child_l] = - (nodes_sum[1, child_l]) / (nodes_sum[2, child_l] + lambda * nodes_sum[3, child_l] + ϵ)
+        tree_pred[1, child_r] = - (nodes_sum[1, child_r]) / (nodes_sum[2, child_r] + lambda * nodes_sum[3, child_r] + ϵ)
     else
         g, h, w = nodes_sum[1, node], nodes_sum[2, node], nodes_sum[3, node]
         if w <= 0.0 || h + lambda <= 0.0
             tree_pred[node] = 0.0f0
         else
-            tree_pred[node] = -g / (h + lambda + 1e-8)
+            tree_pred[1, node] = -g / (h + lambda * w + 1e-8)
         end
     end
 end

@@ -304,65 +304,54 @@ end
 end
 
 function update_hist_gpu!(
-    h∇, hL, hR, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes_gpu, nodes_sum_gpu, params
+    h∇, hL, hR, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
+    left_nodes_buf, right_nodes_buf, target_mask_buf
 )
     backend = KernelAbstractions.get_backend(h∇)
-    
-    # Use the provided active nodes (1:n_active), with zeros meaning inactive
-    active_nodes = active_nodes_gpu
+
     n_active = length(active_nodes)
-    
+
     if depth == 1
-        # Root level: build parent histogram from scratch
         h∇ .= 0
-        kernel_hist_is! = hist_kernel_is!(backend)
-        kernel_hist_is!(h∇, ∇, x_bin, nidx, js, is; ndrange = (length(is), length(js)))
+        hist_is! = hist_kernel_is!(backend)
+        hist_is!(h∇, ∇, x_bin, nidx, js, is; ndrange = (length(is), length(js)))
     else
-        # Build children histograms at current depth using selective accumulation for left children,
-        # then derive right children by subtraction from their parent hist
         parent_nodes = active_nodes
-        left_nodes = KernelAbstractions.zeros(backend, Int32, length(parent_nodes))
-        right_nodes = KernelAbstractions.zeros(backend, Int32, length(parent_nodes))
-        kernel_fill_children! = fill_children_nodes_kernel!(backend)
-        kernel_fill_children!(left_nodes, right_nodes, parent_nodes; ndrange = length(parent_nodes))
+        fill_children! = fill_children_nodes_kernel!(backend)
+        fill_children!(left_nodes_buf, right_nodes_buf, parent_nodes; ndrange = n_active)
 
-        kernel_zero_nodes! = zero_node_hist_kernel!(backend)
-        kernel_zero_nodes!(h∇, left_nodes; ndrange = (length(left_nodes), size(h∇, 3), size(h∇, 2)))
-        kernel_zero_nodes!(h∇, right_nodes; ndrange = (length(right_nodes), size(h∇, 3), size(h∇, 2)))
+        zero_nodes! = zero_node_hist_kernel!(backend)
+        zero_nodes!(h∇, left_nodes_buf; ndrange = (n_active, size(h∇, 3), size(h∇, 2)))
+        zero_nodes!(h∇, right_nodes_buf; ndrange = (n_active, size(h∇, 3), size(h∇, 2)))
 
-        target_mask = KernelAbstractions.zeros(backend, UInt8, size(h∇, 4) + 1)
-        kernel_fill_mask! = fill_mask_kernel!(backend)
-        kernel_fill_mask!(target_mask, left_nodes; ndrange = length(left_nodes))
+        target_mask_buf .= 0
+        fill_mask! = fill_mask_kernel!(backend)
+        fill_mask!(target_mask_buf, left_nodes_buf; ndrange = n_active)
 
-        kernel_hist_selective_mask_is! = hist_kernel_selective_mask_is!(backend)
-        kernel_hist_selective_mask_is!(h∇, ∇, x_bin, nidx, js, target_mask, is;
-                                       ndrange = (length(is), length(js)))
-        
-        kernel_subtract! = subtract_hist_kernel!(backend)
-        kernel_subtract!(h∇, parent_nodes, left_nodes, right_nodes; 
-                        ndrange = (length(parent_nodes), size(h∇, 3), size(h∇, 2)))
+        hist_selective_mask_is! = hist_kernel_selective_mask_is!(backend)
+        hist_selective_mask_is!(h∇, ∇, x_bin, nidx, js, target_mask_buf, is;
+                                 ndrange = (length(is), length(js)))
+
+        subtract_hist! = subtract_hist_kernel!(backend)
+        subtract_hist!(h∇, parent_nodes, left_nodes_buf, right_nodes_buf;
+                       ndrange = (n_active, size(h∇, 3), size(h∇, 2)))
     end
-    
-    # Scan over the provided active nodes
+
     hL .= 0
     hR .= 0
-    kernel_scan_serial! = scan_hist_kernel_serial!(backend)
-    kernel_scan_serial!(hL, hR, h∇, active_nodes; ndrange = (length(active_nodes), size(h∇, 3)))
-    KernelAbstractions.synchronize(backend)
+    scan_serial! = scan_hist_kernel_serial!(backend)
+    scan_serial!(hL, hR, h∇, active_nodes; ndrange = (n_active, size(h∇, 3)))
 
-    # Populate node sums for the active nodes based on scanned histograms
-    kernel_write_nodes_sum! = write_nodes_sum_from_scan!(backend)
-    kernel_write_nodes_sum!(nodes_sum_gpu, hR, active_nodes; ndrange = length(active_nodes))
-    KernelAbstractions.synchronize(backend)
-        
-    # Find best split per active node at this depth
-    kernel_find_split! = find_best_split_kernel_parallel!(backend)
-    kernel_find_split!(
+    write_nodes_sum! = write_nodes_sum_from_scan!(backend)
+    write_nodes_sum!(nodes_sum_gpu, hR, active_nodes; ndrange = n_active)
+
+    find_split! = find_best_split_kernel_parallel!(backend)
+    find_split!(
         gains, bins, feats, hL, hR, nodes_sum_gpu, active_nodes,
         params.lambda + 1e-8, params.min_weight;
-        ndrange = length(active_nodes)
+        ndrange = n_active
     )
-    
+
     KernelAbstractions.synchronize(backend)
     return nothing
 end
