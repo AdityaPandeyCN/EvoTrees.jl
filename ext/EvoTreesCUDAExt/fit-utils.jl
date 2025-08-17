@@ -108,9 +108,9 @@ end
         left = left_nodes[idx]
         right = right_nodes[idx]
         
-        h∇[1, bin, feat, right] = h∇[1, bin, feat, parent] - h∇[1, bin, feat, left]
-        h∇[2, bin, feat, right] = h∇[2, bin, feat, parent] - h∇[2, bin, feat, left]
-        h∇[3, bin, feat, right] = h∇[3, bin, feat, parent] - h∇[3, bin, feat, left]
+        h∇[1, bin, feat, right] = max(0.0, h∇[1, bin, feat, parent] - h∇[1, bin, feat, left])
+        h∇[2, bin, feat, right] = max(0.0, h∇[2, bin, feat, parent] - h∇[2, bin, feat, left])
+        h∇[3, bin, feat, right] = max(0.0, h∇[3, bin, feat, parent] - h∇[3, bin, feat, left])
     end
 end
 
@@ -126,28 +126,27 @@ end
 
     @inbounds if n_idx <= length(active_nodes) && feat <= size(h∇, 3) && bin <= nbins
         node = active_nodes[n_idx]
+        
+        if node > 0
+            sum_g1 = h∇[1, bin, feat, node]
+            sum_g2 = h∇[2, bin, feat, node]
+            sum_g3 = h∇[3, bin, feat, node]
 
-        # Parallel prefix sum – each thread handles one bin
-        sum_g1 = h∇[1, bin, feat, node]
-        sum_g2 = h∇[2, bin, feat, node]
-        sum_g3 = h∇[3, bin, feat, node]
+            if bin > 1
+                sum_g1 += hL[1, bin - 1, feat, node]
+                sum_g2 += hL[2, bin - 1, feat, node]
+                sum_g3 += hL[3, bin - 1, feat, node]
+            end
 
-        # Accumulate previous bin (results from previous pass are in hL)
-        if bin > 1
-            sum_g1 += hL[1, bin - 1, feat, node]
-            sum_g2 += hL[2, bin - 1, feat, node]
-            sum_g3 += hL[3, bin - 1, feat, node]
-        end
+            hL[1, bin, feat, node] = sum_g1
+            hL[2, bin, feat, node] = sum_g2
+            hL[3, bin, feat, node] = sum_g3
 
-        hL[1, bin, feat, node] = sum_g1
-        hL[2, bin, feat, node] = sum_g2
-        hL[3, bin, feat, node] = sum_g3
-
-        # Store total for right-side histogram when we reach last bin
-        if bin == nbins
-            hR[1, nbins, feat, node] = sum_g1
-            hR[2, nbins, feat, node] = sum_g2
-            hR[3, nbins, feat, node] = sum_g3
+            if bin == nbins
+                hR[1, nbins, feat, node] = sum_g1
+                hR[2, nbins, feat, node] = sum_g2
+                hR[3, nbins, feat, node] = sum_g3
+            end
         end
     end
 end
@@ -164,47 +163,52 @@ end
     min_weight::T,
 ) where {T}
     n_idx = @index(Global)
-    ϵ = T(1e-8)        # small constant to stabilise divisions
     
     @inbounds if n_idx <= length(active_nodes)
         node = active_nodes[n_idx]
-        nbins = size(hL, 2)
-        nfeats = size(hL, 3)
         
-        g_best = T(-Inf)
-        b_best = Int32(0)
-        f_best = Int32(0)
-        
-        p_g1 = nodes_sum[1, node]
-        p_g2 = nodes_sum[2, node]
-        ϵ = T(1e-8)
-        gain_p = p_g1^2 / (p_g2 + lambda + ϵ)
-        
-        for f in 1:nfeats
-            p_w = hR[3, nbins, f, node]
-            for b in 1:(nbins - 1)
-                l_w = hL[3, b, f, node]
-                r_w = p_w - l_w
-                if l_w >= min_weight && r_w >= min_weight
-                    l_g1 = hL[1, b, f, node]
-                    l_g2 = hL[2, b, f, node]
-                    r_g1 = p_g1 - l_g1
-                    r_g2 = p_g2 - l_g2
-                    gain_l = l_g1^2 / (l_g2 + lambda + ϵ)
-                    gain_r = r_g1^2 / (r_g2 + lambda + ϵ)
-                    g = gain_l + gain_r - gain_p
-                    if g > g_best
-                        g_best = g
-                        b_best = Int32(b)
-                        f_best = Int32(f)
+        if node == 0
+            gains[n_idx] = T(-Inf)
+            bins[n_idx] = Int32(0)
+            feats[n_idx] = Int32(0)
+        else
+            nbins = size(hL, 2)
+            nfeats = size(hL, 3)
+            
+            g_best = T(-Inf)
+            b_best = Int32(0)
+            f_best = Int32(0)
+            
+            p_g1 = nodes_sum[1, node]
+            p_g2 = nodes_sum[2, node]
+            gain_p = p_g1^2 / (p_g2 + lambda + 1e-8)
+            
+            for f in 1:nfeats
+                p_w = hR[3, nbins, f, node]
+                for b in 1:(nbins - 1)
+                    l_w = hL[3, b, f, node]
+                    r_w = p_w - l_w
+                    if l_w >= min_weight && r_w >= min_weight
+                        l_g1 = hL[1, b, f, node]
+                        l_g2 = hL[2, b, f, node]
+                        r_g1 = p_g1 - l_g1
+                        r_g2 = p_g2 - l_g2
+                        gain_l = l_g1^2 / (l_g2 + lambda + 1e-8)
+                        gain_r = r_g1^2 / (r_g2 + lambda + 1e-8)
+                        g = gain_l + gain_r - gain_p
+                        if g > g_best
+                            g_best = g
+                            b_best = Int32(b)
+                            f_best = Int32(f)
+                        end
                     end
                 end
             end
+            
+            gains[n_idx] = g_best
+            bins[n_idx] = b_best
+            feats[n_idx] = f_best
         end
-        
-        gains[n_idx] = g_best
-        bins[n_idx] = b_best
-        feats[n_idx] = f_best
     end
 end
 
@@ -226,7 +230,7 @@ function update_hist_gpu!(
     kernel_fill!(active_nodes, offset; ndrange = n_nodes_level)
     
     if depth == 1
-        h∇[:, :, :, dnodes] .= 0
+        h∇ .= 0
         kernel_hist! = hist_kernel!(backend)
         kernel_hist!(h∇, ∇, x_bin, nidx, js; ndrange = (size(x_bin, 1), length(js)))
     else
@@ -235,8 +239,8 @@ function update_hist_gpu!(
         parent_nodes = CuArray(collect((n_nodes_level ÷ 2):(n_nodes_level - 1)))
         
         h∇[:, :, :, left_nodes] .= 0
+        h∇[:, :, :, right_nodes] .= 0
 
-        # Build a boolean mask for target nodes to eliminate costly "node in target_nodes" checks
         target_mask = CUDA.zeros(UInt8, size(h∇, 4) + 1)
         target_mask[left_nodes] .= 1
 
@@ -249,20 +253,17 @@ function update_hist_gpu!(
                         ndrange = (length(parent_nodes), size(h∇, 3), size(h∇, 2)))
     end
     
+    hL .= 0
+    hR .= 0
     nbins = size(h∇, 2)
-    # Use nbins threads per node for the scan
-    kernel_scan! = scan_hist_kernel!(backend, nbins)
-    nbins = size(h∇, 2)
-    for pass in 1:ceil(Int, log2(nbins))
-        kernel_scan!(hL, hR, h∇, active_nodes; ndrange = (length(active_nodes), size(h∇, 3), nbins))
-        KernelAbstractions.synchronize(backend)
-    end
+    kernel_scan! = scan_hist_kernel!(backend)
+    kernel_scan!(hL, hR, h∇, active_nodes; ndrange = (length(active_nodes), size(h∇, 3), nbins))
+    KernelAbstractions.synchronize(backend)
         
-    # Single thread per node for finding best split
     kernel_find_split! = find_best_split_kernel_parallel!(backend)
     kernel_find_split!(
         gains, bins, feats, hL, hR, nodes_sum_gpu, active_nodes,
-        params.lambda, params.min_weight;
+        params.lambda + 1e-8, params.min_weight;
         ndrange = length(active_nodes)
     )
     
