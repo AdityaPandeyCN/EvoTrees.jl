@@ -91,42 +91,39 @@ end
     end
 end
 
-# Simplified scan kernel without shared memory issues
 @kernel function scan_hist_kernel!(
     hL::AbstractArray{T,4},
     hR::AbstractArray{T,4},
     @Const(h∇),
     @Const(active_nodes),
 ) where {T}
-    n_idx, feat = @index(Global, NTuple)
-    tid = @index(Local)
+    n_idx, feat, bin = @index(Global, NTuple)
     
     nbins = size(h∇, 2)
     
-    @inbounds if n_idx <= length(active_nodes) && feat <= size(h∇, 3)
+    @inbounds if n_idx <= length(active_nodes) && feat <= size(h∇, 3) && bin <= nbins
         node = active_nodes[n_idx]
         
-        if tid <= nbins
-            # Compute prefix sum directly
-            sum_g1 = zero(T)
-            sum_g2 = zero(T)
-            sum_g3 = zero(T)
-            
-            for i in 1:tid
-                sum_g1 += h∇[1, i, feat, node]
-                sum_g2 += h∇[2, i, feat, node]
-                sum_g3 += h∇[3, i, feat, node]
-            end
-            
-            hL[1, tid, feat, node] = sum_g1
-            hL[2, tid, feat, node] = sum_g2
-            hL[3, tid, feat, node] = sum_g3
-            
-            if tid == nbins
-                hR[1, nbins, feat, node] = sum_g1
-                hR[2, nbins, feat, node] = sum_g2
-                hR[3, nbins, feat, node] = sum_g3
-            end
+        # Parallel prefix sum - each thread handles one bin
+        sum_g1 = h∇[1, bin, feat, node]
+        sum_g2 = h∇[2, bin, feat, node]
+        sum_g3 = h∇[3, bin, feat, node]
+        
+        # Only accumulate previous bins (not sequential!)
+        if bin > 1
+            sum_g1 += hL[1, bin-1, feat, node]
+            sum_g2 += hL[2, bin-1, feat, node]  
+            sum_g3 += hL[3, bin-1, feat, node]
+        end
+        
+        hL[1, bin, feat, node] = sum_g1
+        hL[2, bin, feat, node] = sum_g2
+        hL[3, bin, feat, node] = sum_g3
+        
+        if bin == nbins
+            hR[1, nbins, feat, node] = sum_g1
+            hR[2, nbins, feat, node] = sum_g2
+            hR[3, nbins, feat, node] = sum_g3
         end
     end
 end
@@ -225,8 +222,12 @@ function update_hist_gpu!(
     nbins = size(h∇, 2)
     # Use nbins threads per node for the scan
     kernel_scan! = scan_hist_kernel!(backend, nbins)
-    kernel_scan!(hL, hR, h∇, active_nodes; ndrange = (length(active_nodes), size(h∇, 3)))
-    
+    nbins = size(h∇, 2)
+    for pass in 1:ceil(Int, log2(nbins))
+        kernel_scan!(hL, hR, h∇, active_nodes; ndrange = (length(active_nodes), size(h∇, 3), nbins))
+        KernelAbstractions.synchronize(backend)
+    end
+        
     # Single thread per node for finding best split
     kernel_find_split! = find_best_split_kernel_parallel!(backend)
     kernel_find_split!(
