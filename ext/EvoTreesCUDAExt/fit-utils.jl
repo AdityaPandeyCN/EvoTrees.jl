@@ -183,7 +183,7 @@ end
     feats::AbstractVector{Int32},
     @Const(hL),
     @Const(hR),
-    @Const(nodes_sum),
+    nodes_sum,
     @Const(active_nodes),
     @Const(js),
     lambda::T,
@@ -206,23 +206,18 @@ end
         f_best = Int32(0)
         
         # Get node sum from the first feature in js (they should all be the same)
-        if length(js) > 0
-            f_first = js[1]
-            p_g1 = hR[1, nbins, f_first, node]
-            p_g2 = hR[2, nbins, f_first, node]
-            p_w  = hR[3, nbins, f_first, node]
-            # Write to nodes_sum for use in apply_splits
-            nodes_sum[1, node] = p_g1
-            nodes_sum[2, node] = p_g2
-            nodes_sum[3, node] = p_w
-        else
-            p_g1 = nodes_sum[1, node]
-            p_g2 = nodes_sum[2, node]
-            p_w  = nodes_sum[3, node]
-        end
-            gain_p = p_g1^2 / (p_g2 + lambda * p_w + T(1e-8))
+        f_first = js[1]
+        p_g1 = hR[1, nbins, f_first, node]
+        p_g2 = hR[2, nbins, f_first, node]
+        p_w  = hR[3, nbins, f_first, node]
+        # Write to nodes_sum for use in apply_splits
+        nodes_sum[1, node] = p_g1
+        nodes_sum[2, node] = p_g2
+        nodes_sum[3, node] = p_w
         
-        for j_idx in 1:length(js)
+        gain_p = p_g1^2 / (p_g2 + lambda * p_w + T(1e-8))
+        
+        @inbounds for j_idx in 1:length(js)
             f = js[j_idx]
             f_w = hR[3, nbins, f, node]
             for b in 1:(nbins - 1)
