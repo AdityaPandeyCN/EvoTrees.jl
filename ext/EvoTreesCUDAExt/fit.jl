@@ -53,7 +53,7 @@ function grow_tree!(
     tree_split_gpu = KernelAbstractions.zeros(backend, Bool, length(tree.split))
     tree_cond_bin_gpu = KernelAbstractions.zeros(backend, UInt8, length(tree.cond_bin))
     tree_feat_gpu = KernelAbstractions.zeros(backend, Int32, length(tree.feat))
-    tree_gain_gpu = KernelAbstractions.zeros(backend, Float64, length(tree.gain))
+    tree_gain_gpu = KernelAbstractions.zeros(backend, Float32, length(tree.gain))
     tree_pred_gpu = KernelAbstractions.zeros(backend, Float32, size(tree.pred, 1), size(tree.pred, 2))
 
     max_nodes_total = 2^(params.max_depth + 1)
@@ -143,7 +143,7 @@ function grow_tree!(
     copyto!(tree.split, Array(tree_split_gpu))
     copyto!(tree.cond_bin, Array(tree_cond_bin_gpu))
     copyto!(tree.feat, Array(tree_feat_gpu))
-    copyto!(tree.gain, Array(tree_gain_gpu))
+    tree.gain .= Array(tree_gain_gpu)
 
     copyto!(tree.pred, Array(tree_pred_gpu .* Float32(params.eta)))
     

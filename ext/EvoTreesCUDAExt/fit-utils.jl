@@ -305,36 +305,60 @@ function update_hist_gpu!(
     
     n_active = length(active_nodes)
     
+    profile = get(ENV, "EVO_PROF", "0") == "1"
+    t_hist = 0.0
+    t_scan = 0.0
+    t_write = 0.0
+    t_find = 0.0
+    
     if depth == 1
         h∇ .= 0
         hist_is! = hist_kernel_is!(backend)
-        hist_is!(h∇, ∇, x_bin, nidx, js, is; ndrange = (length(is), length(js)))
+        t_hist += @elapsed begin
+            hist_is!(h∇, ∇, x_bin, nidx, js, is; ndrange = (length(is), length(js)), workgroupsize=(256,1))
+            KernelAbstractions.synchronize(backend)
+        end
     else
         # Build histograms for the current active nodes (parents to split now)
         zero_nodes! = zero_node_hist_kernel!(backend)
-        zero_nodes!(h∇, active_nodes; ndrange = (n_active, size(h∇, 3), size(h∇, 2)))
+        t_hist += @elapsed begin
+            zero_nodes!(h∇, active_nodes; ndrange = (n_active, size(h∇, 3), size(h∇, 2)), workgroupsize=(64,1,1))
+            target_mask_buf .= 0
+            fill_mask! = fill_mask_kernel!(backend)
+            fill_mask!(target_mask_buf, active_nodes; ndrange = n_active, workgroupsize=256)
 
-        target_mask_buf .= 0
-        fill_mask! = fill_mask_kernel!(backend)
-        fill_mask!(target_mask_buf, active_nodes; ndrange = n_active)
-
-        hist_selective_mask_is! = hist_kernel_selective_mask_is!(backend)
-        hist_selective_mask_is!(h∇, ∇, x_bin, nidx, js, target_mask_buf, is;
-                                       ndrange = (length(is), length(js)))
+            hist_selective_mask_is! = hist_kernel_selective_mask_is!(backend)
+            hist_selective_mask_is!(h∇, ∇, x_bin, nidx, js, target_mask_buf, is;
+                                           ndrange = (length(is), length(js)), workgroupsize=(256,1))
+            KernelAbstractions.synchronize(backend)
+        end
     end
 
     scan_serial_js! = scan_hist_kernel_serial_js!(backend)
-    scan_serial_js!(hL, hR, h∇, active_nodes, js; ndrange = (n_active, length(js)))
+    t_scan += @elapsed begin
+        scan_serial_js!(hL, hR, h∇, active_nodes, js; ndrange = (n_active, length(js)), workgroupsize=(64,4))
+        KernelAbstractions.synchronize(backend)
+    end
 
     write_nodes_sum! = write_nodes_sum_from_scan!(backend)
-    write_nodes_sum!(nodes_sum_gpu, hR, active_nodes, js; ndrange = n_active)
+    t_write += @elapsed begin
+        write_nodes_sum!(nodes_sum_gpu, hR, active_nodes, js; ndrange = n_active, workgroupsize=256)
+        KernelAbstractions.synchronize(backend)
+    end
 
     find_split_js! = find_best_split_kernel_parallel_js!(backend)
-    find_split_js!(
-        gains, bins, feats, hL, hR, nodes_sum_gpu, active_nodes, js,
-        eltype(gains)(params.lambda), eltype(gains)(params.min_weight);
-        ndrange = n_active
-    )
+    t_find += @elapsed begin
+        find_split_js!(
+            gains, bins, feats, hL, hR, nodes_sum_gpu, active_nodes, js,
+            eltype(gains)(params.lambda), eltype(gains)(params.min_weight);
+            ndrange = n_active, workgroupsize=256
+        )
+        KernelAbstractions.synchronize(backend)
+    end
+    
+    if profile
+        @info "gpu_prof:update_hist" depth=depth n_active=n_active t_hist=t_hist t_scan=t_scan t_write=t_write t_find=t_find
+    end
     
     return nothing
 end
