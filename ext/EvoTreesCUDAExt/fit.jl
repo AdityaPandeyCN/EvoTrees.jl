@@ -57,15 +57,15 @@ function grow_tree!(
     tree_pred_gpu = KernelAbstractions.zeros(backend, Float32, size(tree.pred, 1), size(tree.pred, 2))
 
     max_nodes_total = 2^(params.max_depth + 1)
-    nodes_sum_gpu = KernelAbstractions.zeros(backend, Float64, 3, max_nodes_total)
-    nodes_gain_gpu = KernelAbstractions.zeros(backend, Float64, max_nodes_total)
+    nodes_sum_gpu = KernelAbstractions.zeros(backend, Float32, 3, max_nodes_total)
+    nodes_gain_gpu = KernelAbstractions.zeros(backend, Float32, max_nodes_total)
 
     max_nodes_level = 2^params.max_depth
     anodes_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level)
     n_next_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level * 2)
     n_next_active_gpu = KernelAbstractions.zeros(backend, Int32, 1)
 
-    best_gain_gpu = KernelAbstractions.zeros(backend, Float64, max_nodes_level)
+    best_gain_gpu = KernelAbstractions.zeros(backend, Float32, max_nodes_level)
     best_bin_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level)
     best_feat_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level)
     
@@ -81,7 +81,7 @@ function grow_tree!(
         1, view(anodes_gpu, 1:1), nodes_sum_gpu, params,
         left_nodes_buf, right_nodes_buf, target_mask_buf
     )
-    get_gain_gpu!(backend)(nodes_gain_gpu, nodes_sum_gpu, view(anodes_gpu, 1:1), params.lambda; ndrange=1)
+    get_gain_gpu!(backend)(nodes_gain_gpu, nodes_sum_gpu, view(anodes_gpu, 1:1), Float32(params.lambda); ndrange=1)
 
     n_active = 1
 
@@ -123,7 +123,7 @@ function grow_tree!(
             view_gain_act, view_bin_act, view_feat_act,
             h∇L,
             active_nodes_act,
-            depth, params.max_depth, params.lambda, params.gamma;
+            depth, params.max_depth, Float32(params.lambda), Float32(params.gamma);
             ndrange = n_active
         )
         
@@ -145,7 +145,7 @@ function grow_tree!(
     copyto!(tree.feat, Array(tree_feat_gpu))
     copyto!(tree.gain, Array(tree_gain_gpu))
 
-    copyto!(tree.pred, Array(tree_pred_gpu .* params.eta))
+    copyto!(tree.pred, Array(tree_pred_gpu .* Float32(params.eta)))
     
     for i in eachindex(tree.split)
         if tree.split[i]
@@ -168,6 +168,9 @@ end
     n_idx = @index(Global)
     node = active_nodes[n_idx]
 
+    # typed epsilon to avoid Float64 promotion
+    epsv = eltype(tree_pred)(1e-8)
+
     @inbounds if depth < max_depth && best_gain[n_idx] > gamma
         tree_split[node] = true
         tree_cond_bin[node] = best_bin[n_idx]
@@ -186,34 +189,33 @@ end
         nodes_sum[3, child_r] = nodes_sum[3, node] - nodes_sum[3, child_l]
 
         p1_l, p2_l, w_l = nodes_sum[1, child_l], nodes_sum[2, child_l], nodes_sum[3, child_l]
-        nodes_gain[child_l] = p1_l^2 / (p2_l + lambda * w_l + 1e-8)
+        nodes_gain[child_l] = p1_l^2 / (p2_l + lambda * w_l + epsv)
         p1_r, p2_r, w_r = nodes_sum[1, child_r], nodes_sum[2, child_r], nodes_sum[3, child_r]
-        nodes_gain[child_r] = p1_r^2 / (p2_r + lambda * w_r + 1e-8)
+        nodes_gain[child_r] = p1_r^2 / (p2_r + lambda * w_r + epsv)
         
         idx_base = Atomix.@atomic n_next_active[1] += 2
         n_next[idx_base - 1] = child_l
         n_next[idx_base] = child_r
 
         # compute leaf prediction at this split for both children
-        ϵ = 1e-8
-        tree_pred[1, child_l] = - (nodes_sum[1, child_l]) / (nodes_sum[2, child_l] + lambda * nodes_sum[3, child_l] + ϵ)
-        tree_pred[1, child_r] = - (nodes_sum[1, child_r]) / (nodes_sum[2, child_r] + lambda * nodes_sum[3, child_r] + ϵ)
+        tree_pred[1, child_l] = - (nodes_sum[1, child_l]) / (nodes_sum[2, child_l] + lambda * nodes_sum[3, child_l] + epsv)
+        tree_pred[1, child_r] = - (nodes_sum[1, child_r]) / (nodes_sum[2, child_r] + lambda * nodes_sum[3, child_r] + epsv)
     else
         g, h, w = nodes_sum[1, node], nodes_sum[2, node], nodes_sum[3, node]
-        if w <= 0.0 || h + lambda * w <= 0.0
+        if w <= zero(w) || h + lambda * w <= zero(h)
             tree_pred[1, node] = 0.0f0
         else
-            tree_pred[1, node] = -g / (h + lambda * w + 1e-8)
+            tree_pred[1, node] = -g / (h + lambda * w + epsv)
         end
     end
 end
 
-@kernel function get_gain_gpu!(nodes_gain, nodes_sum, nodes, lambda)
+@kernel function get_gain_gpu!(nodes_gain::AbstractVector{T}, nodes_sum::AbstractArray{T,2}, nodes, lambda::T) where {T}
     n_idx = @index(Global)
     node = nodes[n_idx]
     @inbounds p1 = nodes_sum[1, node]
     @inbounds p2 = nodes_sum[2, node]
     @inbounds w = nodes_sum[3, node]
-    @inbounds nodes_gain[node] = p1^2 / (p2 + lambda * w + 1e-8)
+    @inbounds nodes_gain[node] = p1^2 / (p2 + lambda * w + T(1e-8))
 end
 

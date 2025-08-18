@@ -205,7 +205,7 @@ end
         p_g1 = nodes_sum[1, node]
         p_g2 = nodes_sum[2, node]
         p_w  = nodes_sum[3, node]
-            gain_p = p_g1^2 / (p_g2 + lambda * p_w + 1e-8)
+            gain_p = p_g1^2 / (p_g2 + lambda * p_w + T(1e-8))
         
         for f in 1:nfeats
             f_w = hR[3, nbins, f, node]
@@ -217,8 +217,8 @@ end
                     l_g2 = hL[2, b, f, node]
                     r_g1 = p_g1 - l_g1
                     r_g2 = p_g2 - l_g2
-                        gain_l = l_g1^2 / (l_g2 + lambda * l_w + 1e-8)
-                        gain_r = r_g1^2 / (r_g2 + lambda * r_w + 1e-8)
+                        gain_l = l_g1^2 / (l_g2 + lambda * l_w + T(1e-8))
+                        gain_r = r_g1^2 / (r_g2 + lambda * r_w + T(1e-8))
                     g = gain_l + gain_r - gain_p
                     if g > g_best
                         g_best = g
@@ -341,7 +341,7 @@ function update_hist_gpu!(
     find_split! = find_best_split_kernel_parallel!(backend)
     find_split!(
         gains, bins, feats, hL, hR, nodes_sum_gpu, active_nodes,
-        params.lambda, params.min_weight;
+        eltype(gains)(params.lambda), eltype(gains)(params.min_weight);
         ndrange = n_active
     )
     
