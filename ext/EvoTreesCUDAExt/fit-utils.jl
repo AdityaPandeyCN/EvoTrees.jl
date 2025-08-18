@@ -317,25 +317,17 @@ function update_hist_gpu!(
         hist_is! = hist_kernel_is!(backend)
         hist_is!(h∇, ∇, x_bin, nidx, js, is; ndrange = (length(is), length(js)))
     else
-        parent_nodes = active_nodes
-        fill_children! = fill_children_nodes_kernel!(backend)
-        fill_children!(left_nodes_buf, right_nodes_buf, parent_nodes; ndrange = n_active)
-
+        # Build histograms for the current active nodes (parents to split now)
         zero_nodes! = zero_node_hist_kernel!(backend)
-        zero_nodes!(h∇, left_nodes_buf; ndrange = (n_active, size(h∇, 3), size(h∇, 2)))
-        zero_nodes!(h∇, right_nodes_buf; ndrange = (n_active, size(h∇, 3), size(h∇, 2)))
+        zero_nodes!(h∇, active_nodes; ndrange = (n_active, size(h∇, 3), size(h∇, 2)))
 
         target_mask_buf .= 0
         fill_mask! = fill_mask_kernel!(backend)
-        fill_mask!(target_mask_buf, left_nodes_buf; ndrange = n_active)
+        fill_mask!(target_mask_buf, active_nodes; ndrange = n_active)
 
         hist_selective_mask_is! = hist_kernel_selective_mask_is!(backend)
         hist_selective_mask_is!(h∇, ∇, x_bin, nidx, js, target_mask_buf, is;
                                        ndrange = (length(is), length(js)))
-        
-        subtract_hist! = subtract_hist_kernel!(backend)
-        subtract_hist!(h∇, parent_nodes, left_nodes_buf, right_nodes_buf;
-                       ndrange = (n_active, size(h∇, 3), size(h∇, 2)))
     end
 
     hL .= 0
@@ -349,7 +341,7 @@ function update_hist_gpu!(
     find_split! = find_best_split_kernel_parallel!(backend)
     find_split!(
         gains, bins, feats, hL, hR, nodes_sum_gpu, active_nodes,
-        params.lambda + 1e-8, params.min_weight;
+        params.lambda, params.min_weight;
         ndrange = n_active
     )
     

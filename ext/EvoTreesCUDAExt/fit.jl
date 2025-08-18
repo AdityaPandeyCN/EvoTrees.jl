@@ -200,7 +200,7 @@ end
         tree_pred[1, child_r] = - (nodes_sum[1, child_r]) / (nodes_sum[2, child_r] + lambda * nodes_sum[3, child_r] + ϵ)
     else
         g, h, w = nodes_sum[1, node], nodes_sum[2, node], nodes_sum[3, node]
-        if w <= 0.0 || h + lambda <= 0.0
+        if w <= 0.0 || h + lambda * w <= 0.0
             tree_pred[1, node] = 0.0f0
         else
             tree_pred[1, node] = -g / (h + lambda * w + 1e-8)
