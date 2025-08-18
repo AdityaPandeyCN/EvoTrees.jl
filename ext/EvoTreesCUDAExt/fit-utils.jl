@@ -330,8 +330,6 @@ function update_hist_gpu!(
                                        ndrange = (length(is), length(js)))
     end
 
-    hL .= 0
-    hR .= 0
     scan_serial! = scan_hist_kernel_serial!(backend)
     scan_serial!(hL, hR, h∇, active_nodes; ndrange = (n_active, size(h∇, 3)))
 
@@ -345,7 +343,6 @@ function update_hist_gpu!(
         ndrange = n_active
     )
     
-    KernelAbstractions.synchronize(backend)
     return nothing
 end
 
