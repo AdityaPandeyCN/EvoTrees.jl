@@ -53,12 +53,11 @@ function grow_tree!(
     tree_split_gpu = KernelAbstractions.zeros(backend, Bool, length(tree.split))
     tree_cond_bin_gpu = KernelAbstractions.zeros(backend, UInt8, length(tree.cond_bin))
     tree_feat_gpu = KernelAbstractions.zeros(backend, Int32, length(tree.feat))
-    tree_gain_gpu = KernelAbstractions.zeros(backend, Float32, length(tree.gain))
+    tree_gain_gpu = KernelAbstractions.zeros(backend, Float64, length(tree.gain))
     tree_pred_gpu = KernelAbstractions.zeros(backend, Float32, size(tree.pred, 1), size(tree.pred, 2))
 
     max_nodes_total = 2^(params.max_depth + 1)
     nodes_sum_gpu = KernelAbstractions.zeros(backend, Float32, 3, max_nodes_total)
-    # removed nodes_gain_gpu to reduce memory traffic
 
     max_nodes_level = 2^params.max_depth
     anodes_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level)
@@ -71,9 +70,11 @@ function grow_tree!(
     
     nidx .= 1
     
-    # compute root sums on GPU from hist scan of depth 1
-    nsamples = Float32(length(is_gpu))
-    view(anodes_gpu, 1:1) .= 1
+    # Initialize root node
+    anodes_gpu[1] = 1
+    n_active = 1
+    
+    # Compute root histograms and sums
     update_hist_gpu!(
         h∇, h∇L, h∇R,
         best_gain_gpu, best_bin_gpu, best_feat_gpu,
@@ -81,72 +82,72 @@ function grow_tree!(
         1, view(anodes_gpu, 1:1), nodes_sum_gpu, params,
         left_nodes_buf, right_nodes_buf, target_mask_buf
     )
-    # removed get_gain_gpu! kernel call
-
-    n_active = 1
+    
+    # Root gain not needed explicitly; proceed to depth loop
 
     for depth in 1:params.max_depth
         !iszero(n_active) || break
         
         n_nodes_level = 2^(depth - 1)
-        active_nodes_full = view(anodes_gpu, 1:n_nodes_level)
+        active_nodes = view(anodes_gpu, 1:n_active)
         
-        if n_active < n_nodes_level
-            view(anodes_gpu, n_active+1:n_nodes_level) .= 0
-        end
-
-        view_gain = view(best_gain_gpu, 1:n_nodes_level)
-        view_bin  = view(best_bin_gpu, 1:n_nodes_level)
-        view_feat = view(best_feat_gpu, 1:n_nodes_level)
+        view_gain = view(best_gain_gpu, 1:n_active)
+        view_bin  = view(best_bin_gpu, 1:n_active)
+        view_feat = view(best_feat_gpu, 1:n_active)
         
+        # For depth > 1, update histograms with subtraction trick
         if depth > 1
             update_hist_gpu!(
                 h∇, h∇L, h∇R,
                 view_gain, view_bin, view_feat,
                 ∇, x_bin, nidx, js_gpu, is_gpu,
-                depth, view(active_nodes_full, 1:n_active), nodes_sum_gpu, params,
+                depth, active_nodes, nodes_sum_gpu, params,
                 left_nodes_buf, right_nodes_buf, target_mask_buf
             )
         end
 
+        # Reset next active counter
         n_next_active_gpu .= 0
-        view_gain_act  = view(view_gain, 1:n_active)
-        view_bin_act   = view(view_bin, 1:n_active)
-        view_feat_act  = view(view_feat, 1:n_active)
-
-        active_nodes_act = view(active_nodes_full, 1:n_active)
-
+        
+        # Apply splits for active nodes
         apply_splits_kernel!(backend)(
             tree_split_gpu, tree_cond_bin_gpu, tree_feat_gpu, tree_gain_gpu, tree_pred_gpu,
             nodes_sum_gpu,
             n_next_gpu, n_next_active_gpu,
-            view_gain_act, view_bin_act, view_feat_act,
+            view_gain, view_bin, view_feat,
             h∇L,
-            active_nodes_act,
+            active_nodes,
             depth, params.max_depth, Float32(params.lambda), Float32(params.gamma);
             ndrange = n_active
         )
+        KernelAbstractions.synchronize(backend)
         
+        # Get number of active nodes for next iteration
         n_active = Int(Array(n_next_active_gpu)[1])
+        
+        # Copy next active nodes
         if n_active > 0
             copyto!(view(anodes_gpu, 1:n_active), view(n_next_gpu, 1:n_active))
         end
 
+        # Update node indices for next depth
         if depth < params.max_depth && n_active > 0
             update_nodes_idx_kernel!(backend)(
                 nidx, is_gpu, x_bin, tree_feat_gpu, tree_cond_bin_gpu, feattypes_gpu;
                 ndrange = length(is_gpu)
             )
+            KernelAbstractions.synchronize(backend)
         end
     end
 
+    # Copy results back to CPU
     copyto!(tree.split, Array(tree_split_gpu))
     copyto!(tree.cond_bin, Array(tree_cond_bin_gpu))
     copyto!(tree.feat, Array(tree_feat_gpu))
-    tree.gain .= Array(tree_gain_gpu)
-
+    copyto!(tree.gain, Array(tree_gain_gpu))
     copyto!(tree.pred, Array(tree_pred_gpu .* Float32(params.eta)))
     
+    # Set float conditions from bins
     for i in eachindex(tree.split)
         if tree.split[i]
             tree.cond_float[i] = edges[tree.feat[i]][tree.cond_bin[i]]
@@ -166,43 +167,59 @@ end
     depth, max_depth, lambda, gamma
 )
     n_idx = @index(Global)
-    node = active_nodes[n_idx]
-
-    # typed epsilon to avoid Float64 promotion
-    epsv = eltype(tree_pred)(1e-8)
-
-    @inbounds if depth < max_depth && best_gain[n_idx] > gamma
-        tree_split[node] = true
-        tree_cond_bin[node] = best_bin[n_idx]
-        tree_feat[node] = best_feat[n_idx]
-        tree_gain[node] = best_gain[n_idx]
-
-        child_l, child_r = node << 1, (node << 1) + 1
-        feat, bin = Int(tree_feat[node]), Int(tree_cond_bin[node])
-
-        nodes_sum[1, child_l] = h∇L[1, bin, feat, node]
-        nodes_sum[2, child_l] = h∇L[2, bin, feat, node]
-        nodes_sum[3, child_l] = h∇L[3, bin, feat, node]
+    
+    @inbounds if n_idx <= length(active_nodes)
+        node = active_nodes[n_idx]
         
-        nodes_sum[1, child_r] = nodes_sum[1, node] - nodes_sum[1, child_l]
-        nodes_sum[2, child_r] = nodes_sum[2, node] - nodes_sum[2, child_l]
-        nodes_sum[3, child_r] = nodes_sum[3, node] - nodes_sum[3, child_l]
+        if node > 0 && depth < max_depth && best_gain[n_idx] > gamma
+            # This node will split
+            tree_split[node] = true
+            tree_cond_bin[node] = best_bin[n_idx]
+            tree_feat[node] = best_feat[n_idx]
+            tree_gain[node] = best_gain[n_idx]
 
-        # removed nodes_gain writes to reduce memory traffic
-        
-        idx_base = Atomix.@atomic n_next_active[1] += 2
-        n_next[idx_base - 1] = child_l
-        n_next[idx_base] = child_r
+            child_l = node << 1
+            child_r = child_l + 1
+            feat = Int(tree_feat[node])
+            bin = Int(tree_cond_bin[node])
 
-        # compute leaf prediction at this split for both children
-        tree_pred[1, child_l] = - (nodes_sum[1, child_l]) / (nodes_sum[2, child_l] + lambda * nodes_sum[3, child_l] + epsv)
-        tree_pred[1, child_r] = - (nodes_sum[1, child_r]) / (nodes_sum[2, child_r] + lambda * nodes_sum[3, child_r] + epsv)
-    else
-        g, h, w = nodes_sum[1, node], nodes_sum[2, node], nodes_sum[3, node]
-        if w <= zero(w) || h + lambda * w <= zero(h)
-            tree_pred[1, node] = 0.0f0
+            # Set children sums from histogram
+            nodes_sum[1, child_l] = h∇L[1, bin, feat, node]
+            nodes_sum[2, child_l] = h∇L[2, bin, feat, node]
+            nodes_sum[3, child_l] = h∇L[3, bin, feat, node]
+            
+            nodes_sum[1, child_r] = nodes_sum[1, node] - nodes_sum[1, child_l]
+            nodes_sum[2, child_r] = nodes_sum[2, node] - nodes_sum[2, child_l]
+            nodes_sum[3, child_r] = nodes_sum[3, node] - nodes_sum[3, child_l]
+
+            # Compute local values for children (avoid writing back gains array)
+            p1_l = nodes_sum[1, child_l]
+            p2_l = nodes_sum[2, child_l]
+            w_l = nodes_sum[3, child_l]
+            epsv = eltype(tree_pred)(1e-8)
+            
+            p1_r = nodes_sum[1, child_r]
+            p2_r = nodes_sum[2, child_r]
+            w_r = nodes_sum[3, child_r]
+            
+            # Add children to next active nodes
+            idx_base = Atomix.@atomic n_next_active[1] += 2
+            n_next[idx_base - 1] = child_l
+            n_next[idx_base] = child_r
+
+            # Compute predictions for children
+            tree_pred[1, child_l] = -p1_l / (p2_l + lambda * w_l + epsv)
+            tree_pred[1, child_r] = -p1_r / (p2_r + lambda * w_r + epsv)
         else
-            tree_pred[1, node] = -g / (h + lambda * w + epsv)
+            # This is a leaf node
+            g = nodes_sum[1, node]
+            h = nodes_sum[2, node]
+            w = nodes_sum[3, node]
+            if w > 0.0 && h + lambda * w > 0.0
+                tree_pred[1, node] = -g / (h + lambda * w + epsv)
+            else
+                tree_pred[1, node] = 0.0f0
+            end
         end
     end
 end

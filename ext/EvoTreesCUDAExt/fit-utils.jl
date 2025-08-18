@@ -27,146 +27,32 @@ using Atomix
     end
 end
 
-@kernel function fill_mask_kernel!(mask::AbstractVector{UInt8}, @Const(nodes))
-    i = @index(Global)
-    @inbounds if i <= length(nodes)
-        node = nodes[i]
-        if node > 0 && node <= length(mask)
-            mask[node] = UInt8(1)
-        end
-    end
-end
-
-# removed unused zero_node_hist_kernel!
-
-@kernel function zero_node_hist_kernel_js!(h∇::AbstractArray{T,4}, @Const(nodes), @Const(js)) where {T}
-    idx, j_idx, bin = @index(Global, NTuple)
-    @inbounds if idx <= length(nodes) && j_idx <= length(js) && bin <= size(h∇, 2)
-        node = nodes[idx]
-        if node > 0
-            feat = js[j_idx]
-            h∇[1, bin, feat, node] = zero(T)
-            h∇[2, bin, feat, node] = zero(T)
-            h∇[3, bin, feat, node] = zero(T)
-        end
-    end
-end
-
-# removed unused scan_hist_kernel_serial!
-
-@kernel function scan_hist_kernel_serial_js!(
-    hL::AbstractArray{T,4},
-    hR::AbstractArray{T,4},
-    @Const(h∇),
-    @Const(active_nodes),
-    @Const(js),
-) where {T}
-    n_idx, f_idx = @index(Global, NTuple)
-    
-    nbins = size(h∇, 2)
-    
-    @inbounds if n_idx <= length(active_nodes) && f_idx <= length(js)
-        node = active_nodes[n_idx]
-        if node > 0
-            f = js[f_idx]
-            s1 = zero(T); s2 = zero(T); s3 = zero(T)
-            @inbounds for bin in 1:nbins
-                s1 += h∇[1, bin, f, node]
-                s2 += h∇[2, bin, f, node]
-                s3 += h∇[3, bin, f, node]
-                hL[1, bin, f, node] = s1
-                hL[2, bin, f, node] = s2
-                hL[3, bin, f, node] = s3
-            end
-            hR[1, nbins, f, node] = s1
-            hR[2, nbins, f, node] = s2
-            hR[3, nbins, f, node] = s3
-        end
-    end
-end
-
-# removed unused find_best_split_kernel_parallel! (non-js variant)
-
-@kernel function find_best_split_kernel_parallel_js!(
-    gains::AbstractVector{T},
-    bins::AbstractVector{Int32},
-    feats::AbstractVector{Int32},
-    @Const(hL),
-    @Const(hR),
-    @Const(nodes_sum),
-    @Const(active_nodes),
-    @Const(js),
-    lambda::T,
-    min_weight::T,
-) where {T}
-    n_idx = @index(Global)
-    
-    @inbounds if n_idx <= length(active_nodes)
-        node = active_nodes[n_idx]
-        
-        if node == 0
-            gains[n_idx] = T(-Inf)
-            bins[n_idx] = Int32(0)
-            feats[n_idx] = Int32(0)
-        else
-        nbins = size(hL, 2)
-        
-        g_best = T(-Inf)
-        b_best = Int32(0)
-        f_best = Int32(0)
-        
-        p_g1 = nodes_sum[1, node]
-        p_g2 = nodes_sum[2, node]
-        p_w  = nodes_sum[3, node]
-            gain_p = p_g1^2 / (p_g2 + lambda * p_w + T(1e-8))
-        
-        for f_idx in 1:length(js)
-            f = js[f_idx]
-            f_w = hR[3, nbins, f, node]
-            # Early skip if the total weight cannot produce a valid split
-            if f_w < min_weight + min_weight
-                continue
-            end
-            for b in 1:(nbins - 1)
-                l_w = hL[3, b, f, node]
-                r_w = f_w - l_w
-                if l_w >= min_weight && r_w >= min_weight
-                    l_g1 = hL[1, b, f, node]
-                    l_g2 = hL[2, b, f, node]
-                    r_g1 = p_g1 - l_g1
-                    r_g2 = p_g2 - l_g2
-                        gain_l = l_g1^2 / (l_g2 + lambda * l_w + T(1e-8))
-                        gain_r = r_g1^2 / (r_g2 + lambda * r_w + T(1e-8))
-                    g = gain_l + gain_r - gain_p
-                    if g > g_best
-                        g_best = g
-                        b_best = Int32(b)
-                        f_best = Int32(f)
-                    end
-                end
-            end
-        end
-        
-        gains[n_idx] = g_best
-        bins[n_idx] = b_best
-        feats[n_idx] = f_best
-        end
-    end
-end
-
-@kernel function hist_kernel_is!(
+# Single histogram kernel for all nodes at current depth
+@kernel function hist_kernel_depth!(
     h∇::AbstractArray{T,4},
     @Const(∇),
     @Const(x_bin),
     @Const(nidx),
     @Const(js),
     @Const(is),
+    @Const(nodes_at_depth),  # Which nodes we're building histograms for
 ) where {T}
     i, j = @index(Global, NTuple)
     @inbounds if i <= length(is) && j <= length(js)
         obs = is[i]
         node = nidx[obs]
-        if node > 0
+        
+        # Check if this observation's node is one we're computing
+        # (This is more efficient than a mask lookup)
+        valid = false
+        for k in 1:length(nodes_at_depth)
+            if node == nodes_at_depth[k]
+                valid = true
+                break
+            end
+        end
+        
+        if valid
             jdx = js[j]
             bin = x_bin[obs, jdx]
             if bin > 0 && bin <= size(h∇, 2)
@@ -178,94 +64,162 @@ end
     end
 end
 
-# removed unused hist_kernel_selective_mask_is!
-
-@kernel function filter_is_active_kernel!(is_out, out_len, @Const(is), @Const(nidx), @Const(target_mask))
-    i = @index(Global)
-    @inbounds if i <= length(is)
-        obs = is[i]
-        node = nidx[obs]
-        if node > 0 && target_mask[node] != 0
-            idx = Atomix.@atomic out_len[1] += 1
-            is_out[idx] = obs
-        end
-    end
-end
-
-@kernel function fill_node_index_map_kernel!(map::AbstractVector{Int32}, @Const(active_nodes))
-    i = @index(Global)
-    @inbounds if i <= length(active_nodes)
-        node = active_nodes[i]
-        if node > 0 && node <= length(map)
-            map[node] = Int32(i)
-        end
-    end
-end
-
-@kernel function count_by_node_kernel!(counts::AbstractVector{Int32}, @Const(is), @Const(nidx), @Const(node_map), n_used::Int32)
-    i = @index(Global)
-    @inbounds if i <= n_used
-        obs = is[i]
-        pos = node_map[nidx[obs]]
-        if pos > 0
-            Atomix.@atomic counts[pos] += 1
-        end
-    end
-end
-
-@kernel function gather_by_node_kernel!(grouped_is, cursors::AbstractVector{Int32}, @Const(is), @Const(nidx), @Const(node_map), @Const(offsets), n_used::Int32)
-    i = @index(Global)
-    @inbounds if i <= n_used
-        obs = is[i]
-        pos = node_map[nidx[obs]]
-        if pos > 0
-            idx = Atomix.@atomic cursors[pos] += 1
-            base = offsets[pos]
-            grouped_is[base + idx] = obs
-        end
-    end
-end
-
-@kernel function hist_grouped_kernel_js!(
+# Optimized histogram kernel using node range (for contiguous nodes)
+@kernel function hist_kernel_range!(
     h∇::AbstractArray{T,4},
     @Const(∇),
     @Const(x_bin),
-    @Const(grouped_is),
+    @Const(nidx),
     @Const(js),
-    @Const(active_nodes),
-    @Const(offsets),
-    @Const(counts)
+    @Const(is),
+    node_start::Int32,
+    node_end::Int32,
+    even_only::Int32,
 ) where {T}
-    n_idx, f_idx = @index(Global, NTuple)
-    @inbounds if n_idx <= length(active_nodes) && f_idx <= length(js)
-        node = active_nodes[n_idx]
-        feat = js[f_idx]
-        start = offsets[n_idx]
-        len = counts[n_idx]
-        stop = start + len - 1
-        @inbounds for p in start:stop
-            obs = grouped_is[p]
-            bin = x_bin[obs, feat]
+    i, j = @index(Global, NTuple)
+    @inbounds if i <= length(is) && j <= length(js)
+        obs = is[i]
+        node = nidx[obs]
+        
+        if node >= node_start && node <= node_end
+            if even_only != 0 && (node & 1) != 0
+                return
+            end
+            jdx = js[j]
+            bin = x_bin[obs, jdx]
             if bin > 0 && bin <= size(h∇, 2)
-                Atomix.@atomic h∇[1, bin, feat, node] += ∇[1, obs]
-                Atomix.@atomic h∇[2, bin, feat, node] += ∇[2, obs]
-                Atomix.@atomic h∇[3, bin, feat, node] += ∇[3, obs]
+                Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, obs]
+                Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, obs]
+                Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, obs]
             end
         end
     end
 end
 
-@kernel function write_nodes_sum_from_scan!(nodes_sum, @Const(hR), @Const(active_nodes), @Const(js))
-    n_idx = @index(Global)
-    @inbounds if n_idx <= length(active_nodes)
-        node = active_nodes[n_idx]
-        if node > 0
-            nbins = size(hR, 2)
-            f = js[1]
-            nodes_sum[1, node] = hR[1, nbins, f, node]
-            nodes_sum[2, node] = hR[2, nbins, f, node]
-            nodes_sum[3, node] = hR[3, nbins, f, node]
+@kernel function subtract_hist_kernel!(
+    h∇::AbstractArray{T,4},
+    parent_start::Int32,
+    parent_end::Int32,
+    @Const(js),
+) where {T}
+    parent_idx, f_idx, bin = @index(Global, NTuple)
+    
+    @inbounds if parent_idx <= (parent_end - parent_start + 1) && f_idx <= length(js) && bin <= size(h∇, 2)
+        parent = parent_start + parent_idx - 1
+        left = parent << 1
+        right = left + 1
+        feat = js[f_idx]
+        
+        # Right = Parent - Left
+        h∇[1, bin, feat, right] = h∇[1, bin, feat, parent] - h∇[1, bin, feat, left]
+        h∇[2, bin, feat, right] = h∇[2, bin, feat, parent] - h∇[2, bin, feat, left]
+        h∇[3, bin, feat, right] = h∇[3, bin, feat, parent] - h∇[3, bin, feat, left]
+    end
+end
+
+@kernel function scan_hist_kernel!(
+    hL::AbstractArray{T,4},
+    hR::AbstractArray{T,4},
+    @Const(h∇),
+    node_start::Int32,
+    node_end::Int32,
+    @Const(js),
+) where {T}
+    node_idx, f_idx = @index(Global, NTuple)
+    nbins = size(h∇, 2)
+    
+    @inbounds if node_idx <= (node_end - node_start + 1) && f_idx <= length(js)
+        node = node_start + node_idx - 1
+        f = js[f_idx]
+        
+        s1 = zero(T); s2 = zero(T); s3 = zero(T)
+        for bin in 1:nbins
+            s1 += h∇[1, bin, f, node]
+            s2 += h∇[2, bin, f, node]
+            s3 += h∇[3, bin, f, node]
+            hL[1, bin, f, node] = s1
+            hL[2, bin, f, node] = s2
+            hL[3, bin, f, node] = s3
         end
+        
+        hR[1, nbins, f, node] = s1
+        hR[2, nbins, f, node] = s2
+        hR[3, nbins, f, node] = s3
+    end
+end
+
+@kernel function find_best_split_kernel!(
+    gains::AbstractVector{T},
+    bins::AbstractVector{Int32},
+    feats::AbstractVector{Int32},
+    @Const(hL),
+    @Const(hR),
+    @Const(nodes_sum),
+    node_start::Int32,
+    node_end::Int32,
+    @Const(js),
+    lambda::T,
+    min_weight::T,
+) where {T}
+    node_idx = @index(Global)
+    
+    @inbounds if node_idx <= (node_end - node_start + 1)
+        node = node_start + node_idx - 1
+        idx = node_idx  # Output index
+        
+        nbins = size(hL, 2)
+        g_best = T(-Inf)
+        b_best = Int32(0)
+        f_best = Int32(0)
+        
+        p_g1 = nodes_sum[1, node]
+        p_g2 = nodes_sum[2, node]
+        p_w  = nodes_sum[3, node]
+        gain_p = p_g1^2 / (p_g2 + lambda * p_w + T(1e-8))
+        
+        for f_idx in 1:length(js)
+            f = js[f_idx]
+            f_w = hR[3, nbins, f, node]
+            
+            if f_w < 2 * min_weight
+                continue
+            end
+            
+            for b in 1:(nbins - 1)
+                l_w = hL[3, b, f, node]
+                r_w = f_w - l_w
+                if l_w >= min_weight && r_w >= min_weight
+                    l_g1 = hL[1, b, f, node]
+                    l_g2 = hL[2, b, f, node]
+                    r_g1 = p_g1 - l_g1
+                    r_g2 = p_g2 - l_g2
+                    gain_l = l_g1^2 / (l_g2 + lambda * l_w + T(1e-8))
+                    gain_r = r_g1^2 / (r_g2 + lambda * r_w + T(1e-8))
+                    g = gain_l + gain_r - gain_p
+                    if g > g_best
+                        g_best = g
+                        b_best = Int32(b)
+                        f_best = Int32(f)
+                    end
+                end
+            end
+        end
+        
+        gains[idx] = g_best
+        bins[idx] = b_best
+        feats[idx] = f_best
+    end
+end
+
+@kernel function write_nodes_sum_range!(nodes_sum, @Const(hR), node_start::Int32, node_end::Int32, @Const(js))
+    idx = @index(Global)
+    @inbounds if idx <= (node_end - node_start + 1)
+        node = node_start + idx - 1
+        nbins = size(hR, 2)
+        f = js[1]
+        nodes_sum[1, node] = hR[1, nbins, f, node]
+        nodes_sum[2, node] = hR[2, nbins, f, node]
+        nodes_sum[3, node] = hR[3, nbins, f, node]
     end
 end
 
@@ -275,97 +229,79 @@ function update_hist_gpu!(
 )
     backend = KernelAbstractions.get_backend(h∇)
     
-    n_active = length(active_nodes)
-    
     profile = get(ENV, "EVO_PROF", "0") == "1"
     t_hist = 0.0
     t_scan = 0.0
-    t_write = 0.0
     t_find = 0.0
     
+    # Nodes at this depth level are contiguous
+    # At depth d, nodes range from 2^(d-1) to 2^d - 1
+    nodes_at_depth_start = Int32(2^(depth - 1))
+    nodes_at_depth_end = Int32(2^depth - 1)
+    n_nodes = nodes_at_depth_end - nodes_at_depth_start + 1
+    
     if depth == 1
+        # Root node - just compute its histogram
         h∇ .= 0
-        hist_is! = hist_kernel_is!(backend)
+        hist_range! = hist_kernel_range!(backend)
         t_hist += @elapsed begin
-            hist_is!(h∇, ∇, x_bin, nidx, js, is; ndrange = (length(is), length(js)), workgroupsize=(256,1))
+                         hist_range!(h∇, ∇, x_bin, nidx, js, is, Int32(1), Int32(1), Int32(0); 
+                        ndrange = (length(is), length(js)))
             KernelAbstractions.synchronize(backend)
         end
     else
-        # Build histograms for the current active nodes (parents to split now)
-        zero_nodes_js! = zero_node_hist_kernel_js!(backend)
+        # For depth > 1, use histogram subtraction trick
+        # Parent nodes are at previous level
+        parent_start = Int32(2^(depth - 2))
+        parent_end = Int32(2^(depth - 1) - 1)
+        
+        # Zero out children histograms
+        h∇[:, :, :, nodes_at_depth_start:nodes_at_depth_end] .= 0
+        
+        # Build histograms only for left children (even nodes at current depth)
+        hist_range! = hist_kernel_range!(backend)
         t_hist += @elapsed begin
-            zero_nodes_js!(h∇, active_nodes, js; ndrange = (n_active, length(js), size(h∇, 2)), workgroupsize=(32,4,4))
-        target_mask_buf .= 0
-        fill_mask! = fill_mask_kernel!(backend)
-            fill_mask!(target_mask_buf, active_nodes; ndrange = n_active, workgroupsize=256)
-
-            # compact observations belonging to current active nodes
-            is_active = KernelAbstractions.zeros(backend, eltype(is), length(is))
-            is_active_len = KernelAbstractions.zeros(backend, Int32, 1)
-            filter_is_act! = filter_is_active_kernel!(backend)
-            filter_is_act!(is_active, is_active_len, is, nidx, target_mask_buf; ndrange = length(is), workgroupsize=256)
+            # Left children are even nodes: 2^(d-1), 2^(d-1)+2, ...
+            # We can optimize by only computing for observations that belong to left children
+            # For now, compute for all and filter by node
+                         hist_range!(h∇, ∇, x_bin, nidx, js, is, 
+                        nodes_at_depth_start, nodes_at_depth_end, Int32(1);
+                        ndrange = (length(is), length(js))
             KernelAbstractions.synchronize(backend)
-            n_is_act = Int(Array(is_active_len)[1])
-
-            # build node index map for active_nodes
-            # node_index_map_buf is provided in cache; reuse and zero it
-            # Fallback: allocate if missing (should not happen if cache provides it)
-            node_index_map = KernelAbstractions.zeros(backend, Int32, size(h∇, 4))
-            node_index_map .= 0
-            fill_map! = fill_node_index_map_kernel!(backend)
-            fill_map!(node_index_map, active_nodes; ndrange = n_active, workgroupsize=256)
-
-            # count and group observations by node
-            counts = KernelAbstractions.zeros(backend, Int32, n_active)
-            count_by_node! = count_by_node_kernel!(backend)
-            count_by_node!(counts, is_active, nidx, node_index_map, Int32(n_is_act); ndrange = n_is_act, workgroupsize=256)
-            KernelAbstractions.synchronize(backend)
-            counts_host = Array(counts)
-            offsets_host = similar(counts_host)
-            total = 0
-            @inbounds for i in eachindex(counts_host)
-                offsets_host[i] = total + 1
-                total += counts_host[i]
-            end
-            offsets = KernelAbstractions.zeros(backend, Int32, n_active)
-            KernelAbstractions.copyto!(offsets, offsets_host)
-            cursors = KernelAbstractions.zeros(backend, Int32, n_active)
-            grouped_is = KernelAbstractions.zeros(backend, eltype(is), total)
-            gather_by_node! = gather_by_node_kernel!(backend)
-            gather_by_node!(grouped_is, cursors, is_active, nidx, node_index_map, offsets, Int32(n_is_act); ndrange = n_is_act, workgroupsize=256)
-            KernelAbstractions.synchronize(backend)
-
-            # histogram over grouped observations per (node, feature)
-            hist_grouped! = hist_grouped_kernel_js!(backend)
-            hist_grouped!(h∇, ∇, x_bin, grouped_is, js, active_nodes, offsets, counts; ndrange = (n_active, length(js)), workgroupsize=(1,64))
+            
+            # Subtract to get right children
+            subtract! = subtract_hist_kernel!(backend)
+            n_parents = parent_end - parent_start + 1
+            subtract!(h∇, parent_start, parent_end, js; 
+                     ndrange = (n_parents, length(js), size(h∇, 2)))
             KernelAbstractions.synchronize(backend)
         end
     end
-
-    scan_serial_js! = scan_hist_kernel_serial_js!(backend)
+    
+    # Scan for cumulative histograms
+    scan! = scan_hist_kernel!(backend)
     t_scan += @elapsed begin
-        scan_serial_js!(hL, hR, h∇, active_nodes, js; ndrange = (n_active, length(js)), workgroupsize=(64,4))
+        scan!(hL, hR, h∇, nodes_at_depth_start, nodes_at_depth_end, js; 
+              ndrange = (n_nodes, length(js)))
         KernelAbstractions.synchronize(backend)
     end
+    
+        # Update nodes_sum from first feature on GPU
+    write_nodes_sum_rng! = write_nodes_sum_range!(backend)
+    write_nodes_sum_rng!(nodes_sum_gpu, hR, nodes_at_depth_start, nodes_at_depth_end, js; ndrange = n_nodes)
 
-    write_nodes_sum! = write_nodes_sum_from_scan!(backend)
-    t_write += @elapsed begin
-        write_nodes_sum!(nodes_sum_gpu, hR, active_nodes, js; ndrange = n_active, workgroupsize=256)
-        KernelAbstractions.synchronize(backend)
-    end
-
-    find_split_js! = find_best_split_kernel_parallel_js!(backend)
+    # Find best splits
+    find_split! = find_best_split_kernel!(backend)
     t_find += @elapsed begin
-        find_split_js!(
-            gains, bins, feats, hL, hR, nodes_sum_gpu, active_nodes, js,
-            eltype(gains)(params.lambda), eltype(gains)(params.min_weight);
-            ndrange = n_active, workgroupsize=256
-        )
+        find_split!(gains, bins, feats, hL, hR, nodes_sum_gpu,
+                   nodes_at_depth_start, nodes_at_depth_end, js,
+                   eltype(gains)(params.lambda), eltype(gains)(params.min_weight);
+                   ndrange = n_nodes)
         KernelAbstractions.synchronize(backend)
     end
     
     if profile
-        @info "gpu_prof:update_hist" depth=depth n_active=n_active t_hist=t_hist t_scan=t_scan t_write=t_write t_find=t_find
+        @info "gpu_prof:update_hist" depth=depth n_nodes=n_nodes t_hist=t_hist t_scan=t_scan t_find=t_find
     end
     
     return nothing
