@@ -50,7 +50,8 @@ end
     end
 end
 
-@kernel function scan_hist_kernel_serial!(
+// removed: scan_hist_kernel_serial! (replaced by fused split kernel)
+
     hL::AbstractArray{T,4},
     hR::AbstractArray{T,4},
     @Const(h∇),
@@ -151,6 +152,77 @@ end
     end
 end
 
+@kernel function find_best_split_from_hist_kernel!(
+    gains::AbstractVector{T},
+    bins::AbstractVector{Int32},
+    feats::AbstractVector{Int32},
+    @Const(h∇),
+    nodes_sum,
+    @Const(active_nodes),
+    @Const(js),
+    lambda::T,
+    min_weight::T,
+) where {T}
+    n_idx = @index(Global)
+    
+    @inbounds if n_idx <= length(active_nodes)
+        node = active_nodes[n_idx]
+        if node == 0
+            gains[n_idx] = T(-Inf)
+            bins[n_idx] = Int32(0)
+            feats[n_idx] = Int32(0)
+        else
+            nbins = size(h∇, 2)
+            # compute parent sums using first feature (identical across features)
+            f_first = js[1]
+            p_g1 = zero(T); p_g2 = zero(T); p_w = zero(T)
+            @inbounds for b in 1:nbins
+                p_g1 += h∇[1, b, f_first, node]
+                p_g2 += h∇[2, b, f_first, node]
+                p_w  += h∇[3, b, f_first, node]
+            end
+            nodes_sum[1, node] = p_g1
+            nodes_sum[2, node] = p_g2
+            nodes_sum[3, node] = p_w
+            
+            gain_p = p_g1^2 / (p_g2 + lambda * p_w + T(1e-8))
+            
+            g_best = T(-Inf)
+            b_best = Int32(0)
+            f_best = Int32(0)
+            
+            @inbounds for j_idx in 1:length(js)
+                f = js[j_idx]
+                s1 = zero(T); s2 = zero(T); s3 = zero(T)
+                @inbounds for b in 1:(nbins - 1)
+                    s1 += h∇[1, b, f, node]
+                    s2 += h∇[2, b, f, node]
+                    s3 += h∇[3, b, f, node]
+                    l_w = s3
+                    r_w = p_w - l_w
+                    if l_w >= min_weight && r_w >= min_weight
+                        l_g1 = s1
+                        l_g2 = s2
+                        r_g1 = p_g1 - l_g1
+                        r_g2 = p_g2 - l_g2
+                        gain_l = l_g1^2 / (l_g2 + lambda * l_w + T(1e-8))
+                        gain_r = r_g1^2 / (r_g2 + lambda * r_w + T(1e-8))
+                        g = gain_l + gain_r - gain_p
+                        if g > g_best
+                            g_best = g
+                            b_best = Int32(b)
+                            f_best = Int32(f)
+                        end
+                    end
+                end
+            end
+            gains[n_idx] = g_best
+            bins[n_idx] = b_best
+            feats[n_idx] = f_best
+        end
+    end
+end
+
 @kernel function hist_kernel_is_tiled!(
     h∇::AbstractArray{T,4},
     @Const(∇),
@@ -230,7 +302,7 @@ function update_hist_gpu!(
         obs_per_thread = Int32(clamp(div(length(is), 2048), 1, 1024))
         n_tiles = Int(ceil(length(is) / obs_per_thread))
         hist_is_tiled! = hist_kernel_is_tiled!(backend)
-        hist_is_tiled!(h∇, ∇, x_bin, nidx, js, is, obs_per_thread; ndrange = (n_tiles, length(js)))
+        hist_is_tiled!(h∇, ∇, x_bin, nidx, js, is, Int32(64); ndrange = (Int(ceil(length(is) / 64)), length(js)))
     else
         # Build histograms for the current active nodes (parents to split now)
         zero_nodes! = zero_node_hist_kernel!(backend)
@@ -241,20 +313,14 @@ function update_hist_gpu!(
         fill_mask!(target_mask_buf, active_nodes; ndrange = n_active)
 
         # Use tiled kernel to accumulate histograms for active nodes only
-        obs_per_thread = Int32(clamp(div(length(is), 2048), 1, 1024))
-        n_tiles = Int(ceil(length(is) / obs_per_thread))
         hist_selective_mask_is_tiled! = hist_kernel_selective_mask_is_tiled!(backend)
-        hist_selective_mask_is_tiled!(h∇, ∇, x_bin, nidx, js, target_mask_buf, is, obs_per_thread; ndrange = (n_tiles, length(js)))
+        hist_selective_mask_is_tiled!(h∇, ∇, x_bin, nidx, js, target_mask_buf, is, Int32(64); ndrange = (Int(ceil(length(is) / 64)), length(js)))
     end
 
-    # Scan and write node sums in a single kernel
-    scan_serial! = scan_hist_kernel_serial!(backend)
-    scan_serial!(hL, hR, h∇, active_nodes, js; ndrange = (n_active, length(js)))
-
-    # Update nodes_sum_gpu directly from hR in find_best_split kernel
-    find_split! = find_best_split_kernel_parallel!(backend)
+    # Compute best splits directly from histograms, writing nodes_sum
+    find_split! = find_best_split_from_hist_kernel!(backend)
     find_split!(
-        gains, bins, feats, hL, hR, nodes_sum_gpu, active_nodes, js,
+        gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
         eltype(gains)(params.lambda), eltype(gains)(params.min_weight);
         ndrange = n_active
     )

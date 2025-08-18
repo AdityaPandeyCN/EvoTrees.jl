@@ -121,7 +121,7 @@ function grow_tree!(
             nodes_sum_gpu, nodes_gain_gpu,
             n_next_gpu, n_next_active_gpu,
             view_gain_act, view_bin_act, view_feat_act,
-            h∇L,
+            h∇,
             active_nodes_act,
             depth, params.max_depth, Float32(params.lambda), Float32(params.gamma);
             ndrange = n_active
@@ -161,7 +161,7 @@ end
     nodes_sum, nodes_gain,
     n_next, n_next_active,
     best_gain, best_bin, best_feat,
-    h∇L,
+    h∇,
     active_nodes,
     depth, max_depth, lambda, gamma
 )
@@ -180,9 +180,16 @@ end
         child_l, child_r = node << 1, (node << 1) + 1
         feat, bin = Int(tree_feat[node]), Int(tree_cond_bin[node])
 
-        nodes_sum[1, child_l] = h∇L[1, bin, feat, node]
-        nodes_sum[2, child_l] = h∇L[2, bin, feat, node]
-        nodes_sum[3, child_l] = h∇L[3, bin, feat, node]
+        # compute left sums by prefix-sum of h∇ up to bin
+        s1 = zero(eltype(nodes_sum)); s2 = zero(eltype(nodes_sum)); s3 = zero(eltype(nodes_sum))
+        @inbounds for b in 1:bin
+            s1 += h∇[1, b, feat, node]
+            s2 += h∇[2, b, feat, node]
+            s3 += h∇[3, b, feat, node]
+        end
+        nodes_sum[1, child_l] = s1
+        nodes_sum[2, child_l] = s2
+        nodes_sum[3, child_l] = s3
         
         nodes_sum[1, child_r] = nodes_sum[1, node] - nodes_sum[1, child_l]
         nodes_sum[2, child_r] = nodes_sum[2, node] - nodes_sum[2, child_l]
@@ -218,3 +225,4 @@ end
     @inbounds w = nodes_sum[3, node]
     @inbounds nodes_gain[node] = p1^2 / (p2 + lambda * w + T(1e-8))
 end
+
