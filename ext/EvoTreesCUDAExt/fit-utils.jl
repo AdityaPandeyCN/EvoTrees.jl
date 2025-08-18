@@ -82,15 +82,15 @@ end
         node = nidx[obs]
         
         if node >= node_start && node <= node_end
-            if even_only != 0 && (node & 1) != 0
-                return
-            end
-            jdx = js[j]
-            bin = x_bin[obs, jdx]
-            if bin > 0 && bin <= size(h∇, 2)
-                Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, obs]
-                Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, obs]
-                Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, obs]
+            process = (even_only == 0) || ((node & 1) == 0)
+            if process
+                jdx = js[j]
+                bin = x_bin[obs, jdx]
+                if bin > 0 && bin <= size(h∇, 2)
+                    Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, obs]
+                    Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, obs]
+                    Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, obs]
+                end
             end
         end
     end
