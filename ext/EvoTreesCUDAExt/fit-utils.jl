@@ -50,38 +50,6 @@ end
     end
 end
 
-// removed: scan_hist_kernel_serial! (replaced by fused split kernel)
-
-    hL::AbstractArray{T,4},
-    hR::AbstractArray{T,4},
-    @Const(h∇),
-    @Const(active_nodes),
-    @Const(js),
-) where {T}
-    n_idx, j_idx = @index(Global, NTuple)
-    
-    nbins = size(h∇, 2)
-    
-    @inbounds if n_idx <= length(active_nodes) && j_idx <= length(js)
-        node = active_nodes[n_idx]
-        feat = js[j_idx]
-        if node > 0
-            s1 = zero(T); s2 = zero(T); s3 = zero(T)
-            @inbounds for bin in 1:nbins
-                s1 += h∇[1, bin, feat, node]
-                s2 += h∇[2, bin, feat, node]
-                s3 += h∇[3, bin, feat, node]
-                hL[1, bin, feat, node] = s1
-                hL[2, bin, feat, node] = s2
-                hL[3, bin, feat, node] = s3
-            end
-            hR[1, nbins, feat, node] = s1
-            hR[2, nbins, feat, node] = s2
-            hR[3, nbins, feat, node] = s3
-        end
-    end
-end
-
 @kernel function find_best_split_kernel_parallel!(
     gains::AbstractVector{T},
     bins::AbstractVector{Int32},
