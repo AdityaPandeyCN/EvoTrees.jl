@@ -27,74 +27,6 @@ using Atomix
     end
 end
 
-@kernel function hist_kernel!(
-    h∇::AbstractArray{T,4},
-    @Const(∇),
-    @Const(x_bin),
-    @Const(nidx),
-    @Const(js),
-) where {T}
-    i, j = @index(Global, NTuple)
-    @inbounds if i <= size(x_bin, 1) && j <= length(js)
-        node = nidx[i]
-        if node > 0
-            jdx = js[j]
-            bin = x_bin[i, jdx]
-            if bin > 0 && bin <= size(h∇, 2)
-                Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, i]
-                Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, i]
-                Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, i]
-            end
-        end
-    end
-end
-
-@kernel function hist_kernel_selective!(
-    h∇::AbstractArray{T,4},
-    @Const(∇),
-    @Const(x_bin),
-    @Const(nidx),
-    @Const(js),
-    @Const(target_nodes),
-) where {T}
-    i, j = @index(Global, NTuple)
-    @inbounds if i <= size(x_bin, 1) && j <= length(js)
-        node = nidx[i]
-        if node > 0 && node in target_nodes
-            jdx = js[j]
-            bin = x_bin[i, jdx]
-            if bin > 0 && bin <= size(h∇, 2)
-                Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, i]
-                Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, i]
-                Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, i]
-            end
-        end
-    end
-end
-
-@kernel function hist_kernel_selective_mask!(
-    h∇::AbstractArray{T,4},
-    @Const(∇),
-    @Const(x_bin),
-    @Const(nidx),
-    @Const(js),
-    @Const(target_mask),
-) where {T}
-    i, j = @index(Global, NTuple)
-    @inbounds if i <= size(x_bin, 1) && j <= length(js)
-        node = nidx[i]
-        if node > 0 && target_mask[node] != 0
-            jdx = js[j]
-            bin = x_bin[i, jdx]
-            if bin > 0 && bin <= size(h∇, 2)
-                Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, i]
-                Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, i]
-                Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, i]
-            end
-        end
-    end
-end
-
 @kernel function fill_mask_kernel!(mask::AbstractVector{UInt8}, @Const(nodes))
     i = @index(Global)
     @inbounds if i <= length(nodes)
@@ -132,17 +64,19 @@ end
     @Const(parent_nodes),
     @Const(left_nodes),
     @Const(right_nodes),
+    @Const(js),
 ) where {T}
-    idx, feat, bin = @index(Global, NTuple)
+    idx, j_idx, bin = @index(Global, NTuple)
     
-    @inbounds if idx <= length(parent_nodes) && feat <= size(h∇, 3) && bin <= size(h∇, 2)
+    @inbounds if idx <= length(parent_nodes) && j_idx <= length(js) && bin <= size(h∇, 2)
         parent = parent_nodes[idx]
         left = left_nodes[idx]
         right = right_nodes[idx]
+        feat = js[j_idx]
         
-        h∇[1, bin, feat, right] = max(T(0), h∇[1, bin, feat, parent] - h∇[1, bin, feat, left])
-        h∇[2, bin, feat, right] = max(T(0), h∇[2, bin, feat, parent] - h∇[2, bin, feat, left])
-        h∇[3, bin, feat, right] = max(T(0), h∇[3, bin, feat, parent] - h∇[3, bin, feat, left])
+        h∇[1, bin, feat, right] = h∇[1, bin, feat, parent] - h∇[1, bin, feat, left]
+        h∇[2, bin, feat, right] = h∇[2, bin, feat, parent] - h∇[2, bin, feat, left]
+        h∇[3, bin, feat, right] = h∇[3, bin, feat, parent] - h∇[3, bin, feat, left]
     end
 end
 
@@ -252,31 +186,41 @@ end
     @inbounds active_nodes[idx] = idx + offset
 end
 
-@kernel function hist_kernel_is!(
+# Optimized histogram kernel that processes blocks of observations
+@kernel function hist_kernel_is_block!(
     h∇::AbstractArray{T,4},
     @Const(∇),
     @Const(x_bin),
     @Const(nidx),
     @Const(js),
     @Const(is),
+    obs_per_thread::Int32,
 ) where {T}
-    i, j = @index(Global, NTuple)
-    @inbounds if i <= length(is) && j <= length(js)
+    tid = @index(Global)
+    
+    # Each thread processes a block of observations
+    start_idx = (tid - 1) * obs_per_thread + 1
+    end_idx = min(tid * obs_per_thread, length(is))
+    
+    @inbounds for i in start_idx:end_idx
         obs = is[i]
         node = nidx[obs]
         if node > 0
-            jdx = js[j]
-            bin = x_bin[obs, jdx]
-            if bin > 0 && bin <= size(h∇, 2)
-                Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, obs]
-                Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, obs]
-                Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, obs]
+            for j in 1:length(js)
+                jdx = js[j]
+                bin = x_bin[obs, jdx]
+                if bin > 0 && bin <= size(h∇, 2)
+                    Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, obs]
+                    Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, obs]
+                    Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, obs]
+                end
             end
         end
     end
 end
 
-@kernel function hist_kernel_selective_mask_is!(
+# Optimized selective mask histogram kernel that processes blocks
+@kernel function hist_kernel_selective_mask_is_block!(
     h∇::AbstractArray{T,4},
     @Const(∇),
     @Const(x_bin),
@@ -284,33 +228,27 @@ end
     @Const(js),
     @Const(target_mask),
     @Const(is),
+    obs_per_thread::Int32,
 ) where {T}
-    i, j = @index(Global, NTuple)
-    @inbounds if i <= length(is) && j <= length(js)
+    tid = @index(Global)
+    
+    # Each thread processes a block of observations
+    start_idx = (tid - 1) * obs_per_thread + 1
+    end_idx = min(tid * obs_per_thread, length(is))
+    
+    @inbounds for i in start_idx:end_idx
         obs = is[i]
         node = nidx[obs]
         if node > 0 && target_mask[node] != 0
-            jdx = js[j]
-            bin = x_bin[obs, jdx]
-            if bin > 0 && bin <= size(h∇, 2)
-                Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, obs]
-                Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, obs]
-                Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, obs]
+            for j in 1:length(js)
+                jdx = js[j]
+                bin = x_bin[obs, jdx]
+                if bin > 0 && bin <= size(h∇, 2)
+                    Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, obs]
+                    Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, obs]
+                    Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, obs]
+                end
             end
-        end
-    end
-end
-
-@kernel function write_nodes_sum_from_scan!(nodes_sum, @Const(hR), @Const(active_nodes), @Const(js))
-    n_idx = @index(Global)
-    @inbounds if n_idx <= length(active_nodes)
-        node = active_nodes[n_idx]
-        if node > 0
-            nbins = size(hR, 2)
-            f = js[1]
-            nodes_sum[1, node] = hR[1, nbins, f, node]
-            nodes_sum[2, node] = hR[2, nbins, f, node]
-            nodes_sum[3, node] = hR[3, nbins, f, node]
         end
     end
 end
@@ -325,20 +263,60 @@ function update_hist_gpu!(
     
     if depth == 1
         h∇ .= 0
-        hist_is! = hist_kernel_is!(backend)
-        hist_is!(h∇, ∇, x_bin, nidx, js, is; ndrange = (length(is), length(js)))
+        # Use block kernel for better performance
+        obs_per_thread = Int32(max(1, ceil(length(is) / 1024)))  # Target ~1024 threads
+        n_threads = Int(ceil(length(is) / obs_per_thread))
+        hist_is_block! = hist_kernel_is_block!(backend)
+        hist_is_block!(h∇, ∇, x_bin, nidx, js, is, obs_per_thread; ndrange = n_threads)
     else
-        # Build histograms for the current active nodes (parents to split now)
-        zero_nodes! = zero_node_hist_kernel!(backend)
-        zero_nodes!(h∇, active_nodes, js; ndrange = (n_active, length(js), size(h∇, 2)))
+        # For depth > 1, we can use histogram subtraction trick
+        # Build histograms only for left children of active nodes
+        # Get parent nodes and compute child nodes
+        n_parents = n_active ÷ 2
+        if n_parents > 0
+            # Fill parent and child node buffers
+            fill_children! = fill_children_nodes_kernel!(backend)
+            fill_children!(left_nodes_buf, right_nodes_buf, view(active_nodes, 1:n_parents); 
+                          ndrange = n_parents)
+            
+            # Zero histograms for left children only
+            zero_nodes! = zero_node_hist_kernel!(backend)
+            zero_nodes!(h∇, view(left_nodes_buf, 1:n_parents), js; 
+                       ndrange = (n_parents, length(js), size(h∇, 2)))
+            
+            # Build mask for left children
+            target_mask_buf .= 0
+            fill_mask! = fill_mask_kernel!(backend)
+            fill_mask!(target_mask_buf, view(left_nodes_buf, 1:n_parents); ndrange = n_parents)
+            
+            # Build histograms for left children using block kernel
+            obs_per_thread = Int32(max(1, ceil(length(is) / 1024)))
+            n_threads = Int(ceil(length(is) / obs_per_thread))
+            hist_selective_mask_is_block! = hist_kernel_selective_mask_is_block!(backend)
+            hist_selective_mask_is_block!(h∇, ∇, x_bin, nidx, js, target_mask_buf, is, obs_per_thread;
+                                         ndrange = n_threads)
+            
+            # Subtract to get right children histograms
+            subtract_hist! = subtract_hist_kernel!(backend)
+            subtract_hist!(h∇, view(active_nodes, 1:n_parents), 
+                          view(left_nodes_buf, 1:n_parents), 
+                          view(right_nodes_buf, 1:n_parents), js;
+                          ndrange = (n_parents, length(js), size(h∇, 2)))
+        else
+            # If no parent nodes, build histograms directly
+            zero_nodes! = zero_node_hist_kernel!(backend)
+            zero_nodes!(h∇, active_nodes, js; ndrange = (n_active, length(js), size(h∇, 2)))
 
-        target_mask_buf .= 0
-        fill_mask! = fill_mask_kernel!(backend)
-        fill_mask!(target_mask_buf, active_nodes; ndrange = n_active)
+            target_mask_buf .= 0
+            fill_mask! = fill_mask_kernel!(backend)
+            fill_mask!(target_mask_buf, active_nodes; ndrange = n_active)
 
-        hist_selective_mask_is! = hist_kernel_selective_mask_is!(backend)
-        hist_selective_mask_is!(h∇, ∇, x_bin, nidx, js, target_mask_buf, is;
-                                       ndrange = (length(is), length(js)))
+            obs_per_thread = Int32(max(1, ceil(length(is) / 1024)))
+            n_threads = Int(ceil(length(is) / obs_per_thread))
+            hist_selective_mask_is_block! = hist_kernel_selective_mask_is_block!(backend)
+            hist_selective_mask_is_block!(h∇, ∇, x_bin, nidx, js, target_mask_buf, is, obs_per_thread;
+                                         ndrange = n_threads)
+        end
     end
 
     # Scan and write node sums in a single kernel
