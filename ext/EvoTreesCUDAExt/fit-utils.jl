@@ -21,7 +21,7 @@ using Atomix
             else
                 feattype = feattypes[feat]
                 is_left = feattype ? (x_bin[obs, feat] <= bin) : (x_bin[obs, feat] == bin)
-                nidx[obs] = (node << 1) + !is_left
+                nidx[obs] = (node << 1) + T(Int(!is_left))
             end
         end
     end
@@ -204,20 +204,21 @@ end
         
         p_g1 = nodes_sum[1, node]
         p_g2 = nodes_sum[2, node]
-            gain_p = p_g1^2 / (p_g2 + lambda + 1e-8)
+        p_w  = nodes_sum[3, node]
+            gain_p = p_g1^2 / (p_g2 + lambda * p_w + 1e-8)
         
         for f in 1:nfeats
-            p_w = hR[3, nbins, f, node]
+            f_w = hR[3, nbins, f, node]
             for b in 1:(nbins - 1)
                 l_w = hL[3, b, f, node]
-                r_w = p_w - l_w
+                r_w = f_w - l_w
                 if l_w >= min_weight && r_w >= min_weight
                     l_g1 = hL[1, b, f, node]
                     l_g2 = hL[2, b, f, node]
                     r_g1 = p_g1 - l_g1
                     r_g2 = p_g2 - l_g2
-                        gain_l = l_g1^2 / (l_g2 + lambda + 1e-8)
-                        gain_r = r_g1^2 / (r_g2 + lambda + 1e-8)
+                        gain_l = l_g1^2 / (l_g2 + lambda * l_w + 1e-8)
+                        gain_r = r_g1^2 / (r_g2 + lambda * r_w + 1e-8)
                     g = gain_l + gain_r - gain_p
                     if g > g_best
                         g_best = g
@@ -289,16 +290,16 @@ end
     end
 end
 
-@kernel function write_nodes_sum_from_scan!(nodes_sum, @Const(hR), @Const(active_nodes))
+@kernel function write_nodes_sum_from_scan!(nodes_sum, @Const(hR), @Const(active_nodes), @Const(js))
     n_idx = @index(Global)
     @inbounds if n_idx <= length(active_nodes)
         node = active_nodes[n_idx]
         if node > 0
             nbins = size(hR, 2)
-            # use feature index 1 as totals are identical across features
-            nodes_sum[1, node] = hR[1, nbins, 1, node]
-            nodes_sum[2, node] = hR[2, nbins, 1, node]
-            nodes_sum[3, node] = hR[3, nbins, 1, node]
+            f = js[1]
+            nodes_sum[1, node] = hR[1, nbins, f, node]
+            nodes_sum[2, node] = hR[2, nbins, f, node]
+            nodes_sum[3, node] = hR[3, nbins, f, node]
         end
     end
 end
@@ -343,7 +344,7 @@ function update_hist_gpu!(
     scan_serial!(hL, hR, h∇, active_nodes; ndrange = (n_active, size(h∇, 3)))
 
     write_nodes_sum! = write_nodes_sum_from_scan!(backend)
-    write_nodes_sum!(nodes_sum_gpu, hR, active_nodes; ndrange = n_active)
+    write_nodes_sum!(nodes_sum_gpu, hR, active_nodes, js; ndrange = n_active)
 
     find_split! = find_best_split_kernel_parallel!(backend)
     find_split!(

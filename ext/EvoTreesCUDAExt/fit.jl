@@ -54,7 +54,7 @@ function grow_tree!(
     tree_cond_bin_gpu = KernelAbstractions.zeros(backend, UInt8, length(tree.cond_bin))
     tree_feat_gpu = KernelAbstractions.zeros(backend, Int32, length(tree.feat))
     tree_gain_gpu = KernelAbstractions.zeros(backend, Float64, length(tree.gain))
-    tree_pred_gpu = KernelAbstractions.zeros(backend, Float32, size(tree.pred, 1), length(tree.pred))
+    tree_pred_gpu = KernelAbstractions.zeros(backend, Float32, size(tree.pred, 1), size(tree.pred, 2))
 
     max_nodes_total = 2^(params.max_depth + 1)
     nodes_sum_gpu = KernelAbstractions.zeros(backend, Float64, 3, max_nodes_total)
@@ -185,10 +185,10 @@ end
         nodes_sum[2, child_r] = nodes_sum[2, node] - nodes_sum[2, child_l]
         nodes_sum[3, child_r] = nodes_sum[3, node] - nodes_sum[3, child_l]
 
-        p1_l, p2_l = nodes_sum[1, child_l], nodes_sum[2, child_l]
-        nodes_gain[child_l] = p1_l^2 / (p2_l + lambda + 1e-8)
-        p1_r, p2_r = nodes_sum[1, child_r], nodes_sum[2, child_r]
-        nodes_gain[child_r] = p1_r^2 / (p2_r + lambda + 1e-8)
+        p1_l, p2_l, w_l = nodes_sum[1, child_l], nodes_sum[2, child_l], nodes_sum[3, child_l]
+        nodes_gain[child_l] = p1_l^2 / (p2_l + lambda * w_l + 1e-8)
+        p1_r, p2_r, w_r = nodes_sum[1, child_r], nodes_sum[2, child_r], nodes_sum[3, child_r]
+        nodes_gain[child_r] = p1_r^2 / (p2_r + lambda * w_r + 1e-8)
         
         idx_base = Atomix.@atomic n_next_active[1] += 2
         n_next[idx_base - 1] = child_l
@@ -201,7 +201,7 @@ end
     else
         g, h, w = nodes_sum[1, node], nodes_sum[2, node], nodes_sum[3, node]
         if w <= 0.0 || h + lambda <= 0.0
-            tree_pred[node] = 0.0f0
+            tree_pred[1, node] = 0.0f0
         else
             tree_pred[1, node] = -g / (h + lambda * w + 1e-8)
         end
@@ -213,6 +213,7 @@ end
     node = nodes[n_idx]
     @inbounds p1 = nodes_sum[1, node]
     @inbounds p2 = nodes_sum[2, node]
-    @inbounds nodes_gain[node] = p1^2 / (p2 + lambda + 1e-8)
+    @inbounds w = nodes_sum[3, node]
+    @inbounds nodes_gain[node] = p1^2 / (p2 + lambda * w + 1e-8)
 end
 
