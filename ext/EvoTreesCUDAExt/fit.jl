@@ -71,7 +71,7 @@ function grow_tree!(
     nidx .= 1
     
     # Initialize root node
-    anodes_gpu[1] = 1
+    copyto!(view(anodes_gpu, 1:1), Int32[1])
     n_active = 1
     
     # Compute root histograms and sums
