@@ -400,54 +400,19 @@ function update_hist_gpu!(
         hist_is_block! = hist_kernel_is_block!(backend)
         hist_is_block!(h∇, ∇, x_bin, nidx, js, is, obs_per_thread; ndrange = n_threads)
     else
-        # For depth > 1, we can use histogram subtraction trick
-        # Build histograms only for left children of active nodes
-        # Get parent nodes and compute child nodes
-        n_parents = n_active ÷ 2
-        if n_parents > 0
-            # Fill parent and child node buffers
-            fill_children! = fill_children_nodes_kernel!(backend)
-            fill_children!(left_nodes_buf, right_nodes_buf, view(active_nodes, 1:n_parents); 
-                          ndrange = n_parents)
-            
-            # Zero histograms for left children only
-            zero_nodes! = zero_node_hist_kernel!(backend)
-            zero_nodes!(h∇, view(left_nodes_buf, 1:n_parents), js; 
-                       ndrange = (n_parents, length(js), size(h∇, 2)))
-            
-            # Build mask for left children
-            target_mask_buf .= 0
-            fill_mask! = fill_mask_kernel!(backend)
-            fill_mask!(target_mask_buf, view(left_nodes_buf, 1:n_parents); ndrange = n_parents)
-            
-            # Build histograms for left children using block kernel
-            obs_per_thread = Int32(max(1, ceil(length(is) / 1024)))
-            n_threads = Int(ceil(length(is) / obs_per_thread))
-            hist_selective_mask_is_block! = hist_kernel_selective_mask_is_block!(backend)
-            hist_selective_mask_is_block!(h∇, ∇, x_bin, nidx, js, target_mask_buf, is, obs_per_thread;
-                                         ndrange = n_threads)
-            
-            # Subtract to get right children histograms
-            subtract_hist! = subtract_hist_kernel!(backend)
-            subtract_hist!(h∇, view(active_nodes, 1:n_parents), 
-                          view(left_nodes_buf, 1:n_parents), 
-                          view(right_nodes_buf, 1:n_parents), js;
-                          ndrange = (n_parents, length(js), size(h∇, 2)))
-        else
-            # If no parent nodes, build histograms directly
-            zero_nodes! = zero_node_hist_kernel!(backend)
-            zero_nodes!(h∇, active_nodes, js; ndrange = (n_active, length(js), size(h∇, 2)))
+        # Build histograms for the current active nodes (parents to split now)
+        zero_nodes! = zero_node_hist_kernel!(backend)
+        zero_nodes!(h∇, active_nodes, js; ndrange = (n_active, length(js), size(h∇, 2)))
 
-            target_mask_buf .= 0
-            fill_mask! = fill_mask_kernel!(backend)
-            fill_mask!(target_mask_buf, active_nodes; ndrange = n_active)
+        target_mask_buf .= 0
+        fill_mask! = fill_mask_kernel!(backend)
+        fill_mask!(target_mask_buf, active_nodes; ndrange = n_active)
 
-            obs_per_thread = Int32(max(1, ceil(length(is) / 1024)))
-            n_threads = Int(ceil(length(is) / obs_per_thread))
-            hist_selective_mask_is_block! = hist_kernel_selective_mask_is_block!(backend)
-            hist_selective_mask_is_block!(h∇, ∇, x_bin, nidx, js, target_mask_buf, is, obs_per_thread;
-                                         ndrange = n_threads)
-        end
+        # Use block kernel to accumulate histograms for active nodes only
+        obs_per_thread = Int32(max(1, ceil(length(is) / 1024)))
+        n_threads = Int(ceil(length(is) / obs_per_thread))
+        hist_selective_mask_is_block! = hist_kernel_selective_mask_is_block!(backend)
+        hist_selective_mask_is_block!(h∇, ∇, x_bin, nidx, js, target_mask_buf, is, obs_per_thread; ndrange = n_threads)
     end
 
     # Scan and write node sums in a single kernel
