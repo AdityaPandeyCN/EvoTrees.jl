@@ -27,42 +27,7 @@ using Atomix
     end
 end
 
-# Single histogram kernel for all nodes at current depth
-@kernel function hist_kernel_depth!(
-    h∇::AbstractArray{T,4},
-    @Const(∇),
-    @Const(x_bin),
-    @Const(nidx),
-    @Const(js),
-    @Const(is),
-    @Const(nodes_at_depth),  # Which nodes we're building histograms for
-) where {T}
-    i, j = @index(Global, NTuple)
-    @inbounds if i <= length(is) && j <= length(js)
-        obs = is[i]
-        node = nidx[obs]
-        
-        # Check if this observation's node is one we're computing
-        # (This is more efficient than a mask lookup)
-        valid = false
-        for k in 1:length(nodes_at_depth)
-            if node == nodes_at_depth[k]
-                valid = true
-                break
-            end
-        end
-        
-        if valid
-            jdx = js[j]
-            bin = x_bin[obs, jdx]
-            if bin > 0 && bin <= size(h∇, 2)
-                Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, obs]
-                Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, obs]
-                Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, obs]
-            end
-        end
-    end
-end
+# removed hist_kernel_depth! (replaced by hist_kernel_range!)
 
 # Optimized histogram kernel using node range (for contiguous nodes)
 @kernel function hist_kernel_range!(
