@@ -232,44 +232,44 @@ end
             gains[idx] = T(-Inf)
             bins[idx] = Int32(0)
             feats[idx] = Int32(0)
-            return
-        end
-        nbins = size(hL, 2)
-        g_best = T(-Inf)
-        b_best = Int32(0)
-        f_best = Int32(0)
-        p_g1 = nodes_sum[1, node]
-        p_g2 = nodes_sum[2, node]
-        p_w  = nodes_sum[3, node]
-        gain_p = p_g1^2 / (p_g2 + lambda * p_w + T(1e-8))
-        for f_idx in 1:length(js)
-            f = js[f_idx]
-            f_w = hR[3, nbins, f, node]
-            if f_w < 2 * min_weight
-                continue
-            end
-            for b in 1:(nbins - 1)
-                l_w = hL[3, b, f, node]
-                r_w = f_w - l_w
-                if l_w >= min_weight && r_w >= min_weight
-                    l_g1 = hL[1, b, f, node]
-                    l_g2 = hL[2, b, f, node]
-                    r_g1 = p_g1 - l_g1
-                    r_g2 = p_g2 - l_g2
-                    gain_l = l_g1^2 / (l_g2 + lambda * l_w + T(1e-8))
-                    gain_r = r_g1^2 / (r_g2 + lambda * r_w + T(1e-8))
-                    g = gain_l + gain_r - gain_p
-                    if g > g_best
-                        g_best = g
-                        b_best = Int32(b)
-                        f_best = Int32(f)
+        else
+            nbins = size(hL, 2)
+            g_best = T(-Inf)
+            b_best = Int32(0)
+            f_best = Int32(0)
+            p_g1 = nodes_sum[1, node]
+            p_g2 = nodes_sum[2, node]
+            p_w  = nodes_sum[3, node]
+            gain_p = p_g1^2 / (p_g2 + lambda * p_w + T(1e-8))
+            for f_idx in 1:length(js)
+                f = js[f_idx]
+                f_w = hR[3, nbins, f, node]
+                if f_w < 2 * min_weight
+                    continue
+                end
+                for b in 1:(nbins - 1)
+                    l_w = hL[3, b, f, node]
+                    r_w = f_w - l_w
+                    if l_w >= min_weight && r_w >= min_weight
+                        l_g1 = hL[1, b, f, node]
+                        l_g2 = hL[2, b, f, node]
+                        r_g1 = p_g1 - l_g1
+                        r_g2 = p_g2 - l_g2
+                        gain_l = l_g1^2 / (l_g2 + lambda * l_w + T(1e-8))
+                        gain_r = r_g1^2 / (r_g2 + lambda * r_w + T(1e-8))
+                        g = gain_l + gain_r - gain_p
+                        if g > g_best
+                            g_best = g
+                            b_best = Int32(b)
+                            f_best = Int32(f)
+                        end
                     end
                 end
             end
+            gains[idx] = g_best
+            bins[idx] = b_best
+            feats[idx] = f_best
         end
-        gains[idx] = g_best
-        bins[idx] = b_best
-        feats[idx] = f_best
     end
 end
 
