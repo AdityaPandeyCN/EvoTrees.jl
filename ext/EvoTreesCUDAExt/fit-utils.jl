@@ -27,6 +27,74 @@ using Atomix
     end
 end
 
+@kernel function hist_kernel!(
+    h∇::AbstractArray{T,4},
+    @Const(∇),
+    @Const(x_bin),
+    @Const(nidx),
+    @Const(js),
+) where {T}
+    i, j = @index(Global, NTuple)
+    @inbounds if i <= size(x_bin, 1) && j <= length(js)
+        node = nidx[i]
+        if node > 0
+            jdx = js[j]
+            bin = x_bin[i, jdx]
+            if bin > 0 && bin <= size(h∇, 2)
+                Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, i]
+                Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, i]
+                Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, i]
+            end
+        end
+    end
+end
+
+@kernel function hist_kernel_selective!(
+    h∇::AbstractArray{T,4},
+    @Const(∇),
+    @Const(x_bin),
+    @Const(nidx),
+    @Const(js),
+    @Const(target_nodes),
+) where {T}
+    i, j = @index(Global, NTuple)
+    @inbounds if i <= size(x_bin, 1) && j <= length(js)
+        node = nidx[i]
+        if node > 0 && node in target_nodes
+            jdx = js[j]
+            bin = x_bin[i, jdx]
+            if bin > 0 && bin <= size(h∇, 2)
+                Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, i]
+                Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, i]
+                Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, i]
+            end
+        end
+    end
+end
+
+@kernel function hist_kernel_selective_mask!(
+    h∇::AbstractArray{T,4},
+    @Const(∇),
+    @Const(x_bin),
+    @Const(nidx),
+    @Const(js),
+    @Const(target_mask),
+) where {T}
+    i, j = @index(Global, NTuple)
+    @inbounds if i <= size(x_bin, 1) && j <= length(js)
+        node = nidx[i]
+        if node > 0 && target_mask[node] != 0
+            jdx = js[j]
+            bin = x_bin[i, jdx]
+            if bin > 0 && bin <= size(h∇, 2)
+                Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, i]
+                Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, i]
+                Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, i]
+            end
+        end
+    end
+end
+
 @kernel function fill_mask_kernel!(mask::AbstractVector{UInt8}, @Const(nodes))
     i = @index(Global)
     @inbounds if i <= length(nodes)
@@ -186,6 +254,30 @@ end
     @inbounds active_nodes[idx] = idx + offset
 end
 
+@kernel function hist_kernel_is!(
+    h∇::AbstractArray{T,4},
+    @Const(∇),
+    @Const(x_bin),
+    @Const(nidx),
+    @Const(js),
+    @Const(is),
+) where {T}
+    i, j = @index(Global, NTuple)
+    @inbounds if i <= length(is) && j <= length(js)
+        obs = is[i]
+        node = nidx[obs]
+        if node > 0
+            jdx = js[j]
+            bin = x_bin[obs, jdx]
+            if bin > 0 && bin <= size(h∇, 2)
+                Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, obs]
+                Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, obs]
+                Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, obs]
+            end
+        end
+    end
+end
+
 # Optimized histogram kernel that processes blocks of observations
 @kernel function hist_kernel_is_block!(
     h∇::AbstractArray{T,4},
@@ -214,6 +306,31 @@ end
                     Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, obs]
                     Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, obs]
                 end
+            end
+        end
+    end
+end
+
+@kernel function hist_kernel_selective_mask_is!(
+    h∇::AbstractArray{T,4},
+    @Const(∇),
+    @Const(x_bin),
+    @Const(nidx),
+    @Const(js),
+    @Const(target_mask),
+    @Const(is),
+) where {T}
+    i, j = @index(Global, NTuple)
+    @inbounds if i <= length(is) && j <= length(js)
+        obs = is[i]
+        node = nidx[obs]
+        if node > 0 && target_mask[node] != 0
+            jdx = js[j]
+            bin = x_bin[obs, jdx]
+            if bin > 0 && bin <= size(h∇, 2)
+                Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, obs]
+                Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, obs]
+                Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, obs]
             end
         end
     end
@@ -249,6 +366,20 @@ end
                     Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, obs]
                 end
             end
+        end
+    end
+end
+
+@kernel function write_nodes_sum_from_scan!(nodes_sum, @Const(hR), @Const(active_nodes), @Const(js))
+    n_idx = @index(Global)
+    @inbounds if n_idx <= length(active_nodes)
+        node = active_nodes[n_idx]
+        if node > 0
+            nbins = size(hR, 2)
+            f = js[1]
+            nodes_sum[1, node] = hR[1, nbins, f, node]
+            nodes_sum[2, node] = hR[2, nbins, f, node]
+            nodes_sum[3, node] = hR[3, nbins, f, node]
         end
     end
 end
