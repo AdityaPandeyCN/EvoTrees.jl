@@ -1,0 +1,5001 @@
+Streaming output truncated to the last 5000 lines.
+└   t_find = 0.000789924
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.020376155
+│   t_scan = 6.7747e-5
+│   t_write = 3.2363e-5
+└   t_find = 0.000791072
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023647012
+│   t_scan = 6.435e-5
+│   t_write = 4.7347e-5
+└   t_find = 0.000794002
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.019330639
+│   t_scan = 7.0255e-5
+│   t_write = 3.3511e-5
+└   t_find = 0.000816172
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.016662446
+│   t_scan = 7.7261e-5
+│   t_write = 3.1348e-5
+└   t_find = 0.000872268
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.014898397
+│   t_scan = 0.000110882
+│   t_write = 2.7441e-5
+└   t_find = 0.001027397
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027629047
+│   t_scan = 8.4048e-5
+│   t_write = 3.4966e-5
+└   t_find = 0.000788863
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.020685633
+│   t_scan = 6.918e-5
+│   t_write = 3.5982e-5
+└   t_find = 0.000882637
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.021793876
+│   t_scan = 7.7255e-5
+│   t_write = 3.8839e-5
+└   t_find = 0.000797239
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.020250933
+│   t_scan = 8.4411e-5
+│   t_write = 3.6675e-5
+└   t_find = 0.000822391
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.017025793
+│   t_scan = 7.8881e-5
+│   t_write = 3.5685e-5
+└   t_find = 0.000881704
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.015242489
+│   t_scan = 0.000114472
+│   t_write = 3.8039e-5
+└   t_find = 0.001001548
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026736192
+│   t_scan = 6.7286e-5
+│   t_write = 3.5281e-5
+└   t_find = 0.000777509
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025205302
+│   t_scan = 5.7878e-5
+│   t_write = 3.3412e-5
+└   t_find = 0.000785734
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.018882687
+│   t_scan = 6.804e-5
+│   t_write = 3.5657e-5
+└   t_find = 0.000789876
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.017528012
+│   t_scan = 7.2413e-5
+│   t_write = 3.364e-5
+└   t_find = 0.000823347
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.014992528
+│   t_scan = 7.9467e-5
+│   t_write = 3.3837e-5
+└   t_find = 0.000880178
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.014489165
+│   t_scan = 0.000116655
+│   t_write = 4.463e-5
+└   t_find = 0.001040533
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026704186
+│   t_scan = 6.4823e-5
+│   t_write = 3.4802e-5
+└   t_find = 0.000788095
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.022837155
+│   t_scan = 6.2424e-5
+│   t_write = 3.274e-5
+└   t_find = 0.000787629
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.02200627
+│   t_scan = 6.4345e-5
+│   t_write = 3.3129e-5
+└   t_find = 0.000796844
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.024226086
+│   t_scan = 8.1586e-5
+│   t_write = 3.2746e-5
+└   t_find = 0.001943914
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.019590277
+│   t_scan = 8.5104e-5
+│   t_write = 3.2585e-5
+└   t_find = 0.000918909
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.016022326
+│   t_scan = 0.000110367
+│   t_write = 2.6947e-5
+└   t_find = 0.001004129
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026625908
+│   t_scan = 7.8068e-5
+│   t_write = 3.5574e-5
+└   t_find = 0.000770975
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025014892
+│   t_scan = 6.311e-5
+│   t_write = 3.2448e-5
+└   t_find = 0.000783591
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.024052292
+│   t_scan = 5.7547e-5
+│   t_write = 4.1114e-5
+└   t_find = 0.000800435
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.021465396
+│   t_scan = 6.8956e-5
+│   t_write = 3.5651e-5
+└   t_find = 0.000815243
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.019542933
+│   t_scan = 9.0401e-5
+│   t_write = 3.4053e-5
+└   t_find = 0.000873767
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.015954604
+│   t_scan = 0.000272642
+│   t_write = 4.4086e-5
+└   t_find = 0.001026551
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026289081
+│   t_scan = 7.0378e-5
+│   t_write = 4.685e-5
+└   t_find = 0.007181992
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.021491629
+│   t_scan = 7.5279e-5
+│   t_write = 3.8317e-5
+└   t_find = 0.000891817
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.02081713
+│   t_scan = 6.8965e-5
+│   t_write = 3.3818e-5
+└   t_find = 0.000795851
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.019290244
+│   t_scan = 9.4024e-5
+│   t_write = 3.258e-5
+└   t_find = 0.00081704
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.018362575
+│   t_scan = 8.2756e-5
+│   t_write = 3.0308e-5
+└   t_find = 0.000865489
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.018565947
+│   t_scan = 0.000102845
+│   t_write = 2.8226e-5
+└   t_find = 0.000999595
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027151845
+│   t_scan = 7.1693e-5
+│   t_write = 3.4036e-5
+└   t_find = 0.000787132
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025034543
+│   t_scan = 6.356e-5
+│   t_write = 4.3157e-5
+└   t_find = 0.000784419
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023334152
+│   t_scan = 6.4897e-5
+│   t_write = 3.2091e-5
+└   t_find = 0.000784183
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.016772453
+│   t_scan = 7.1103e-5
+│   t_write = 3.2265e-5
+└   t_find = 0.000819652
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.017441364
+│   t_scan = 8.1026e-5
+│   t_write = 3.0514e-5
+└   t_find = 0.000867531
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.012529471
+│   t_scan = 0.000107154
+│   t_write = 4.5338e-5
+└   t_find = 0.001001559
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027580582
+│   t_scan = 7.2022e-5
+│   t_write = 3.7117e-5
+└   t_find = 0.00088197
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.026695832
+│   t_scan = 7.3268e-5
+│   t_write = 3.5516e-5
+└   t_find = 0.000785678
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.025719051
+│   t_scan = 7.1199e-5
+│   t_write = 3.4123e-5
+└   t_find = 0.000792599
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.020759555
+│   t_scan = 7.4902e-5
+│   t_write = 3.5719e-5
+└   t_find = 0.00085016
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.020563532
+│   t_scan = 8.4134e-5
+│   t_write = 3.4094e-5
+└   t_find = 0.000893512
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.019001344
+│   t_scan = 0.000112512
+│   t_write = 5.3658e-5
+└   t_find = 0.001006228
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.025164058
+│   t_scan = 7.7085e-5
+│   t_write = 3.1102e-5
+└   t_find = 0.000780262
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.018817038
+│   t_scan = 6.4105e-5
+│   t_write = 3.4304e-5
+└   t_find = 0.000786998
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.018682588
+│   t_scan = 8.2863e-5
+│   t_write = 3.2525e-5
+└   t_find = 0.000796916
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.015989795
+│   t_scan = 7.3628e-5
+│   t_write = 3.2966e-5
+└   t_find = 0.00082707
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.014843957
+│   t_scan = 9.8013e-5
+│   t_write = 3.7549e-5
+└   t_find = 0.004816576
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.015046412
+│   t_scan = 0.000106334
+│   t_write = 3.077e-5
+└   t_find = 0.001015109
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.029585938
+│   t_scan = 7.9725e-5
+│   t_write = 3.4408e-5
+└   t_find = 0.00077901
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.023846759
+│   t_scan = 6.4265e-5
+│   t_write = 3.2761e-5
+└   t_find = 0.000781752
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.021400764
+│   t_scan = 7.4031e-5
+│   t_write = 3.3738e-5
+└   t_find = 0.000800753
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.019640096
+│   t_scan = 7.4184e-5
+│   t_write = 4.9084e-5
+└   t_find = 0.000825258
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.019434769
+│   t_scan = 8.6668e-5
+│   t_write = 3.4626e-5
+└   t_find = 0.000867502
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.016987786
+│   t_scan = 0.000109255
+│   t_write = 2.8756e-5
+└   t_find = 0.001125326
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027713345
+│   t_scan = 0.000103593
+│   t_write = 4.3897e-5
+└   t_find = 0.000789426
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.019827578
+│   t_scan = 6.8867e-5
+│   t_write = 3.672e-5
+└   t_find = 0.000783978
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.020545039
+│   t_scan = 7.2071e-5
+│   t_write = 3.6253e-5
+└   t_find = 0.000797739
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.013799479
+│   t_scan = 7.5083e-5
+│   t_write = 3.2884e-5
+└   t_find = 0.00081915
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.013844586
+│   t_scan = 8.235e-5
+│   t_write = 2.8835e-5
+└   t_find = 0.000912009
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.010825149
+│   t_scan = 0.000106732
+│   t_write = 2.5155e-5
+└   t_find = 0.001041508
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.029144077
+│   t_scan = 7.2351e-5
+│   t_write = 4.3072e-5
+└   t_find = 0.000829982
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.022113985
+│   t_scan = 6.221e-5
+│   t_write = 3.3274e-5
+└   t_find = 0.000813472
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.021431393
+│   t_scan = 6.3067e-5
+│   t_write = 3.147e-5
+└   t_find = 0.000798154
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.0192067
+│   t_scan = 6.7231e-5
+│   t_write = 3.2001e-5
+└   t_find = 0.000817846
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.018107088
+│   t_scan = 8.0251e-5
+│   t_write = 3.4111e-5
+└   t_find = 0.000873473
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.016957087
+│   t_scan = 0.000107534
+│   t_write = 5.3083e-5
+└   t_find = 0.000986338
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026161495
+│   t_scan = 5.7463e-5
+│   t_write = 3.1038e-5
+└   t_find = 0.000769737
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025856772
+│   t_scan = 5.5915e-5
+│   t_write = 3.0569e-5
+└   t_find = 0.000777446
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.025111431
+│   t_scan = 6.3315e-5
+│   t_write = 3.1596e-5
+└   t_find = 0.000793066
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.024288403
+│   t_scan = 7.5533e-5
+│   t_write = 5.0122e-5
+└   t_find = 0.000833172
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.022440483
+│   t_scan = 8.4154e-5
+│   t_write = 3.5323e-5
+└   t_find = 0.007415851
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 30
+│   t_hist = 0.021031137
+│   t_scan = 0.000107561
+│   t_write = 2.8249e-5
+└   t_find = 0.000975176
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026205973
+│   t_scan = 6.4816e-5
+│   t_write = 3.372e-5
+└   t_find = 0.000766314
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025224145
+│   t_scan = 5.6194e-5
+│   t_write = 3.1454e-5
+└   t_find = 0.000775224
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.025025192
+│   t_scan = 6.3419e-5
+│   t_write = 3.2375e-5
+└   t_find = 0.000776791
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.024495597
+│   t_scan = 6.9892e-5
+│   t_write = 3.1114e-5
+└   t_find = 0.00081175
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.016436221
+│   t_scan = 8.1264e-5
+│   t_write = 4.4486e-5
+└   t_find = 0.00088224
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.01674826
+│   t_scan = 0.000112945
+│   t_write = 2.6903e-5
+└   t_find = 0.001004668
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.02536355
+│   t_scan = 6.289e-5
+│   t_write = 3.2718e-5
+└   t_find = 0.000777929
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.022799775
+│   t_scan = 5.6754e-5
+│   t_write = 3.0894e-5
+└   t_find = 0.000787392
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.021722706
+│   t_scan = 7.1532e-5
+│   t_write = 3.651e-5
+└   t_find = 0.00089874
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.018722038
+│   t_scan = 7.412e-5
+│   t_write = 3.4858e-5
+└   t_find = 0.00082629
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.01681815
+│   t_scan = 8.4072e-5
+│   t_write = 3.3087e-5
+└   t_find = 0.000871067
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.015399613
+│   t_scan = 0.000107349
+│   t_write = 3.1669e-5
+└   t_find = 0.001020912
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.02808108
+│   t_scan = 6.6529e-5
+│   t_write = 3.1969e-5
+└   t_find = 0.000781354
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.023938442
+│   t_scan = 6.6766e-5
+│   t_write = 3.218e-5
+└   t_find = 0.000779435
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.021444892
+│   t_scan = 5.9861e-5
+│   t_write = 3.2319e-5
+└   t_find = 0.000814933
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.017766841
+│   t_scan = 6.8878e-5
+│   t_write = 3.2396e-5
+└   t_find = 0.000848999
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.01588389
+│   t_scan = 8.2541e-5
+│   t_write = 3.2295e-5
+└   t_find = 0.000874446
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.011654242
+│   t_scan = 0.000114142
+│   t_write = 2.7504e-5
+└   t_find = 0.001008896
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.028529682
+│   t_scan = 6.3852e-5
+│   t_write = 3.4057e-5
+└   t_find = 0.000781476
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.027628509
+│   t_scan = 6.1585e-5
+│   t_write = 3.1116e-5
+└   t_find = 0.000787882
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.027182284
+│   t_scan = 6.2459e-5
+│   t_write = 3.3165e-5
+└   t_find = 0.000796651
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.026617823
+│   t_scan = 6.6007e-5
+│   t_write = 3.0976e-5
+└   t_find = 0.000818078
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.024342592
+│   t_scan = 8.3263e-5
+│   t_write = 2.9932e-5
+└   t_find = 0.00087699
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.023872682
+│   t_scan = 0.000105717
+│   t_write = 3.5239e-5
+└   t_find = 0.001096406
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026922835
+│   t_scan = 5.9909e-5
+│   t_write = 3.1625e-5
+└   t_find = 0.000773334
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025539989
+│   t_scan = 6.4006e-5
+│   t_write = 3.1794e-5
+└   t_find = 0.000784851
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.021187834
+│   t_scan = 5.8667e-5
+│   t_write = 3.2124e-5
+└   t_find = 0.000788582
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.019805263
+│   t_scan = 6.3585e-5
+│   t_write = 3.8792e-5
+└   t_find = 0.000814816
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.017224655
+│   t_scan = 9.0463e-5
+│   t_write = 3.7018e-5
+└   t_find = 0.000880862
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.015626057
+│   t_scan = 0.000106309
+│   t_write = 3.4765e-5
+└   t_find = 0.001004189
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026776307
+│   t_scan = 6.3354e-5
+│   t_write = 3.2583e-5
+└   t_find = 0.000878309
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.02530496
+│   t_scan = 6.5591e-5
+│   t_write = 3.3458e-5
+└   t_find = 0.00082041
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.019060654
+│   t_scan = 6.6201e-5
+│   t_write = 3.2045e-5
+└   t_find = 0.000790462
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.016338252
+│   t_scan = 7.0055e-5
+│   t_write = 3.2331e-5
+└   t_find = 0.000840804
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.01605356
+│   t_scan = 8.3445e-5
+│   t_write = 3.4181e-5
+└   t_find = 0.00090123
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.013314708
+│   t_scan = 0.000111392
+│   t_write = 3.129e-5
+└   t_find = 0.001023143
+┌ Info: iter 100
+└   metric = 0.08312542736530304
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026645209
+│   t_scan = 6.2434e-5
+│   t_write = 6.0489e-5
+└   t_find = 0.000808391
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.020287894
+│   t_scan = 6.2321e-5
+│   t_write = 3.1802e-5
+└   t_find = 0.000806616
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.020636588
+│   t_scan = 6.2414e-5
+│   t_write = 3.0828e-5
+└   t_find = 0.00080374
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.017894783
+│   t_scan = 6.8765e-5
+│   t_write = 3.2559e-5
+└   t_find = 0.000817742
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.018539369
+│   t_scan = 8.6213e-5
+│   t_write = 3.5e-5
+└   t_find = 0.000872803
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.016555945
+│   t_scan = 0.000107831
+│   t_write = 2.8114e-5
+└   t_find = 0.001002457
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026619673
+│   t_scan = 6.1968e-5
+│   t_write = 3.2722e-5
+└   t_find = 0.000772893
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025164261
+│   t_scan = 6.7124e-5
+│   t_write = 3.4945e-5
+└   t_find = 0.008194555
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023596103
+│   t_scan = 6.6678e-5
+│   t_write = 3.3637e-5
+└   t_find = 0.000798321
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.021039523
+│   t_scan = 6.9767e-5
+│   t_write = 3.1962e-5
+└   t_find = 0.000817567
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.019136518
+│   t_scan = 8.0767e-5
+│   t_write = 3.1399e-5
+└   t_find = 0.00087841
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.01796025
+│   t_scan = 0.000118796
+│   t_write = 2.7284e-5
+└   t_find = 0.000993254
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.025872618
+│   t_scan = 6.9867e-5
+│   t_write = 3.5114e-5
+└   t_find = 0.000782222
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.023896984
+│   t_scan = 6.2613e-5
+│   t_write = 3.4411e-5
+└   t_find = 0.00080845
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.021004601
+│   t_scan = 6.4351e-5
+│   t_write = 3.5503e-5
+└   t_find = 0.000802814
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.017720045
+│   t_scan = 8.125e-5
+│   t_write = 3.0104e-5
+└   t_find = 0.000819268
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.014365453
+│   t_scan = 8.4623e-5
+│   t_write = 3.3131e-5
+└   t_find = 0.000899672
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.015104618
+│   t_scan = 0.000122762
+│   t_write = 5.0023e-5
+└   t_find = 0.001324595
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.028045581
+│   t_scan = 6.7231e-5
+│   t_write = 3.3073e-5
+└   t_find = 0.000792142
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.020792467
+│   t_scan = 6.5801e-5
+│   t_write = 3.1971e-5
+└   t_find = 0.000788544
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.019578083
+│   t_scan = 7.4566e-5
+│   t_write = 3.2725e-5
+└   t_find = 0.000790497
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.01503135
+│   t_scan = 7.4586e-5
+│   t_write = 2.8687e-5
+└   t_find = 0.000826152
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.011258554
+│   t_scan = 8.2535e-5
+│   t_write = 3.2483e-5
+└   t_find = 0.00090755
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.011587573
+│   t_scan = 0.000101731
+│   t_write = 2.7331e-5
+└   t_find = 0.001026703
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.029016973
+│   t_scan = 6.3604e-5
+│   t_write = 3.2845e-5
+└   t_find = 0.000826528
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.019981591
+│   t_scan = 6.1472e-5
+│   t_write = 4.3783e-5
+└   t_find = 0.000806134
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.019575501
+│   t_scan = 6.3454e-5
+│   t_write = 3.2047e-5
+└   t_find = 0.000803979
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.013671228
+│   t_scan = 6.6793e-5
+│   t_write = 3.3412e-5
+└   t_find = 0.000829875
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.011405909
+│   t_scan = 7.5565e-5
+│   t_write = 3.5227e-5
+└   t_find = 0.000884111
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.010556732
+│   t_scan = 0.000107747
+│   t_write = 2.6835e-5
+└   t_find = 0.001062685
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.028730877
+│   t_scan = 7.4391e-5
+│   t_write = 3.3381e-5
+└   t_find = 0.00081437
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.022547429
+│   t_scan = 6.3972e-5
+│   t_write = 3.3396e-5
+└   t_find = 0.000794874
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.022053676
+│   t_scan = 7.6302e-5
+│   t_write = 3.451e-5
+└   t_find = 0.000794931
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.016020254
+│   t_scan = 6.7553e-5
+│   t_write = 3.2365e-5
+└   t_find = 0.000820901
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.012980578
+│   t_scan = 8.2025e-5
+│   t_write = 3.3449e-5
+└   t_find = 0.000872182
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.012818529
+│   t_scan = 0.000108473
+│   t_write = 2.7005e-5
+└   t_find = 0.001035476
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027571505
+│   t_scan = 6.9029e-5
+│   t_write = 5.0227e-5
+└   t_find = 0.000825114
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.026143733
+│   t_scan = 6.3035e-5
+│   t_write = 3.2908e-5
+└   t_find = 0.000795937
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.024548333
+│   t_scan = 6.3545e-5
+│   t_write = 3.2364e-5
+└   t_find = 0.000797325
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.022698833
+│   t_scan = 6.3581e-5
+│   t_write = 3.1248e-5
+└   t_find = 0.000822699
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.016546929
+│   t_scan = 7.9574e-5
+│   t_write = 4.9852e-5
+└   t_find = 0.00089582
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.014114165
+│   t_scan = 0.000134312
+│   t_write = 5.0787e-5
+└   t_find = 0.008149164
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027818841
+│   t_scan = 6.3575e-5
+│   t_write = 3.3284e-5
+└   t_find = 0.000771775
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.027289971
+│   t_scan = 8.6592e-5
+│   t_write = 4.4783e-5
+└   t_find = 0.007055489
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.032681563
+│   t_scan = 6.481e-5
+│   t_write = 2.9916e-5
+└   t_find = 0.006919476
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.022469221
+│   t_scan = 7.9386e-5
+│   t_write = 3.3111e-5
+└   t_find = 0.000817012
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.020944426
+│   t_scan = 8.0888e-5
+│   t_write = 3.4318e-5
+└   t_find = 0.000870852
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.017367748
+│   t_scan = 0.000166912
+│   t_write = 7.3937e-5
+└   t_find = 0.001025038
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.025487676
+│   t_scan = 6.4215e-5
+│   t_write = 3.4072e-5
+└   t_find = 0.000776274
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.024728073
+│   t_scan = 6.5679e-5
+│   t_write = 3.4848e-5
+└   t_find = 0.000780297
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023478267
+│   t_scan = 7.4982e-5
+│   t_write = 4.0612e-5
+└   t_find = 0.000788687
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.022480121
+│   t_scan = 6.786e-5
+│   t_write = 3.2079e-5
+└   t_find = 0.000825084
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.016614448
+│   t_scan = 8.6389e-5
+│   t_write = 3.4994e-5
+└   t_find = 0.006491379
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.020699566
+│   t_scan = 0.000113435
+│   t_write = 3.8074e-5
+└   t_find = 0.001518194
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.02623856
+│   t_scan = 6.8665e-5
+│   t_write = 3.4437e-5
+└   t_find = 0.0007711
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025628915
+│   t_scan = 5.9969e-5
+│   t_write = 3.1755e-5
+└   t_find = 0.0007783
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.025278823
+│   t_scan = 6.6609e-5
+│   t_write = 3.2512e-5
+└   t_find = 0.000784484
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.021703701
+│   t_scan = 6.7356e-5
+│   t_write = 3.0757e-5
+└   t_find = 0.000824341
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.015922524
+│   t_scan = 7.6885e-5
+│   t_write = 3.3845e-5
+└   t_find = 0.000862991
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.016115754
+│   t_scan = 0.000106871
+│   t_write = 2.7828e-5
+└   t_find = 0.001032622
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026432386
+│   t_scan = 6.4844e-5
+│   t_write = 3.1488e-5
+└   t_find = 0.000798656
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025557961
+│   t_scan = 6.4574e-5
+│   t_write = 3.2465e-5
+└   t_find = 0.000819953
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.020992218
+│   t_scan = 8.5487e-5
+│   t_write = 3.4208e-5
+└   t_find = 0.000781982
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.016433942
+│   t_scan = 8.0054e-5
+│   t_write = 3.6239e-5
+└   t_find = 0.000852278
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.016695784
+│   t_scan = 8.2988e-5
+│   t_write = 2.874e-5
+└   t_find = 0.000919407
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.015425475
+│   t_scan = 0.000105719
+│   t_write = 2.614e-5
+└   t_find = 0.001124543
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027854127
+│   t_scan = 6.6825e-5
+│   t_write = 3.2739e-5
+└   t_find = 0.000781423
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.023290993
+│   t_scan = 6.5958e-5
+│   t_write = 3.3041e-5
+└   t_find = 0.000782371
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023490227
+│   t_scan = 7.367e-5
+│   t_write = 3.3998e-5
+└   t_find = 0.000787127
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.017588234
+│   t_scan = 7.0603e-5
+│   t_write = 3.2171e-5
+└   t_find = 0.00081656
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.016791002
+│   t_scan = 8.0229e-5
+│   t_write = 3.2968e-5
+└   t_find = 0.000885263
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.01428298
+│   t_scan = 0.000102538
+│   t_write = 3.992e-5
+└   t_find = 0.001027026
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027425334
+│   t_scan = 6.2106e-5
+│   t_write = 3.3339e-5
+└   t_find = 0.000792524
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.023813313
+│   t_scan = 6.1333e-5
+│   t_write = 3.4178e-5
+└   t_find = 0.000793836
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.022051773
+│   t_scan = 6.7025e-5
+│   t_write = 3.3465e-5
+└   t_find = 0.000788319
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.014289237
+│   t_scan = 6.7063e-5
+│   t_write = 3.1783e-5
+└   t_find = 0.000818276
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.012831451
+│   t_scan = 8.5816e-5
+│   t_write = 3.2421e-5
+└   t_find = 0.001550692
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.012298883
+│   t_scan = 0.000106957
+│   t_write = 2.633e-5
+└   t_find = 0.001038926
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027322669
+│   t_scan = 7.0573e-5
+│   t_write = 3.2837e-5
+└   t_find = 0.000804957
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025850099
+│   t_scan = 6.389e-5
+│   t_write = 3.2474e-5
+└   t_find = 0.000796716
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.022615286
+│   t_scan = 6.1879e-5
+│   t_write = 4.3934e-5
+└   t_find = 0.000787883
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.021812009
+│   t_scan = 8.5497e-5
+│   t_write = 3.8998e-5
+└   t_find = 0.000821668
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.020947827
+│   t_scan = 8.3679e-5
+│   t_write = 3.1783e-5
+└   t_find = 0.000876725
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.020167163
+│   t_scan = 0.000106979
+│   t_write = 2.6281e-5
+└   t_find = 0.000983694
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.02524547
+│   t_scan = 7.2676e-5
+│   t_write = 3.5785e-5
+└   t_find = 0.000770143
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.021036724
+│   t_scan = 6.0472e-5
+│   t_write = 3.2192e-5
+└   t_find = 0.000781132
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.021611524
+│   t_scan = 6.5201e-5
+│   t_write = 3.372e-5
+└   t_find = 0.000786706
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.016946441
+│   t_scan = 8.5907e-5
+│   t_write = 3.1434e-5
+└   t_find = 0.000816223
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.013758756
+│   t_scan = 9.7016e-5
+│   t_write = 2.9068e-5
+└   t_find = 0.000883896
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.010259982
+│   t_scan = 0.000107734
+│   t_write = 2.6863e-5
+└   t_find = 0.001036429
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027949921
+│   t_scan = 6.5573e-5
+│   t_write = 3.2938e-5
+└   t_find = 0.000811353
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.018809564
+│   t_scan = 6.3828e-5
+│   t_write = 3.411e-5
+└   t_find = 0.000801707
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.016888147
+│   t_scan = 6.3817e-5
+│   t_write = 3.1812e-5
+└   t_find = 0.000807003
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.012202688
+│   t_scan = 7.4543e-5
+│   t_write = 3.4457e-5
+└   t_find = 0.000838021
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.012098594
+│   t_scan = 7.4562e-5
+│   t_write = 3.1822e-5
+└   t_find = 0.00089587
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.010871411
+│   t_scan = 0.0001079
+│   t_write = 2.6996e-5
+└   t_find = 0.001048994
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.029064593
+│   t_scan = 6.289e-5
+│   t_write = 3.3105e-5
+└   t_find = 0.000795113
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.027410601
+│   t_scan = 6.2382e-5
+│   t_write = 3.2024e-5
+└   t_find = 0.000792456
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.026911273
+│   t_scan = 6.9809e-5
+│   t_write = 3.3778e-5
+└   t_find = 0.00079951
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.036555858
+│   t_scan = 0.000108298
+│   t_write = 4.9129e-5
+└   t_find = 0.002896521
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.022310628
+│   t_scan = 8.9736e-5
+│   t_write = 5.6671e-5
+└   t_find = 0.000877912
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.021451945
+│   t_scan = 0.000116003
+│   t_write = 3.1866e-5
+└   t_find = 0.000985558
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026539285
+│   t_scan = 6.5977e-5
+│   t_write = 3.6169e-5
+└   t_find = 0.000768574
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.018268984
+│   t_scan = 6.2345e-5
+│   t_write = 3.3813e-5
+└   t_find = 0.000798805
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.020673087
+│   t_scan = 6.7929e-5
+│   t_write = 3.3349e-5
+└   t_find = 0.000791212
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.017383536
+│   t_scan = 6.4545e-5
+│   t_write = 3.2092e-5
+└   t_find = 0.000805837
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.01825003
+│   t_scan = 0.000109006
+│   t_write = 6.1871e-5
+└   t_find = 0.001409218
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.013387062
+│   t_scan = 0.000111955
+│   t_write = 2.8607e-5
+└   t_find = 0.000993417
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.02608855
+│   t_scan = 6.4078e-5
+│   t_write = 3.3929e-5
+└   t_find = 0.000779378
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.019634608
+│   t_scan = 5.8259e-5
+│   t_write = 3.6133e-5
+└   t_find = 0.000786048
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.01844106
+│   t_scan = 6.3848e-5
+│   t_write = 4.5204e-5
+└   t_find = 0.000790552
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.014496019
+│   t_scan = 7.1353e-5
+│   t_write = 3.2805e-5
+└   t_find = 0.000818419
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.013416945
+│   t_scan = 8.1336e-5
+│   t_write = 3.2448e-5
+└   t_find = 0.000899397
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.013514155
+│   t_scan = 0.0001088
+│   t_write = 2.6968e-5
+└   t_find = 0.001107768
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.028211235
+│   t_scan = 6.3934e-5
+│   t_write = 3.255e-5
+└   t_find = 0.000801207
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.026060097
+│   t_scan = 6.3425e-5
+│   t_write = 3.8704e-5
+└   t_find = 0.000799317
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.020840419
+│   t_scan = 9.9378e-5
+│   t_write = 4.0191e-5
+└   t_find = 0.000795846
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.018437961
+│   t_scan = 7.2038e-5
+│   t_write = 3.279e-5
+└   t_find = 0.000816303
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.018051757
+│   t_scan = 7.8112e-5
+│   t_write = 3.2441e-5
+└   t_find = 0.000882731
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.015515982
+│   t_scan = 0.000105697
+│   t_write = 2.6404e-5
+└   t_find = 0.001006246
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.03154379
+│   t_scan = 6.8735e-5
+│   t_write = 3.4504e-5
+└   t_find = 0.000788685
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.023684687
+│   t_scan = 7.5721e-5
+│   t_write = 3.168e-5
+└   t_find = 0.000787923
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023930991
+│   t_scan = 6.638e-5
+│   t_write = 3.3365e-5
+└   t_find = 0.000788732
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.017537605
+│   t_scan = 7.3308e-5
+│   t_write = 3.2584e-5
+└   t_find = 0.000818394
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.01491559
+│   t_scan = 8.505e-5
+│   t_write = 3.2403e-5
+└   t_find = 0.00087909
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.010592163
+│   t_scan = 0.00011823
+│   t_write = 2.7784e-5
+└   t_find = 0.001030597
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027787095
+│   t_scan = 6.1187e-5
+│   t_write = 3.1967e-5
+└   t_find = 0.000839181
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.02631843
+│   t_scan = 6.3135e-5
+│   t_write = 3.1279e-5
+└   t_find = 0.000795947
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023092225
+│   t_scan = 6.2879e-5
+│   t_write = 3.8927e-5
+└   t_find = 0.000793886
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.021886463
+│   t_scan = 6.9583e-5
+│   t_write = 3.1678e-5
+└   t_find = 0.00081847
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.021448389
+│   t_scan = 7.903e-5
+│   t_write = 3.2748e-5
+└   t_find = 0.000875152
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.019422364
+│   t_scan = 0.000103725
+│   t_write = 2.6997e-5
+└   t_find = 0.000987292
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027344828
+│   t_scan = 6.3592e-5
+│   t_write = 3.1786e-5
+└   t_find = 0.000783581
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.041486671
+│   t_scan = 7.0144e-5
+│   t_write = 3.4733e-5
+└   t_find = 0.000781034
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023892541
+│   t_scan = 6.2879e-5
+│   t_write = 3.259e-5
+└   t_find = 0.000813328
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.015760103
+│   t_scan = 6.9857e-5
+│   t_write = 3.332e-5
+└   t_find = 0.000812507
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.016180288
+│   t_scan = 8.2968e-5
+│   t_write = 3.1247e-5
+└   t_find = 0.000881453
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.012348436
+│   t_scan = 0.000109704
+│   t_write = 2.74e-5
+└   t_find = 0.001032551
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026526429
+│   t_scan = 6.6605e-5
+│   t_write = 3.349e-5
+└   t_find = 0.000790646
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025657416
+│   t_scan = 7.137e-5
+│   t_write = 3.2346e-5
+└   t_find = 0.000782144
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.025090576
+│   t_scan = 6.3574e-5
+│   t_write = 3.2212e-5
+└   t_find = 0.00079063
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.020229783
+│   t_scan = 7.3366e-5
+│   t_write = 3.3873e-5
+└   t_find = 0.000927861
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.014622931
+│   t_scan = 8.2479e-5
+│   t_write = 3.2544e-5
+└   t_find = 0.000891042
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.011545369
+│   t_scan = 0.000106399
+│   t_write = 3.4695e-5
+└   t_find = 0.00101711
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.028133467
+│   t_scan = 6.4978e-5
+│   t_write = 3.2394e-5
+└   t_find = 0.000886351
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.022500525
+│   t_scan = 6.6309e-5
+│   t_write = 3.2849e-5
+└   t_find = 0.000825694
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.024034697
+│   t_scan = 6.6004e-5
+│   t_write = 3.2605e-5
+└   t_find = 0.000795917
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.021179491
+│   t_scan = 7.2647e-5
+│   t_write = 3.151e-5
+└   t_find = 0.000821083
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.01978646
+│   t_scan = 7.4126e-5
+│   t_write = 3.2594e-5
+└   t_find = 0.000868906
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.017767036
+│   t_scan = 0.000108001
+│   t_write = 2.7787e-5
+└   t_find = 0.001009981
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026124139
+│   t_scan = 6.4512e-5
+│   t_write = 3.278e-5
+└   t_find = 0.000778617
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.019537157
+│   t_scan = 6.47e-5
+│   t_write = 3.2872e-5
+└   t_find = 0.000780633
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.018324284
+│   t_scan = 5.8373e-5
+│   t_write = 3.1362e-5
+└   t_find = 0.000795989
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.015929311
+│   t_scan = 6.5185e-5
+│   t_write = 3.1325e-5
+└   t_find = 0.000843598
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.013845702
+│   t_scan = 7.9494e-5
+│   t_write = 3.4458e-5
+└   t_find = 0.000895874
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.013716432
+│   t_scan = 0.000109963
+│   t_write = 2.6429e-5
+└   t_find = 0.001084586
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027049687
+│   t_scan = 6.811e-5
+│   t_write = 3.4524e-5
+└   t_find = 0.000796035
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.022554705
+│   t_scan = 6.3309e-5
+│   t_write = 3.3474e-5
+└   t_find = 0.000791568
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.021272533
+│   t_scan = 6.3272e-5
+│   t_write = 3.215e-5
+└   t_find = 0.000791091
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.015405834
+│   t_scan = 7.5525e-5
+│   t_write = 3.3179e-5
+└   t_find = 0.000823545
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.013790118
+│   t_scan = 9.2021e-5
+│   t_write = 2.9802e-5
+└   t_find = 0.000881475
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.010940889
+│   t_scan = 0.000106169
+│   t_write = 3.1868e-5
+└   t_find = 0.001038015
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.0262379
+│   t_scan = 5.9141e-5
+│   t_write = 3.1606e-5
+└   t_find = 0.000812377
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.024565348
+│   t_scan = 6.2824e-5
+│   t_write = 3.3219e-5
+└   t_find = 0.0007929
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023913506
+│   t_scan = 6.5531e-5
+│   t_write = 3.3083e-5
+└   t_find = 0.000794866
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.022037107
+│   t_scan = 6.9328e-5
+│   t_write = 3.1681e-5
+└   t_find = 0.000822794
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.020041999
+│   t_scan = 7.5608e-5
+│   t_write = 5.0572e-5
+└   t_find = 0.000882888
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.018696001
+│   t_scan = 0.000106752
+│   t_write = 4.8974e-5
+└   t_find = 0.000993061
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026272916
+│   t_scan = 6.4615e-5
+│   t_write = 3.2829e-5
+└   t_find = 0.000760816
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025369693
+│   t_scan = 6.9034e-5
+│   t_write = 3.361e-5
+└   t_find = 0.000780516
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.021192004
+│   t_scan = 6.545e-5
+│   t_write = 3.3181e-5
+└   t_find = 0.000801143
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.018720034
+│   t_scan = 6.9912e-5
+│   t_write = 3.2148e-5
+└   t_find = 0.000819471
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.018205554
+│   t_scan = 8.0567e-5
+│   t_write = 3.1299e-5
+└   t_find = 0.000863267
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.017273157
+│   t_scan = 0.000120858
+│   t_write = 2.8099e-5
+└   t_find = 0.001006509
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027108546
+│   t_scan = 6.4662e-5
+│   t_write = 3.4152e-5
+└   t_find = 0.000778661
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.026091828
+│   t_scan = 6.6734e-5
+│   t_write = 3.4617e-5
+└   t_find = 0.007664473
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.025989043
+│   t_scan = 7.34e-5
+│   t_write = 3.4127e-5
+└   t_find = 0.002237133
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.023662455
+│   t_scan = 0.000104153
+│   t_write = 5.182e-5
+└   t_find = 0.001505257
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.013434126
+│   t_scan = 9.4191e-5
+│   t_write = 3.5696e-5
+└   t_find = 0.002342788
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.019857742
+│   t_scan = 0.000119274
+│   t_write = 3.7785e-5
+└   t_find = 0.001159817
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027303878
+│   t_scan = 6.5801e-5
+│   t_write = 3.2072e-5
+└   t_find = 0.005495839
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025807819
+│   t_scan = 0.00013024
+│   t_write = 3.3204e-5
+└   t_find = 0.000918782
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.031994381
+│   t_scan = 6.8591e-5
+│   t_write = 3.3333e-5
+└   t_find = 0.00237471
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.019724603
+│   t_scan = 6.8789e-5
+│   t_write = 4.1777e-5
+└   t_find = 0.000922691
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.025396989
+│   t_scan = 8.2747e-5
+│   t_write = 3.2668e-5
+└   t_find = 0.002392567
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.016903626
+│   t_scan = 0.00011126
+│   t_write = 3.365e-5
+└   t_find = 0.001294382
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.025838079
+│   t_scan = 7.3928e-5
+│   t_write = 3.3403e-5
+└   t_find = 0.000865635
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.027840677
+│   t_scan = 6.1137e-5
+│   t_write = 3.0982e-5
+└   t_find = 0.00701851
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.031467295
+│   t_scan = 6.9389e-5
+│   t_write = 3.2851e-5
+└   t_find = 0.000935461
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.0131957
+│   t_scan = 6.9809e-5
+│   t_write = 3.0752e-5
+└   t_find = 0.000815334
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.012173068
+│   t_scan = 8.3305e-5
+│   t_write = 3.4242e-5
+└   t_find = 0.000873138
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.009204034
+│   t_scan = 0.000106441
+│   t_write = 3.3835e-5
+└   t_find = 0.001304068
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.03581285
+│   t_scan = 6.798e-5
+│   t_write = 3.3447e-5
+└   t_find = 0.000885427
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.039533837
+│   t_scan = 7.0483e-5
+│   t_write = 3.3197e-5
+└   t_find = 0.021888572
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.026862363
+│   t_scan = 6.1669e-5
+│   t_write = 3.1261e-5
+└   t_find = 0.020665386
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.032637488
+│   t_scan = 7.5959e-5
+│   t_write = 3.2937e-5
+└   t_find = 0.006907075
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.018116482
+│   t_scan = 7.6164e-5
+│   t_write = 3.1276e-5
+└   t_find = 0.016401467
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.028239467
+│   t_scan = 0.000109584
+│   t_write = 3.6097e-5
+└   t_find = 0.007399226
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.024601588
+│   t_scan = 6.3909e-5
+│   t_write = 3.3867e-5
+└   t_find = 0.012643773
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.029586685
+│   t_scan = 7.8187e-5
+│   t_write = 3.3943e-5
+└   t_find = 0.006894858
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023305084
+│   t_scan = 7.4511e-5
+│   t_write = 3.26e-5
+└   t_find = 0.021224832
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.032652857
+│   t_scan = 7.3042e-5
+│   t_write = 3.2308e-5
+└   t_find = 0.016271058
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.021033359
+│   t_scan = 8.6062e-5
+│   t_write = 3.2552e-5
+└   t_find = 0.022934305
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.02831178
+│   t_scan = 0.000106302
+│   t_write = 3.2755e-5
+└   t_find = 0.023215403
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.025651259
+│   t_scan = 7.8689e-5
+│   t_write = 3.3907e-5
+└   t_find = 0.000867515
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.030093618
+│   t_scan = 6.4767e-5
+│   t_write = 3.1419e-5
+└   t_find = 0.007598367
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.032233942
+│   t_scan = 6.87e-5
+│   t_write = 3.1358e-5
+└   t_find = 0.007326736
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.031659619
+│   t_scan = 7.5099e-5
+│   t_write = 3.1991e-5
+└   t_find = 0.004881559
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.026623345
+│   t_scan = 8.3925e-5
+│   t_write = 3.2775e-5
+└   t_find = 0.006916969
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.028622927
+│   t_scan = 0.000114652
+│   t_write = 3.7385e-5
+└   t_find = 0.001100971
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.03397872
+│   t_scan = 7.3373e-5
+│   t_write = 3.6088e-5
+└   t_find = 0.000865795
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.026413266
+│   t_scan = 6.8368e-5
+│   t_write = 3.4818e-5
+└   t_find = 0.000875724
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.031655275
+│   t_scan = 8.3724e-5
+│   t_write = 3.7428e-5
+└   t_find = 0.006597454
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.017149097
+│   t_scan = 8.6633e-5
+│   t_write = 3.6366e-5
+└   t_find = 0.000931675
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.01782786
+│   t_scan = 8.8997e-5
+│   t_write = 3.6756e-5
+└   t_find = 0.000981808
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.018418459
+│   t_scan = 0.000115959
+│   t_write = 3.4195e-5
+└   t_find = 0.006876001
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.034494839
+│   t_scan = 7.2334e-5
+│   t_write = 3.482e-5
+└   t_find = 0.006920508
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.029500193
+│   t_scan = 7.9534e-5
+│   t_write = 3.5376e-5
+└   t_find = 0.015974537
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.033637232
+│   t_scan = 7.6666e-5
+│   t_write = 3.7269e-5
+└   t_find = 0.007911231
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.017706895
+│   t_scan = 7.3709e-5
+│   t_write = 3.3533e-5
+└   t_find = 0.007818869
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.016753392
+│   t_scan = 8.1867e-5
+│   t_write = 3.2651e-5
+└   t_find = 0.000969488
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.015943698
+│   t_scan = 0.000113091
+│   t_write = 4.8204e-5
+└   t_find = 0.001121365
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.034677749
+│   t_scan = 7.8774e-5
+│   t_write = 3.7281e-5
+└   t_find = 0.000906288
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.022898068
+│   t_scan = 6.8457e-5
+│   t_write = 3.4222e-5
+└   t_find = 0.00088718
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.036279362
+│   t_scan = 7.5658e-5
+│   t_write = 3.6997e-5
+└   t_find = 0.006902872
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.01965889
+│   t_scan = 7.6062e-5
+│   t_write = 3.5805e-5
+└   t_find = 0.000824985
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.016849534
+│   t_scan = 8.3659e-5
+│   t_write = 3.3274e-5
+└   t_find = 0.009027087
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.014850063
+│   t_scan = 0.000113844
+│   t_write = 3.7495e-5
+└   t_find = 0.002443861
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027261175
+│   t_scan = 7.3356e-5
+│   t_write = 3.5799e-5
+└   t_find = 0.000885502
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.020649457
+│   t_scan = 6.9857e-5
+│   t_write = 3.472e-5
+└   t_find = 0.000883792
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.019093164
+│   t_scan = 6.9578e-5
+│   t_write = 3.2351e-5
+└   t_find = 0.000900214
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.025135586
+│   t_scan = 7.847e-5
+│   t_write = 3.5129e-5
+└   t_find = 0.000981882
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.012810853
+│   t_scan = 8.8015e-5
+│   t_write = 6.074e-5
+└   t_find = 0.015947061
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.020239493
+│   t_scan = 0.000124679
+│   t_write = 4.3465e-5
+└   t_find = 0.001117659
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027157885
+│   t_scan = 7.9194e-5
+│   t_write = 3.832e-5
+└   t_find = 0.000782468
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.021149306
+│   t_scan = 7.0641e-5
+│   t_write = 3.6902e-5
+└   t_find = 0.000787144
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.018005302
+│   t_scan = 6.5785e-5
+│   t_write = 3.2103e-5
+└   t_find = 0.00077434
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.014394821
+│   t_scan = 7.043e-5
+│   t_write = 3.2848e-5
+└   t_find = 0.00082735
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.0130678
+│   t_scan = 9.8258e-5
+│   t_write = 3.7249e-5
+└   t_find = 0.000889975
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.0109586
+│   t_scan = 0.000128348
+│   t_write = 2.8173e-5
+└   t_find = 0.001043298
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027882683
+│   t_scan = 6.7935e-5
+│   t_write = 3.381e-5
+└   t_find = 0.001082179
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025017875
+│   t_scan = 7.6862e-5
+│   t_write = 3.5005e-5
+└   t_find = 0.000793167
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.020264944
+│   t_scan = 6.6726e-5
+│   t_write = 3.2651e-5
+└   t_find = 0.000893674
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.018896711
+│   t_scan = 6.68e-5
+│   t_write = 3.6163e-5
+└   t_find = 0.000826173
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.01600167
+│   t_scan = 8.0724e-5
+│   t_write = 5.1167e-5
+└   t_find = 0.000899571
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.014792755
+│   t_scan = 0.0001155
+│   t_write = 2.7896e-5
+└   t_find = 0.001045412
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027057031
+│   t_scan = 6.3967e-5
+│   t_write = 3.7395e-5
+└   t_find = 0.000796446
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.022360068
+│   t_scan = 6.4453e-5
+│   t_write = 3.4439e-5
+└   t_find = 0.00079344
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.021868858
+│   t_scan = 6.7028e-5
+│   t_write = 3.3233e-5
+└   t_find = 0.000798038
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.020758796
+│   t_scan = 0.000851672
+│   t_write = 5.3098e-5
+└   t_find = 0.000945775
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.019630101
+│   t_scan = 8.5999e-5
+│   t_write = 3.3092e-5
+└   t_find = 0.000899701
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.015625405
+│   t_scan = 0.000105521
+│   t_write = 3.3475e-5
+└   t_find = 0.000989959
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.02690334
+│   t_scan = 6.2571e-5
+│   t_write = 5.6411e-5
+└   t_find = 0.000785547
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025986429
+│   t_scan = 6.5388e-5
+│   t_write = 3.3655e-5
+└   t_find = 0.000783679
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.025667926
+│   t_scan = 6.2038e-5
+│   t_write = 3.3042e-5
+└   t_find = 0.000793684
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.021342998
+│   t_scan = 6.4986e-5
+│   t_write = 3.1948e-5
+└   t_find = 0.000822273
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.01734289
+│   t_scan = 8.5224e-5
+│   t_write = 3.0547e-5
+└   t_find = 0.000910817
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.016649668
+│   t_scan = 0.000109423
+│   t_write = 2.6881e-5
+└   t_find = 0.001033743
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.025052594
+│   t_scan = 6.3947e-5
+│   t_write = 3.2368e-5
+└   t_find = 0.000781743
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.0218244
+│   t_scan = 6.7003e-5
+│   t_write = 3.2763e-5
+└   t_find = 0.000781727
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.017428158
+│   t_scan = 0.000101267
+│   t_write = 2.9833e-5
+└   t_find = 0.000913597
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.013882405
+│   t_scan = 7.1986e-5
+│   t_write = 3.313e-5
+└   t_find = 0.000832096
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.011510978
+│   t_scan = 7.5916e-5
+│   t_write = 3.1456e-5
+└   t_find = 0.000891423
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.013079754
+│   t_scan = 0.000135192
+│   t_write = 3.4855e-5
+└   t_find = 0.001186749
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027820938
+│   t_scan = 6.7853e-5
+│   t_write = 3.3891e-5
+└   t_find = 0.000894793
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.021063543
+│   t_scan = 6.4219e-5
+│   t_write = 3.2296e-5
+└   t_find = 0.000788229
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.018296887
+│   t_scan = 6.3842e-5
+│   t_write = 3.2184e-5
+└   t_find = 0.000791499
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.012356593
+│   t_scan = 6.5002e-5
+│   t_write = 4.0839e-5
+└   t_find = 0.000856796
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.013758531
+│   t_scan = 9.2414e-5
+│   t_write = 3.8031e-5
+└   t_find = 0.000906733
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.010964283
+│   t_scan = 0.000113129
+│   t_write = 2.8925e-5
+└   t_find = 0.001061684
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.02732087
+│   t_scan = 7.5485e-5
+│   t_write = 3.6087e-5
+└   t_find = 0.000843828
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.022309465
+│   t_scan = 6.7427e-5
+│   t_write = 3.5191e-5
+└   t_find = 0.000788667
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.020500342
+│   t_scan = 6.4701e-5
+│   t_write = 2.6061e-5
+└   t_find = 0.000796623
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.014623978
+│   t_scan = 8.0689e-5
+│   t_write = 3.2759e-5
+└   t_find = 0.000832302
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.011851907
+│   t_scan = 8.3482e-5
+│   t_write = 3.2973e-5
+└   t_find = 0.000892265
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.011096183
+│   t_scan = 0.000108841
+│   t_write = 2.7304e-5
+└   t_find = 0.001059411
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027881978
+│   t_scan = 6.4132e-5
+│   t_write = 3.4256e-5
+└   t_find = 0.000818232
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.026231689
+│   t_scan = 6.3909e-5
+│   t_write = 3.2846e-5
+└   t_find = 0.000798087
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.025477399
+│   t_scan = 7.0097e-5
+│   t_write = 3.4116e-5
+└   t_find = 0.00079567
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.018323952
+│   t_scan = 6.3402e-5
+│   t_write = 3.1163e-5
+└   t_find = 0.000826287
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.0147788
+│   t_scan = 8.5562e-5
+│   t_write = 3.4317e-5
+└   t_find = 0.000904182
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.014669135
+│   t_scan = 0.00010742
+│   t_write = 2.7572e-5
+└   t_find = 0.00101019
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026688362
+│   t_scan = 6.8632e-5
+│   t_write = 3.7061e-5
+└   t_find = 0.000800171
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.023737306
+│   t_scan = 6.5114e-5
+│   t_write = 3.343e-5
+└   t_find = 0.000800065
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.022123744
+│   t_scan = 6.389e-5
+│   t_write = 3.427e-5
+└   t_find = 0.000796375
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.018552965
+│   t_scan = 6.6118e-5
+│   t_write = 3.1824e-5
+└   t_find = 0.000821373
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.014500849
+│   t_scan = 8.6095e-5
+│   t_write = 3.0676e-5
+└   t_find = 0.000890142
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.013702895
+│   t_scan = 0.000113673
+│   t_write = 3.4592e-5
+└   t_find = 0.00697456
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026539175
+│   t_scan = 6.272e-5
+│   t_write = 3.3282e-5
+└   t_find = 0.000775622
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025029335
+│   t_scan = 6.2874e-5
+│   t_write = 3.2664e-5
+└   t_find = 0.000787109
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.024646007
+│   t_scan = 5.8835e-5
+│   t_write = 4.4068e-5
+└   t_find = 0.000800815
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.020143227
+│   t_scan = 6.9143e-5
+│   t_write = 3.3583e-5
+└   t_find = 0.000819229
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.018074273
+│   t_scan = 8.0336e-5
+│   t_write = 3.1924e-5
+└   t_find = 0.000897772
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.015911576
+│   t_scan = 0.000118207
+│   t_write = 2.9583e-5
+└   t_find = 0.000989117
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027095104
+│   t_scan = 7.058e-5
+│   t_write = 3.6314e-5
+└   t_find = 0.000775791
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.026066585
+│   t_scan = 6.3537e-5
+│   t_write = 3.1981e-5
+└   t_find = 0.000780729
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.020184686
+│   t_scan = 6.5881e-5
+│   t_write = 3.2806e-5
+└   t_find = 0.000789828
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.015754442
+│   t_scan = 7.6008e-5
+│   t_write = 3.462e-5
+└   t_find = 0.000828819
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.011889521
+│   t_scan = 7.511e-5
+│   t_write = 3.339e-5
+└   t_find = 0.000885886
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.012513302
+│   t_scan = 0.000106832
+│   t_write = 2.6726e-5
+└   t_find = 0.001046286
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.028848041
+│   t_scan = 6.1605e-5
+│   t_write = 3.2351e-5
+└   t_find = 0.000801303
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.027733903
+│   t_scan = 8.9665e-5
+│   t_write = 3.1309e-5
+└   t_find = 0.000792501
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.021721109
+│   t_scan = 6.1891e-5
+│   t_write = 3.1884e-5
+└   t_find = 0.000794423
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.01613336
+│   t_scan = 6.7531e-5
+│   t_write = 3.8332e-5
+└   t_find = 0.000833491
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.016194341
+│   t_scan = 8.8342e-5
+│   t_write = 3.0103e-5
+└   t_find = 0.00088625
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.012462786
+│   t_scan = 0.000106579
+│   t_write = 2.6791e-5
+└   t_find = 0.001042112
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.02675534
+│   t_scan = 7.0308e-5
+│   t_write = 4.3338e-5
+└   t_find = 0.000802266
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.020282042
+│   t_scan = 6.2556e-5
+│   t_write = 3.2886e-5
+└   t_find = 0.000792969
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.018725576
+│   t_scan = 6.8942e-5
+│   t_write = 3.1481e-5
+└   t_find = 0.000799871
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.014303876
+│   t_scan = 6.9069e-5
+│   t_write = 3.0966e-5
+└   t_find = 0.000817527
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.012845639
+│   t_scan = 9.575e-5
+│   t_write = 3.5294e-5
+└   t_find = 0.002643835
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.0128906
+│   t_scan = 0.000109461
+│   t_write = 3.0912e-5
+└   t_find = 0.001072055
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.02797947
+│   t_scan = 6.5333e-5
+│   t_write = 3.2794e-5
+└   t_find = 0.007680357
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.026719596
+│   t_scan = 6.8083e-5
+│   t_write = 4.8203e-5
+└   t_find = 0.00081206
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.025114785
+│   t_scan = 6.4034e-5
+│   t_write = 3.7589e-5
+└   t_find = 0.000796235
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.023031328
+│   t_scan = 6.4382e-5
+│   t_write = 3.0278e-5
+└   t_find = 0.000825797
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.020679097
+│   t_scan = 7.651e-5
+│   t_write = 3.2764e-5
+└   t_find = 0.000890631
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.020590279
+│   t_scan = 0.000111733
+│   t_write = 2.6765e-5
+└   t_find = 0.000994855
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026764496
+│   t_scan = 6.7747e-5
+│   t_write = 3.2399e-5
+└   t_find = 0.007742485
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.020995034
+│   t_scan = 5.9207e-5
+│   t_write = 3.8445e-5
+└   t_find = 0.000771924
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.019143462
+│   t_scan = 6.2199e-5
+│   t_write = 3.125e-5
+└   t_find = 0.000789917
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.017661992
+│   t_scan = 6.4304e-5
+│   t_write = 3.2269e-5
+└   t_find = 0.000827985
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.015703608
+│   t_scan = 8.6357e-5
+│   t_write = 3.3667e-5
+└   t_find = 0.000894769
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.014276459
+│   t_scan = 0.000108487
+│   t_write = 2.6933e-5
+└   t_find = 0.001019248
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.028026663
+│   t_scan = 5.9012e-5
+│   t_write = 3.1463e-5
+└   t_find = 0.000806093
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.026782181
+│   t_scan = 7.0136e-5
+│   t_write = 3.9296e-5
+└   t_find = 0.00077964
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.024585142
+│   t_scan = 6.5726e-5
+│   t_write = 3.2281e-5
+└   t_find = 0.000802289
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.022727224
+│   t_scan = 6.9798e-5
+│   t_write = 3.9533e-5
+└   t_find = 0.000814639
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.02165831
+│   t_scan = 0.000100919
+│   t_write = 3.7312e-5
+└   t_find = 0.000887279
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.016658407
+│   t_scan = 0.000124248
+│   t_write = 2.9432e-5
+└   t_find = 0.000998483
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026709219
+│   t_scan = 6.2714e-5
+│   t_write = 4.6368e-5
+└   t_find = 0.000769472
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.024312914
+│   t_scan = 6.5016e-5
+│   t_write = 3.1492e-5
+└   t_find = 0.000876884
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.01995549
+│   t_scan = 6.6082e-5
+│   t_write = 3.3055e-5
+└   t_find = 0.000803357
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.015859442
+│   t_scan = 7.257e-5
+│   t_write = 3.2906e-5
+└   t_find = 0.000819356
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.013897261
+│   t_scan = 8.3001e-5
+│   t_write = 3.8326e-5
+└   t_find = 0.000904267
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.013049775
+│   t_scan = 0.000101343
+│   t_write = 3.1652e-5
+└   t_find = 0.001007109
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.028707766
+│   t_scan = 6.429e-5
+│   t_write = 3.2629e-5
+└   t_find = 0.000804849
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.020403798
+│   t_scan = 6.15e-5
+│   t_write = 3.194e-5
+└   t_find = 0.00080418
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.020061198
+│   t_scan = 7.1845e-5
+│   t_write = 3.9306e-5
+└   t_find = 0.000803996
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.014857932
+│   t_scan = 6.8018e-5
+│   t_write = 3.1469e-5
+└   t_find = 0.000820781
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.011359173
+│   t_scan = 7.3438e-5
+│   t_write = 3.1595e-5
+└   t_find = 0.000914682
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.01186548
+│   t_scan = 0.000113922
+│   t_write = 2.7879e-5
+└   t_find = 0.001231434
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027417671
+│   t_scan = 7.3583e-5
+│   t_write = 3.9806e-5
+└   t_find = 0.000811697
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025190172
+│   t_scan = 6.7893e-5
+│   t_write = 4.496e-5
+└   t_find = 0.000796125
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023830481
+│   t_scan = 7.3423e-5
+│   t_write = 3.8642e-5
+└   t_find = 0.000785596
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.021437909
+│   t_scan = 7.6938e-5
+│   t_write = 4.8403e-5
+└   t_find = 0.000831351
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.020589323
+│   t_scan = 9.8422e-5
+│   t_write = 5.1663e-5
+└   t_find = 0.000884903
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.019497424
+│   t_scan = 0.0001161
+│   t_write = 3.2544e-5
+└   t_find = 0.001015705
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.028015742
+│   t_scan = 8.753e-5
+│   t_write = 3.5582e-5
+└   t_find = 0.000789814
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.027220493
+│   t_scan = 7.8911e-5
+│   t_write = 3.6931e-5
+└   t_find = 0.000789233
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.027217548
+│   t_scan = 7.1068e-5
+│   t_write = 5.1623e-5
+└   t_find = 0.000801233
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.025909763
+│   t_scan = 0.000114957
+│   t_write = 3.3453e-5
+└   t_find = 0.000818849
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.022523285
+│   t_scan = 9.1191e-5
+│   t_write = 3.5883e-5
+└   t_find = 0.000880944
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.017178736
+│   t_scan = 0.000106594
+│   t_write = 2.7076e-5
+└   t_find = 0.000985123
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026762139
+│   t_scan = 7.5386e-5
+│   t_write = 3.3641e-5
+└   t_find = 0.000772079
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.026231872
+│   t_scan = 6.4252e-5
+│   t_write = 3.3775e-5
+└   t_find = 0.000785687
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.024135167
+│   t_scan = 6.7607e-5
+│   t_write = 3.8032e-5
+└   t_find = 0.000910392
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.02229025
+│   t_scan = 7.7518e-5
+│   t_write = 3.0223e-5
+└   t_find = 0.000819118
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.020585213
+│   t_scan = 7.8691e-5
+│   t_write = 3.3402e-5
+└   t_find = 0.000879109
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.019887567
+│   t_scan = 0.000103863
+│   t_write = 3.0642e-5
+└   t_find = 0.000996916
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026232173
+│   t_scan = 6.0254e-5
+│   t_write = 3.1421e-5
+└   t_find = 0.000772826
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.020606252
+│   t_scan = 8.5472e-5
+│   t_write = 4.1922e-5
+└   t_find = 0.000802545
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.02051575
+│   t_scan = 7.4838e-5
+│   t_write = 3.3084e-5
+└   t_find = 0.000876147
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.017128516
+│   t_scan = 7.7859e-5
+│   t_write = 3.3078e-5
+└   t_find = 0.000809345
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.014252448
+│   t_scan = 8.0677e-5
+│   t_write = 3.478e-5
+└   t_find = 0.000885634
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.013073027
+│   t_scan = 0.000107741
+│   t_write = 2.6557e-5
+└   t_find = 0.001038242
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.028753529
+│   t_scan = 6.7659e-5
+│   t_write = 3.2527e-5
+└   t_find = 0.000805236
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.020989173
+│   t_scan = 6.1374e-5
+│   t_write = 3.8768e-5
+└   t_find = 0.000784356
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.019318603
+│   t_scan = 6.5579e-5
+│   t_write = 3.2246e-5
+└   t_find = 0.000891604
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.015295479
+│   t_scan = 6.9375e-5
+│   t_write = 3.1996e-5
+└   t_find = 0.000820841
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.017215088
+│   t_scan = 8.6643e-5
+│   t_write = 3.1981e-5
+└   t_find = 0.000897796
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.013280245
+│   t_scan = 0.000105006
+│   t_write = 2.5895e-5
+└   t_find = 0.001021348
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.028376124
+│   t_scan = 7.7603e-5
+│   t_write = 3.1394e-5
+└   t_find = 0.000794684
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025235645
+│   t_scan = 6.6601e-5
+│   t_write = 3.2456e-5
+└   t_find = 0.000781542
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023755063
+│   t_scan = 6.7902e-5
+│   t_write = 3.4758e-5
+└   t_find = 0.000798383
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.018996821
+│   t_scan = 7.3442e-5
+│   t_write = 4.2497e-5
+└   t_find = 0.000819805
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.017863762
+│   t_scan = 9.8612e-5
+│   t_write = 4.0857e-5
+└   t_find = 0.000877998
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.014643099
+│   t_scan = 0.000131057
+│   t_write = 3.2895e-5
+└   t_find = 0.001028395
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026780654
+│   t_scan = 9.1858e-5
+│   t_write = 3.2343e-5
+└   t_find = 0.000824763
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.019985966
+│   t_scan = 7.6845e-5
+│   t_write = 3.8695e-5
+└   t_find = 0.000789157
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023713246
+│   t_scan = 6.2561e-5
+│   t_write = 4.0178e-5
+└   t_find = 0.000801028
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.014895022
+│   t_scan = 7.1526e-5
+│   t_write = 3.4943e-5
+└   t_find = 0.000820724
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.013166832
+│   t_scan = 8.4858e-5
+│   t_write = 3.5561e-5
+└   t_find = 0.000911139
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.010216462
+│   t_scan = 0.000116152
+│   t_write = 3.6528e-5
+└   t_find = 0.001045717
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027540082
+│   t_scan = 6.3464e-5
+│   t_write = 3.4686e-5
+└   t_find = 0.000812222
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.026729131
+│   t_scan = 6.7565e-5
+│   t_write = 3.4241e-5
+└   t_find = 0.000793029
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023613886
+│   t_scan = 8.0926e-5
+│   t_write = 3.0876e-5
+└   t_find = 0.000801625
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.022258644
+│   t_scan = 6.3008e-5
+│   t_write = 3.0635e-5
+└   t_find = 0.00082067
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.017734701
+│   t_scan = 7.9854e-5
+│   t_write = 3.3896e-5
+└   t_find = 0.000871374
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.017217947
+│   t_scan = 0.000101018
+│   t_write = 5.343e-5
+└   t_find = 0.000984059
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026687034
+│   t_scan = 6.3331e-5
+│   t_write = 3.4806e-5
+└   t_find = 0.000776013
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.026285415
+│   t_scan = 5.6116e-5
+│   t_write = 3.6165e-5
+└   t_find = 0.000790451
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.022554061
+│   t_scan = 6.508e-5
+│   t_write = 3.1438e-5
+└   t_find = 0.000804542
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.015597463
+│   t_scan = 6.655e-5
+│   t_write = 3.2768e-5
+└   t_find = 0.000829321
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.016127381
+│   t_scan = 8.4848e-5
+│   t_write = 2.7597e-5
+└   t_find = 0.000905916
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.018454752
+│   t_scan = 0.000113775
+│   t_write = 3.0644e-5
+└   t_find = 0.001088052
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027304351
+│   t_scan = 6.2203e-5
+│   t_write = 4.2402e-5
+└   t_find = 0.000794956
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.024678124
+│   t_scan = 6.3111e-5
+│   t_write = 3.3014e-5
+└   t_find = 0.000806146
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.024111007
+│   t_scan = 6.1622e-5
+│   t_write = 3.3876e-5
+└   t_find = 0.000795931
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.018459077
+│   t_scan = 7.6339e-5
+│   t_write = 3.4128e-5
+└   t_find = 0.000817251
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.015542488
+│   t_scan = 8.3459e-5
+│   t_write = 3.0662e-5
+└   t_find = 0.000883057
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.016251528
+│   t_scan = 0.00010575
+│   t_write = 2.7052e-5
+└   t_find = 0.001028317
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027930529
+│   t_scan = 6.5382e-5
+│   t_write = 3.1747e-5
+└   t_find = 0.008421705
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.024636468
+│   t_scan = 6.8397e-5
+│   t_write = 3.6072e-5
+└   t_find = 0.000786042
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.021025692
+│   t_scan = 6.4119e-5
+│   t_write = 3.9397e-5
+└   t_find = 0.000793544
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.017780021
+│   t_scan = 6.7106e-5
+│   t_write = 3.3542e-5
+└   t_find = 0.000819132
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.017145847
+│   t_scan = 7.9764e-5
+│   t_write = 3.4381e-5
+└   t_find = 0.000898391
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.016652356
+│   t_scan = 0.000114197
+│   t_write = 2.7565e-5
+└   t_find = 0.00101858
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027473777
+│   t_scan = 7.0863e-5
+│   t_write = 3.6097e-5
+└   t_find = 0.000788166
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025475371
+│   t_scan = 6.4298e-5
+│   t_write = 3.1774e-5
+└   t_find = 0.000798753
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.025420327
+│   t_scan = 7.5725e-5
+│   t_write = 3.8022e-5
+└   t_find = 0.000796062
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.023708281
+│   t_scan = 7.238e-5
+│   t_write = 4.7228e-5
+└   t_find = 0.000833343
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.023527753
+│   t_scan = 7.9126e-5
+│   t_write = 3.9552e-5
+└   t_find = 0.00086977
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.022417005
+│   t_scan = 0.000115599
+│   t_write = 2.8623e-5
+└   t_find = 0.00098704
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.025549818
+│   t_scan = 6.5572e-5
+│   t_write = 3.4168e-5
+└   t_find = 0.000770976
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025799207
+│   t_scan = 8.9019e-5
+│   t_write = 4.0445e-5
+└   t_find = 0.001432382
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.024356654
+│   t_scan = 6.4343e-5
+│   t_write = 3.459e-5
+└   t_find = 0.000780847
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.02300434
+│   t_scan = 6.9736e-5
+│   t_write = 3.4503e-5
+└   t_find = 0.00082046
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.01950125
+│   t_scan = 9.1298e-5
+│   t_write = 3.1758e-5
+└   t_find = 0.000864742
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.015412502
+│   t_scan = 0.000102537
+│   t_write = 2.6146e-5
+└   t_find = 0.000981397
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026818954
+│   t_scan = 6.3166e-5
+│   t_write = 3.9095e-5
+└   t_find = 0.000785915
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.018811228
+│   t_scan = 6.1255e-5
+│   t_write = 3.278e-5
+└   t_find = 0.000792099
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.020055032
+│   t_scan = 5.7557e-5
+│   t_write = 3.0893e-5
+└   t_find = 0.000808129
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.015243376
+│   t_scan = 7.1849e-5
+│   t_write = 4.551e-5
+└   t_find = 0.000834076
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.013725658
+│   t_scan = 8.2465e-5
+│   t_write = 3.3301e-5
+└   t_find = 0.003429753
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.01334313
+│   t_scan = 0.000148679
+│   t_write = 3.8181e-5
+└   t_find = 0.001206969
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.028159074
+│   t_scan = 7.1171e-5
+│   t_write = 3.5268e-5
+└   t_find = 0.000793608
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.026209606
+│   t_scan = 7.0969e-5
+│   t_write = 4.5645e-5
+└   t_find = 0.000800633
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.024900652
+│   t_scan = 6.7624e-5
+│   t_write = 4.2217e-5
+└   t_find = 0.000797877
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.023076656
+│   t_scan = 7.0553e-5
+│   t_write = 3.2834e-5
+└   t_find = 0.000819096
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.023173724
+│   t_scan = 7.5914e-5
+│   t_write = 3.3654e-5
+└   t_find = 0.000885636
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.020428144
+│   t_scan = 0.000118903
+│   t_write = 3.6366e-5
+└   t_find = 0.001090247
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.025229966
+│   t_scan = 9.2938e-5
+│   t_write = 4.2772e-5
+└   t_find = 0.007304111
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.02107188
+│   t_scan = 7.0732e-5
+│   t_write = 3.7821e-5
+└   t_find = 0.000795544
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.018872685
+│   t_scan = 7.7097e-5
+│   t_write = 3.7063e-5
+└   t_find = 0.000798197
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.017510455
+│   t_scan = 6.9148e-5
+│   t_write = 3.5978e-5
+└   t_find = 0.000817364
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.015997866
+│   t_scan = 8.1912e-5
+│   t_write = 3.9434e-5
+└   t_find = 0.000896395
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.017274259
+│   t_scan = 0.000118232
+│   t_write = 4.0495e-5
+└   t_find = 0.007956511
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.025475361
+│   t_scan = 6.4825e-5
+│   t_write = 3.4168e-5
+└   t_find = 0.000793872
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.022777072
+│   t_scan = 6.4407e-5
+│   t_write = 3.2324e-5
+└   t_find = 0.00078947
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.019233675
+│   t_scan = 6.4239e-5
+│   t_write = 4.8274e-5
+└   t_find = 0.000788422
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.017776015
+│   t_scan = 6.8148e-5
+│   t_write = 3.1973e-5
+└   t_find = 0.000827837
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.016605261
+│   t_scan = 8.3378e-5
+│   t_write = 3.2093e-5
+└   t_find = 0.000911534
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.013822787
+│   t_scan = 0.000102007
+│   t_write = 3.0125e-5
+└   t_find = 0.001022658
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027784556
+│   t_scan = 6.1961e-5
+│   t_write = 4.2746e-5
+└   t_find = 0.000788712
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.02211922
+│   t_scan = 6.8147e-5
+│   t_write = 3.3794e-5
+└   t_find = 0.000791689
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.026140763
+│   t_scan = 9.6463e-5
+│   t_write = 3.8921e-5
+└   t_find = 0.004782927
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.019224557
+│   t_scan = 8.4568e-5
+│   t_write = 3.1846e-5
+└   t_find = 0.001178872
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.015589869
+│   t_scan = 8.6178e-5
+│   t_write = 3.4964e-5
+└   t_find = 0.000876396
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.011296633
+│   t_scan = 0.000111331
+│   t_write = 3.5205e-5
+└   t_find = 0.001000401
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.028497111
+│   t_scan = 6.9765e-5
+│   t_write = 3.4317e-5
+└   t_find = 0.00077909
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.022074517
+│   t_scan = 6.3528e-5
+│   t_write = 3.3891e-5
+└   t_find = 0.000795141
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.021341208
+│   t_scan = 6.7243e-5
+│   t_write = 4.2399e-5
+└   t_find = 0.000793387
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.018701122
+│   t_scan = 6.6051e-5
+│   t_write = 3.29e-5
+└   t_find = 0.00082215
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.017724943
+│   t_scan = 7.7824e-5
+│   t_write = 3.1576e-5
+└   t_find = 0.000877023
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.013385363
+│   t_scan = 0.000131768
+│   t_write = 3.4695e-5
+└   t_find = 0.001032128
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.025956365
+│   t_scan = 7.2378e-5
+│   t_write = 3.4685e-5
+└   t_find = 0.00089582
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.021335714
+│   t_scan = 7.6254e-5
+│   t_write = 3.5776e-5
+└   t_find = 0.000813777
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.020359801
+│   t_scan = 6.6589e-5
+│   t_write = 3.4229e-5
+└   t_find = 0.000800455
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.019459746
+│   t_scan = 6.4681e-5
+│   t_write = 3.0956e-5
+└   t_find = 0.000832756
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.018837774
+│   t_scan = 8.33e-5
+│   t_write = 3.9457e-5
+└   t_find = 0.000880133
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.017358841
+│   t_scan = 0.000116157
+│   t_write = 2.8248e-5
+└   t_find = 0.001000882
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027167135
+│   t_scan = 5.9576e-5
+│   t_write = 3.0829e-5
+└   t_find = 0.000780359
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.02318825
+│   t_scan = 6.6923e-5
+│   t_write = 3.3351e-5
+└   t_find = 0.000777633
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023029299
+│   t_scan = 6.3897e-5
+│   t_write = 3.176e-5
+└   t_find = 0.000893721
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.020748946
+│   t_scan = 9.8373e-5
+│   t_write = 4.0051e-5
+└   t_find = 0.000809375
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.014795883
+│   t_scan = 8.1567e-5
+│   t_write = 3.282e-5
+└   t_find = 0.000888101
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.011784919
+│   t_scan = 0.000107147
+│   t_write = 2.6671e-5
+└   t_find = 0.001038533
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026796195
+│   t_scan = 6.3235e-5
+│   t_write = 4.4298e-5
+└   t_find = 0.000796172
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025106974
+│   t_scan = 6.5229e-5
+│   t_write = 3.1298e-5
+└   t_find = 0.000886625
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.024896989
+│   t_scan = 6.6499e-5
+│   t_write = 3.1639e-5
+└   t_find = 0.00081226
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.024301166
+│   t_scan = 7.6982e-5
+│   t_write = 3.1601e-5
+└   t_find = 0.000827938
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.023037931
+│   t_scan = 8.1603e-5
+│   t_write = 3.0405e-5
+└   t_find = 0.000880423
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.022436484
+│   t_scan = 0.000111538
+│   t_write = 3.4166e-5
+└   t_find = 0.000985793
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026890971
+│   t_scan = 5.8686e-5
+│   t_write = 3.1631e-5
+└   t_find = 0.000777546
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025238649
+│   t_scan = 5.92e-5
+│   t_write = 3.0612e-5
+└   t_find = 0.00078602
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023801189
+│   t_scan = 5.8237e-5
+│   t_write = 4.1916e-5
+└   t_find = 0.000798085
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.019696289
+│   t_scan = 6.8554e-5
+│   t_write = 3.417e-5
+└   t_find = 0.000807024
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.014422882
+│   t_scan = 8.0654e-5
+│   t_write = 3.1059e-5
+└   t_find = 0.000885701
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.013243865
+│   t_scan = 0.000112883
+│   t_write = 2.6663e-5
+└   t_find = 0.001018328
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026299463
+│   t_scan = 6.0145e-5
+│   t_write = 3.3014e-5
+└   t_find = 0.00082442
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.02489691
+│   t_scan = 6.1215e-5
+│   t_write = 4.1507e-5
+└   t_find = 0.000780682
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.022081007
+│   t_scan = 6.6142e-5
+│   t_write = 3.4267e-5
+└   t_find = 0.000799254
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.019598299
+│   t_scan = 6.5371e-5
+│   t_write = 3.2349e-5
+└   t_find = 0.000822034
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.016348166
+│   t_scan = 8.6206e-5
+│   t_write = 3.3804e-5
+└   t_find = 0.000879962
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.012517779
+│   t_scan = 0.000102007
+│   t_write = 2.6651e-5
+└   t_find = 0.001004303
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027679021
+│   t_scan = 6.2627e-5
+│   t_write = 3.391e-5
+└   t_find = 0.000801586
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.026572747
+│   t_scan = 7.409e-5
+│   t_write = 3.262e-5
+└   t_find = 0.000803153
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.024470781
+│   t_scan = 6.342e-5
+│   t_write = 3.3173e-5
+└   t_find = 0.000797099
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.018972386
+│   t_scan = 6.6711e-5
+│   t_write = 3.9095e-5
+└   t_find = 0.000823009
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.019489803
+│   t_scan = 7.462e-5
+│   t_write = 3.2133e-5
+└   t_find = 0.000881216
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.017959531
+│   t_scan = 0.000109967
+│   t_write = 2.8658e-5
+└   t_find = 0.001005427
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.025266583
+│   t_scan = 6.9383e-5
+│   t_write = 4.0069e-5
+└   t_find = 0.000873323
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.024168456
+│   t_scan = 6.5552e-5
+│   t_write = 3.4184e-5
+└   t_find = 0.000792102
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.024647529
+│   t_scan = 6.091e-5
+│   t_write = 3.1975e-5
+└   t_find = 0.00079949
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.023551017
+│   t_scan = 7.5477e-5
+│   t_write = 3.3631e-5
+└   t_find = 0.000809632
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.023042532
+│   t_scan = 8.2322e-5
+│   t_write = 3.4275e-5
+└   t_find = 0.000874212
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.020648329
+│   t_scan = 0.000106385
+│   t_write = 3.3451e-5
+└   t_find = 0.0009914
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027868564
+│   t_scan = 6.458e-5
+│   t_write = 3.3203e-5
+└   t_find = 0.000773167
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.024506267
+│   t_scan = 9.0199e-5
+│   t_write = 4.1696e-5
+└   t_find = 0.000889743
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.025177258
+│   t_scan = 7.4016e-5
+│   t_write = 3.2032e-5
+└   t_find = 0.000798955
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.023022053
+│   t_scan = 6.7108e-5
+│   t_write = 4.8725e-5
+└   t_find = 0.000806396
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.021741708
+│   t_scan = 7.5846e-5
+│   t_write = 3.4339e-5
+└   t_find = 0.000880816
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.0224397
+│   t_scan = 0.000115664
+│   t_write = 2.8929e-5
+└   t_find = 0.000983556
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027868238
+│   t_scan = 6.8173e-5
+│   t_write = 3.7723e-5
+└   t_find = 0.000769557
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.027525048
+│   t_scan = 6.1746e-5
+│   t_write = 3.8878e-5
+└   t_find = 0.000789067
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.027355386
+│   t_scan = 6.7236e-5
+│   t_write = 3.2251e-5
+└   t_find = 0.000780578
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.02364968
+│   t_scan = 6.5678e-5
+│   t_write = 4.039e-5
+└   t_find = 0.000819279
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.016778586
+│   t_scan = 8.317e-5
+│   t_write = 3.465e-5
+└   t_find = 0.000868395
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.012829863
+│   t_scan = 0.000107791
+│   t_write = 2.7659e-5
+└   t_find = 0.001006745
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.028096114
+│   t_scan = 6.2528e-5
+│   t_write = 3.2665e-5
+└   t_find = 0.000790094
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.024264503
+│   t_scan = 7.3094e-5
+│   t_write = 3.6236e-5
+└   t_find = 0.000795783
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.022751188
+│   t_scan = 6.2139e-5
+│   t_write = 3.1621e-5
+└   t_find = 0.000801616
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.018982783
+│   t_scan = 6.289e-5
+│   t_write = 3.8582e-5
+└   t_find = 0.000816977
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.017241156
+│   t_scan = 9.0635e-5
+│   t_write = 3.3546e-5
+└   t_find = 0.000868504
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.014423888
+│   t_scan = 0.000105567
+│   t_write = 4.0317e-5
+└   t_find = 0.00102576
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026857541
+│   t_scan = 6.8647e-5
+│   t_write = 3.4757e-5
+└   t_find = 0.000781481
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.026173698
+│   t_scan = 6.004e-5
+│   t_write = 4.2004e-5
+└   t_find = 0.000794191
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.025093368
+│   t_scan = 6.0939e-5
+│   t_write = 3.2967e-5
+└   t_find = 0.000801166
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.022261665
+│   t_scan = 7.0638e-5
+│   t_write = 3.2768e-5
+└   t_find = 0.000818487
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.02194399
+│   t_scan = 8.4328e-5
+│   t_write = 4.7867e-5
+└   t_find = 0.000884607
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.019656843
+│   t_scan = 0.000105701
+│   t_write = 5.9437e-5
+└   t_find = 0.000998977
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026597823
+│   t_scan = 5.945e-5
+│   t_write = 3.1116e-5
+└   t_find = 0.000771653
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.021749796
+│   t_scan = 5.9687e-5
+│   t_write = 3.3907e-5
+└   t_find = 0.000790859
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.01936001
+│   t_scan = 7.1631e-5
+│   t_write = 5.1522e-5
+└   t_find = 0.000815425
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.015295953
+│   t_scan = 8.0361e-5
+│   t_write = 3.8749e-5
+└   t_find = 0.000852278
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.013383024
+│   t_scan = 8.8689e-5
+│   t_write = 3.5996e-5
+└   t_find = 0.000892583
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.012484052
+│   t_scan = 0.000115904
+│   t_write = 2.7516e-5
+└   t_find = 0.001035991
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026887195
+│   t_scan = 6.0165e-5
+│   t_write = 3.1537e-5
+└   t_find = 0.000807334
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.023330504
+│   t_scan = 6.5605e-5
+│   t_write = 3.8177e-5
+└   t_find = 0.000893687
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.024540531
+│   t_scan = 6.5217e-5
+│   t_write = 3.4277e-5
+└   t_find = 0.000794137
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.018711031
+│   t_scan = 7.1691e-5
+│   t_write = 7.4719e-5
+└   t_find = 0.000906353
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.015472591
+│   t_scan = 8.7093e-5
+│   t_write = 2.8553e-5
+└   t_find = 0.000874844
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.015171603
+│   t_scan = 0.000104246
+│   t_write = 2.6891e-5
+└   t_find = 0.001015929
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027228283
+│   t_scan = 8.1474e-5
+│   t_write = 3.1596e-5
+└   t_find = 0.00078027
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.022637814
+│   t_scan = 6.6119e-5
+│   t_write = 3.2594e-5
+└   t_find = 0.000781729
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.021063634
+│   t_scan = 6.7231e-5
+│   t_write = 3.1757e-5
+└   t_find = 0.000900179
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.018468333
+│   t_scan = 7.1657e-5
+│   t_write = 4.1888e-5
+└   t_find = 0.000820688
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.01849322
+│   t_scan = 9.0115e-5
+│   t_write = 3.2235e-5
+└   t_find = 0.000872383
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.013537385
+│   t_scan = 0.00010623
+│   t_write = 2.9025e-5
+└   t_find = 0.001045288
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026744676
+│   t_scan = 6.9501e-5
+│   t_write = 3.2902e-5
+└   t_find = 0.000787532
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025948599
+│   t_scan = 6.6828e-5
+│   t_write = 3.2484e-5
+└   t_find = 0.00079114
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023047631
+│   t_scan = 5.8562e-5
+│   t_write = 3.6837e-5
+└   t_find = 0.00079738
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.022763603
+│   t_scan = 7.8156e-5
+│   t_write = 3.2201e-5
+└   t_find = 0.000822043
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.018776056
+│   t_scan = 8.3755e-5
+│   t_write = 3.1846e-5
+└   t_find = 0.000887021
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.013403762
+│   t_scan = 0.000106725
+│   t_write = 3.1644e-5
+└   t_find = 0.000985309
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.028390585
+│   t_scan = 6.4037e-5
+│   t_write = 3.3438e-5
+└   t_find = 0.000782502
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025812381
+│   t_scan = 6.461e-5
+│   t_write = 3.2517e-5
+└   t_find = 0.000794018
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.024326491
+│   t_scan = 6.8135e-5
+│   t_write = 3.4757e-5
+└   t_find = 0.000819678
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.019920855
+│   t_scan = 6.6201e-5
+│   t_write = 4.9014e-5
+└   t_find = 0.000837392
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.019932226
+│   t_scan = 7.8605e-5
+│   t_write = 3.7917e-5
+└   t_find = 0.000873189
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.016275439
+│   t_scan = 0.000110946
+│   t_write = 2.8227e-5
+└   t_find = 0.001001294
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.025192957
+│   t_scan = 6.8203e-5
+│   t_write = 3.336e-5
+└   t_find = 0.000784692
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.023401155
+│   t_scan = 5.8071e-5
+│   t_write = 4.0775e-5
+└   t_find = 0.000781918
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023034021
+│   t_scan = 6.0729e-5
+│   t_write = 3.732e-5
+└   t_find = 0.000819649
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.016794308
+│   t_scan = 6.8329e-5
+│   t_write = 3.2163e-5
+└   t_find = 0.000823341
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.01558954
+│   t_scan = 8.9231e-5
+│   t_write = 3.4032e-5
+└   t_find = 0.000881476
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.015434619
+│   t_scan = 0.000109389
+│   t_write = 2.8322e-5
+└   t_find = 0.001028704
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.02502834
+│   t_scan = 6.0208e-5
+│   t_write = 3.9754e-5
+└   t_find = 0.000779963
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.024277245
+│   t_scan = 6.1328e-5
+│   t_write = 3.307e-5
+└   t_find = 0.000790534
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.024035951
+│   t_scan = 6.4077e-5
+│   t_write = 3.2844e-5
+└   t_find = 0.000794805
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.023420984
+│   t_scan = 7.3883e-5
+│   t_write = 4.9708e-5
+└   t_find = 0.000829488
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.022214607
+│   t_scan = 8.0995e-5
+│   t_write = 3.1238e-5
+└   t_find = 0.00087018
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.018559033
+│   t_scan = 0.000104225
+│   t_write = 2.6224e-5
+└   t_find = 0.000994936
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027727661
+│   t_scan = 8.6501e-5
+│   t_write = 3.5662e-5
+└   t_find = 0.001178574
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.026011799
+│   t_scan = 6.5206e-5
+│   t_write = 3.4258e-5
+└   t_find = 0.000782841
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.02327861
+│   t_scan = 5.862e-5
+│   t_write = 3.9797e-5
+└   t_find = 0.000782795
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.020816662
+│   t_scan = 6.5961e-5
+│   t_write = 3.2336e-5
+└   t_find = 0.000810345
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.017062428
+│   t_scan = 9.5175e-5
+│   t_write = 3.4478e-5
+└   t_find = 0.000875492
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.015838799
+│   t_scan = 0.000118251
+│   t_write = 3.4298e-5
+└   t_find = 0.001024308
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.026071055
+│   t_scan = 6.9479e-5
+│   t_write = 3.4954e-5
+└   t_find = 0.000780878
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.023872954
+│   t_scan = 6.2074e-5
+│   t_write = 3.5216e-5
+└   t_find = 0.000786015
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.020002413
+│   t_scan = 7.3447e-5
+│   t_write = 4.6573e-5
+└   t_find = 0.000824034
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.017265909
+│   t_scan = 8.3864e-5
+│   t_write = 3.3835e-5
+└   t_find = 0.002455329
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.014921353
+│   t_scan = 8.8301e-5
+│   t_write = 8.6083e-5
+└   t_find = 0.000903407
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.017026109
+│   t_scan = 0.000113269
+│   t_write = 3.6742e-5
+└   t_find = 0.001025612
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.025810597
+│   t_scan = 7.7635e-5
+│   t_write = 3.7048e-5
+└   t_find = 0.000797012
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.022193969
+│   t_scan = 7.6907e-5
+│   t_write = 3.6745e-5
+└   t_find = 0.000784132
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.018561062
+│   t_scan = 6.9561e-5
+│   t_write = 3.6124e-5
+└   t_find = 0.000790856
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.014909045
+│   t_scan = 6.6627e-5
+│   t_write = 3.3957e-5
+└   t_find = 0.00082283
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.014481906
+│   t_scan = 8.3816e-5
+│   t_write = 3.3797e-5
+└   t_find = 0.000901612
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.011147481
+│   t_scan = 0.000108424
+│   t_write = 2.8003e-5
+└   t_find = 0.001031213
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.027510439
+│   t_scan = 6.813e-5
+│   t_write = 4.0272e-5
+└   t_find = 0.000891776
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.026133256
+│   t_scan = 6.9085e-5
+│   t_write = 3.5433e-5
+└   t_find = 0.000791472
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023843499
+│   t_scan = 6.6481e-5
+│   t_write = 3.237e-5
+└   t_find = 0.00080289
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.020836937
+│   t_scan = 8.0511e-5
+│   t_write = 3.1934e-5
+└   t_find = 0.000817726
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.018177606
+│   t_scan = 7.3575e-5
+│   t_write = 3.1785e-5
+└   t_find = 0.000869398
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.012890542
+│   t_scan = 0.000104941
+│   t_write = 2.5815e-5
+└   t_find = 0.00099892
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.0259431
+│   t_scan = 7.2922e-5
+│   t_write = 3.4737e-5
+└   t_find = 0.0007704
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.025662197
+│   t_scan = 6.977e-5
+│   t_write = 3.4869e-5
+└   t_find = 0.000781744
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.023139496
+│   t_scan = 6.1528e-5
+│   t_write = 3.8897e-5
+└   t_find = 0.00079477
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.022690573
+│   t_scan = 7.0706e-5
+│   t_write = 3.2939e-5
+└   t_find = 0.000810972
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.022151735
+│   t_scan = 8.046e-5
+│   t_write = 3.4454e-5
+└   t_find = 0.000875814
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.019959515
+│   t_scan = 0.000106482
+│   t_write = 2.549e-5
+└   t_find = 0.00098724
+┌ Info: gpu_prof:update_hist
+│   depth = 1
+│   n_active = 1
+│   t_hist = 0.025901512
+│   t_scan = 6.4912e-5
+│   t_write = 3.1995e-5
+└   t_find = 0.000795646
+┌ Info: gpu_prof:update_hist
+│   depth = 2
+│   n_active = 2
+│   t_hist = 0.026412803
+│   t_scan = 9.4068e-5
+│   t_write = 3.5304e-5
+└   t_find = 0.001843927
+┌ Info: gpu_prof:update_hist
+│   depth = 3
+│   n_active = 4
+│   t_hist = 0.021127705
+│   t_scan = 7.2011e-5
+│   t_write = 3.2662e-5
+└   t_find = 0.000786579
+┌ Info: gpu_prof:update_hist
+│   depth = 4
+│   n_active = 8
+│   t_hist = 0.019615861
+│   t_scan = 6.3799e-5
+│   t_write = 3.0598e-5
+└   t_find = 0.000812938
+┌ Info: gpu_prof:update_hist
+│   depth = 5
+│   n_active = 16
+│   t_hist = 0.01711854
+│   t_scan = 7.3636e-5
+│   t_write = 3.7757e-5
+└   t_find = 0.000866544
+┌ Info: gpu_prof:update_hist
+│   depth = 6
+│   n_active = 32
+│   t_hist = 0.013801615
+│   t_scan = 0.000116191
+│   t_write = 2.7383e-5
+└   t_find = 0.001003236
+┌ Info: iter 200
+└   metric = 0.08288303017616272
+┌ Info: train
+└   t_train_evo = 39.629833693
+┌ Info: predict
+└   t_infer_evo = 10.810666995

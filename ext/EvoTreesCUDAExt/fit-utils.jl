@@ -49,6 +49,19 @@ end
     end
 end
 
+@kernel function zero_node_hist_kernel_js!(h∇::AbstractArray{T,4}, @Const(nodes), @Const(js)) where {T}
+    idx, j_idx, bin = @index(Global, NTuple)
+    @inbounds if idx <= length(nodes) && j_idx <= length(js) && bin <= size(h∇, 2)
+        node = nodes[idx]
+        if node > 0
+            feat = js[j_idx]
+            h∇[1, bin, feat, node] = zero(T)
+            h∇[2, bin, feat, node] = zero(T)
+            h∇[3, bin, feat, node] = zero(T)
+        end
+    end
+end
+
 @kernel function scan_hist_kernel_serial!(
     hL::AbstractArray{T,4},
     hR::AbstractArray{T,4},
@@ -207,6 +220,10 @@ end
         for f_idx in 1:length(js)
             f = js[f_idx]
             f_w = hR[3, nbins, f, node]
+            # Early skip if the total weight cannot produce a valid split
+            if f_w < min_weight + min_weight
+                continue
+            end
             for b in 1:(nbins - 1)
                 l_w = hL[3, b, f, node]
                 r_w = f_w - l_w
@@ -283,6 +300,18 @@ end
     end
 end
 
+@kernel function filter_is_active_kernel!(is_out, out_len, @Const(is), @Const(nidx), @Const(target_mask))
+    i = @index(Global)
+    @inbounds if i <= length(is)
+        obs = is[i]
+        node = nidx[obs]
+        if node > 0 && target_mask[node] != 0
+            idx = Atomix.@atomic out_len[1] += 1
+            is_out[idx] = obs
+        end
+    end
+end
+
 @kernel function write_nodes_sum_from_scan!(nodes_sum, @Const(hR), @Const(active_nodes), @Const(js))
     n_idx = @index(Global)
     @inbounds if n_idx <= length(active_nodes)
@@ -320,16 +349,24 @@ function update_hist_gpu!(
         end
     else
         # Build histograms for the current active nodes (parents to split now)
-        zero_nodes! = zero_node_hist_kernel!(backend)
+        zero_nodes_js! = zero_node_hist_kernel_js!(backend)
         t_hist += @elapsed begin
-            zero_nodes!(h∇, active_nodes; ndrange = (n_active, size(h∇, 3), size(h∇, 2)), workgroupsize=(64,1,1))
+            zero_nodes_js!(h∇, active_nodes, js; ndrange = (n_active, length(js), size(h∇, 2)), workgroupsize=(32,4,4))
             target_mask_buf .= 0
             fill_mask! = fill_mask_kernel!(backend)
             fill_mask!(target_mask_buf, active_nodes; ndrange = n_active, workgroupsize=256)
 
+            # compact observations belonging to current active nodes
+            is_active = KernelAbstractions.zeros(backend, eltype(is), length(is))
+            is_active_len = KernelAbstractions.zeros(backend, Int32, 1)
+            filter_is_act! = filter_is_active_kernel!(backend)
+            filter_is_act!(is_active, is_active_len, is, nidx, target_mask_buf; ndrange = length(is), workgroupsize=256)
+            KernelAbstractions.synchronize(backend)
+            n_is_act = Int(Array(is_active_len)[1])
+
             hist_selective_mask_is! = hist_kernel_selective_mask_is!(backend)
-            hist_selective_mask_is!(h∇, ∇, x_bin, nidx, js, target_mask_buf, is;
-                                           ndrange = (length(is), length(js)), workgroupsize=(256,1))
+            hist_selective_mask_is!(h∇, ∇, x_bin, nidx, js, target_mask_buf, is_active;
+                                            ndrange = (n_is_act, length(js)), workgroupsize=(256,1))
             KernelAbstractions.synchronize(backend)
         end
     end
