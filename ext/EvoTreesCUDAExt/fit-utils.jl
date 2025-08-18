@@ -114,10 +114,11 @@ end
     end
 end
 
-@kernel function zero_node_hist_kernel!(h∇::AbstractArray{T,4}, @Const(nodes)) where {T}
-    idx, feat, bin = @index(Global, NTuple)
-    @inbounds if idx <= length(nodes) && feat <= size(h∇, 3) && bin <= size(h∇, 2)
+@kernel function zero_node_hist_kernel!(h∇::AbstractArray{T,4}, @Const(nodes), @Const(js)) where {T}
+    idx, j_idx, bin = @index(Global, NTuple)
+    @inbounds if idx <= length(nodes) && j_idx <= length(js) && bin <= size(h∇, 2)
         node = nodes[idx]
+        feat = js[j_idx]
         if node > 0
             h∇[1, bin, feat, node] = zero(T)
             h∇[2, bin, feat, node] = zero(T)
@@ -150,13 +151,15 @@ end
     hR::AbstractArray{T,4},
     @Const(h∇),
     @Const(active_nodes),
+    @Const(js),
 ) where {T}
-    n_idx, feat = @index(Global, NTuple)
+    n_idx, j_idx = @index(Global, NTuple)
     
     nbins = size(h∇, 2)
     
-    @inbounds if n_idx <= length(active_nodes) && feat <= size(h∇, 3)
+    @inbounds if n_idx <= length(active_nodes) && j_idx <= length(js)
         node = active_nodes[n_idx]
+        feat = js[j_idx]
         if node > 0
             s1 = zero(T); s2 = zero(T); s3 = zero(T)
             @inbounds for bin in 1:nbins
@@ -182,6 +185,7 @@ end
     @Const(hR),
     @Const(nodes_sum),
     @Const(active_nodes),
+    @Const(js),
     lambda::T,
     min_weight::T,
 ) where {T}
@@ -196,18 +200,30 @@ end
             feats[n_idx] = Int32(0)
         else
         nbins = size(hL, 2)
-        nfeats = size(hL, 3)
         
         g_best = T(-Inf)
         b_best = Int32(0)
         f_best = Int32(0)
         
-        p_g1 = nodes_sum[1, node]
-        p_g2 = nodes_sum[2, node]
-        p_w  = nodes_sum[3, node]
+        # Get node sum from the first feature in js (they should all be the same)
+        if length(js) > 0
+            f_first = js[1]
+            p_g1 = hR[1, nbins, f_first, node]
+            p_g2 = hR[2, nbins, f_first, node]
+            p_w  = hR[3, nbins, f_first, node]
+            # Write to nodes_sum for use in apply_splits
+            nodes_sum[1, node] = p_g1
+            nodes_sum[2, node] = p_g2
+            nodes_sum[3, node] = p_w
+        else
+            p_g1 = nodes_sum[1, node]
+            p_g2 = nodes_sum[2, node]
+            p_w  = nodes_sum[3, node]
+        end
             gain_p = p_g1^2 / (p_g2 + lambda * p_w + T(1e-8))
         
-        for f in 1:nfeats
+        for j_idx in 1:length(js)
+            f = js[j_idx]
             f_w = hR[3, nbins, f, node]
             for b in 1:(nbins - 1)
                 l_w = hL[3, b, f, node]
@@ -319,7 +335,7 @@ function update_hist_gpu!(
     else
         # Build histograms for the current active nodes (parents to split now)
         zero_nodes! = zero_node_hist_kernel!(backend)
-        zero_nodes!(h∇, active_nodes; ndrange = (n_active, size(h∇, 3), size(h∇, 2)))
+        zero_nodes!(h∇, active_nodes, js; ndrange = (n_active, length(js), size(h∇, 2)))
 
         target_mask_buf .= 0
         fill_mask! = fill_mask_kernel!(backend)
@@ -330,17 +346,14 @@ function update_hist_gpu!(
                                        ndrange = (length(is), length(js)))
     end
 
-    hL .= 0
-    hR .= 0
+    # Scan and write node sums in a single kernel
     scan_serial! = scan_hist_kernel_serial!(backend)
-    scan_serial!(hL, hR, h∇, active_nodes; ndrange = (n_active, size(h∇, 3)))
+    scan_serial!(hL, hR, h∇, active_nodes, js; ndrange = (n_active, length(js)))
 
-    write_nodes_sum! = write_nodes_sum_from_scan!(backend)
-    write_nodes_sum!(nodes_sum_gpu, hR, active_nodes, js; ndrange = n_active)
-
+    # Update nodes_sum_gpu directly from hR in find_best_split kernel
     find_split! = find_best_split_kernel_parallel!(backend)
     find_split!(
-        gains, bins, feats, hL, hR, nodes_sum_gpu, active_nodes,
+        gains, bins, feats, hL, hR, nodes_sum_gpu, active_nodes, js,
         eltype(gains)(params.lambda), eltype(gains)(params.min_weight);
         ndrange = n_active
     )
@@ -348,3 +361,4 @@ function update_hist_gpu!(
     KernelAbstractions.synchronize(backend)
     return nothing
 end
+
