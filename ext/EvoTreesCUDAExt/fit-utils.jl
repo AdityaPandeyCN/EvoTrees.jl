@@ -50,6 +50,76 @@ end
     end
 end
 
+@kernel function find_best_split_kernel_parallel!(
+    gains::AbstractVector{T},
+    bins::AbstractVector{Int32},
+    feats::AbstractVector{Int32},
+    @Const(hL),
+    @Const(hR),
+    nodes_sum,
+    @Const(active_nodes),
+    @Const(js),
+    lambda::T,
+    min_weight::T,
+) where {T}
+    n_idx = @index(Global)
+    
+    @inbounds if n_idx <= length(active_nodes)
+        node = active_nodes[n_idx]
+        
+        if node == 0
+            gains[n_idx] = T(-Inf)
+            bins[n_idx] = Int32(0)
+            feats[n_idx] = Int32(0)
+        else
+        nbins = size(hL, 2)
+        
+        g_best = T(-Inf)
+        b_best = Int32(0)
+        f_best = Int32(0)
+        
+        # Get node sum from the first feature in js (they should all be the same)
+        f_first = js[1]
+        p_g1 = hR[1, nbins, f_first, node]
+        p_g2 = hR[2, nbins, f_first, node]
+        p_w  = hR[3, nbins, f_first, node]
+        # Write to nodes_sum for use in apply_splits
+        nodes_sum[1, node] = p_g1
+        nodes_sum[2, node] = p_g2
+        nodes_sum[3, node] = p_w
+        
+            gain_p = p_g1^2 / (p_g2 + lambda * p_w + T(1e-8))
+        
+        @inbounds for j_idx in 1:length(js)
+            f = js[j_idx]
+            f_w = hR[3, nbins, f, node]
+            for b in 1:(nbins - 1)
+                l_w = hL[3, b, f, node]
+                r_w = f_w - l_w
+                if l_w >= min_weight && r_w >= min_weight
+                    l_g1 = hL[1, b, f, node]
+                    l_g2 = hL[2, b, f, node]
+                    r_g1 = p_g1 - l_g1
+                    r_g2 = p_g2 - l_g2
+                        gain_l = l_g1^2 / (l_g2 + lambda * l_w + T(1e-8))
+                        gain_r = r_g1^2 / (r_g2 + lambda * r_w + T(1e-8))
+                    g = gain_l + gain_r - gain_p
+                    if g > g_best
+                        g_best = g
+                        b_best = Int32(b)
+                        f_best = Int32(f)
+                    end
+                end
+            end
+        end
+        
+        gains[n_idx] = g_best
+        bins[n_idx] = b_best
+        feats[n_idx] = f_best
+        end
+    end
+end
+
 @kernel function find_best_split_from_hist_kernel!(
     gains::AbstractVector{T},
     bins::AbstractVector{Int32},
@@ -71,6 +141,7 @@ end
             feats[n_idx] = Int32(0)
         else
             nbins = size(h∇, 2)
+            # compute parent sums using first feature (identical across features)
             f_first = js[1]
             p_g1 = zero(T); p_g2 = zero(T); p_w = zero(T)
             @inbounds for b in 1:nbins
@@ -120,66 +191,68 @@ end
     end
 end
 
-# 3D global-index histogram kernel: one thread per (node, feature, bin)
-@kernel function hist_kernel_bins_tiled!(
+@kernel function hist_kernel_is_tiled!(
     h∇::AbstractArray{T,4},
     @Const(∇),
     @Const(x_bin),
     @Const(nidx),
     @Const(js),
     @Const(is),
-    @Const(active_nodes),
+    obs_per_thread::Int32,
 ) where {T}
-    g_node, g_feat = @index(Group, NTuple)
-    l_bin = @index(Local)
+    tile_i, j = @index(Global, NTuple)
     
-    @inbounds if g_node <= length(active_nodes) && g_feat <= length(js) && l_bin <= size(h∇, 2)
-        node_i = Int(active_nodes[g_node])
-        node_u = UInt32(node_i)
-        feat_i = Int(js[g_feat])
-        s1 = T(0); s2 = T(0); s3 = T(0)
-        @inbounds for i in 1:length(is)
-            obs = is[i]
-            if nidx[obs] == node_u
-                b = Int(x_bin[obs, feat_i])
-                if b > 0 && b == l_bin
-                    s1 += ∇[1, obs]
-                    s2 += ∇[2, obs]
-                    s3 += ∇[3, obs]
+    @inbounds if j <= length(js)
+        start_idx = (tile_i - 1) * obs_per_thread + 1
+        if start_idx <= length(is)
+            end_idx = min(tile_i * obs_per_thread, length(is))
+            jdx = js[j]
+            @inbounds for i in start_idx:end_idx
+        obs = is[i]
+        node = nidx[obs]
+        if node > 0
+            bin = x_bin[obs, jdx]
+            if bin > 0 && bin <= size(h∇, 2)
+                Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, obs]
+                Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, obs]
+                Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, obs]
+                    end
                 end
             end
         end
-        Atomix.@atomic h∇[1, l_bin, feat_i, node_i] += s1
-        Atomix.@atomic h∇[2, l_bin, feat_i, node_i] += s2
-        Atomix.@atomic h∇[3, l_bin, feat_i, node_i] += s3
     end
 end
 
-@kernel function hist_kernel_bins_tiled_depth1!(
+@kernel function hist_kernel_selective_mask_is_tiled!(
     h∇::AbstractArray{T,4},
     @Const(∇),
     @Const(x_bin),
+    @Const(nidx),
     @Const(js),
+    @Const(target_mask),
     @Const(is),
+    obs_per_thread::Int32,
 ) where {T}
-    g_feat = @index(Group)
-    l_bin = @index(Local)
-    @inbounds if g_feat <= length(js) && l_bin <= size(h∇, 2)
-        node_i = Int32(1)
-        feat_i = Int(js[g_feat])
-        s1 = T(0); s2 = T(0); s3 = T(0)
-        @inbounds for i in 1:length(is)
-            obs = is[i]
-            b = Int(x_bin[obs, feat_i])
-            if b > 0 && b == l_bin
-                s1 += ∇[1, obs]
-                s2 += ∇[2, obs]
-                s3 += ∇[3, obs]
+    tile_i, j = @index(Global, NTuple)
+    
+    @inbounds if j <= length(js)
+        start_idx = (tile_i - 1) * obs_per_thread + 1
+        if start_idx <= length(is)
+            end_idx = min(tile_i * obs_per_thread, length(is))
+            jdx = js[j]
+            @inbounds for i in start_idx:end_idx
+        obs = is[i]
+        node = nidx[obs]
+        if node > 0 && target_mask[node] != 0
+            bin = x_bin[obs, jdx]
+            if bin > 0 && bin <= size(h∇, 2)
+                Atomix.@atomic h∇[1, bin, jdx, node] += ∇[1, obs]
+                Atomix.@atomic h∇[2, bin, jdx, node] += ∇[2, obs]
+                Atomix.@atomic h∇[3, bin, jdx, node] += ∇[3, obs]
             end
         end
-        Atomix.@atomic h∇[1, l_bin, feat_i, node_i] += s1
-        Atomix.@atomic h∇[2, l_bin, feat_i, node_i] += s2
-        Atomix.@atomic h∇[3, l_bin, feat_i, node_i] += s3
+    end
+        end
     end
 end
 
@@ -193,17 +266,23 @@ function update_hist_gpu!(
     
     if depth == 1
         h∇ .= 0
-        # One group per feature, 64 local threads (one per bin)
-        hist_bins_d1! = hist_kernel_bins_tiled_depth1!(backend)
-        hist_bins_d1!(h∇, ∇, x_bin, js, is; ndrange = length(js), workgroupsize = 64)
+        # Use tiled kernel for better parallelism across features
+        obs_per_thread = Int32(clamp(div(length(is), 2048), 1, 1024))
+        n_tiles = Int(ceil(length(is) / obs_per_thread))
+        hist_is_tiled! = hist_kernel_is_tiled!(backend)
+        hist_is_tiled!(h∇, ∇, x_bin, nidx, js, is, Int32(64); ndrange = (Int(ceil(length(is) / 64)), length(js)))
     else
-        # Build histograms for the current active nodes
+        # Build histograms for the current active nodes (parents to split now)
         zero_nodes! = zero_node_hist_kernel!(backend)
         zero_nodes!(h∇, active_nodes, js; ndrange = (n_active, length(js), size(h∇, 2)))
 
-        # One group per (node, feature), 64 local threads (one per bin)
-        hist_bins! = hist_kernel_bins_tiled!(backend)
-        hist_bins!(h∇, ∇, x_bin, nidx, js, is, active_nodes; ndrange = (n_active, length(js)), workgroupsize = 64)
+        target_mask_buf .= 0
+        fill_mask! = fill_mask_kernel!(backend)
+        fill_mask!(target_mask_buf, active_nodes; ndrange = n_active)
+
+        # Use tiled kernel to accumulate histograms for active nodes only
+        hist_selective_mask_is_tiled! = hist_kernel_selective_mask_is_tiled!(backend)
+        hist_selective_mask_is_tiled!(h∇, ∇, x_bin, nidx, js, target_mask_buf, is, Int32(64); ndrange = (Int(ceil(length(is) / 64)), length(js)))
     end
 
     # Compute best splits directly from histograms, writing nodes_sum
