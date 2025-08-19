@@ -71,7 +71,6 @@ end
             feats[n_idx] = Int32(0)
         else
             nbins = size(h∇, 2)
-            # compute parent sums using first feature (identical across features)
             f_first = js[1]
             p_g1 = zero(T); p_g2 = zero(T); p_w = zero(T)
             @inbounds for b in 1:nbins
@@ -121,32 +120,35 @@ end
     end
 end
 
-@kernel function hist_kernel!(
-    h∇::AbstractArray{T,4},
+# NEW: Segmented histogram kernel - eliminates atomics
+@kernel function hist_kernel_segmented!(
+    h∇_segments::AbstractArray{T,5}, # [grad_dim, bin, feat, node, segment]
     @Const(∇),
     @Const(x_bin),
     @Const(nidx),
     @Const(js),
     @Const(is),
 ) where {T}
-    i, j = @index(Global, NTuple)
-    @inbounds if i <= length(is) && j <= length(js)
+    i, j, seg_id = @index(Global, NTuple)
+    @inbounds if i <= length(is) && j <= length(js) && seg_id <= size(h∇_segments, 5)
         obs = is[i]
         node = nidx[obs]
         if node > 0
             feat = js[j]
             bin = x_bin[obs, feat]
-            if bin > 0 && bin <= size(h∇, 2)
-                Atomix.@atomic h∇[1, bin, feat, node] += ∇[1, obs]
-                Atomix.@atomic h∇[2, bin, feat, node] += ∇[2, obs]
-                Atomix.@atomic h∇[3, bin, feat, node] += ∇[3, obs]
+            if bin > 0 && bin <= size(h∇_segments, 2)
+                # No atomics - each thread writes to its own segment
+                h∇_segments[1, bin, feat, node, seg_id] = ∇[1, obs]
+                h∇_segments[2, bin, feat, node, seg_id] = ∇[2, obs] 
+                h∇_segments[3, bin, feat, node, seg_id] = ∇[3, obs]
             end
         end
     end
 end
 
-@kernel function hist_kernel_selective!(
-    h∇::AbstractArray{T,4},
+# NEW: Selective segmented histogram kernel 
+@kernel function hist_kernel_selective_segmented!(
+    h∇_segments::AbstractArray{T,5},
     @Const(∇),
     @Const(x_bin),
     @Const(nidx),
@@ -154,43 +156,92 @@ end
     @Const(is),
     @Const(target_nodes),
 ) where {T}
-    i, j = @index(Global, NTuple)
-    @inbounds if i <= length(is) && j <= length(js)
+    i, j, seg_id = @index(Global, NTuple)
+    @inbounds if i <= length(is) && j <= length(js) && seg_id <= size(h∇_segments, 5)
         obs = is[i]
         node = nidx[obs]
-        # Only build histogram for target nodes
         if node > 0 && target_nodes[node] != 0
             feat = js[j]
             bin = x_bin[obs, feat]
-            if bin > 0 && bin <= size(h∇, 2)
-                Atomix.@atomic h∇[1, bin, feat, node] += ∇[1, obs]
-                Atomix.@atomic h∇[2, bin, feat, node] += ∇[2, obs]
-                Atomix.@atomic h∇[3, bin, feat, node] += ∇[3, obs]
+            if bin > 0 && bin <= size(h∇_segments, 2)
+                h∇_segments[1, bin, feat, node, seg_id] = ∇[1, obs]
+                h∇_segments[2, bin, feat, node, seg_id] = ∇[2, obs]
+                h∇_segments[3, bin, feat, node, seg_id] = ∇[3, obs]
             end
         end
     end
 end
 
-@kernel function separate_nodes_kernel!(
-    left_buf::AbstractVector{Int32},
-    right_buf::AbstractVector{Int32},
-    left_count::AbstractVector{Int32},
-    right_count::AbstractVector{Int32},
-    @Const(active_nodes)
+# NEW: Reduction kernel to sum segments
+@kernel function reduce_hist_segments_kernel!(
+    h∇::AbstractArray{T,4},
+    @Const(h∇_segments),
+) where {T}
+    grad_dim, bin, feat, node = @index(Global, NTuple)
+    @inbounds if grad_dim <= size(h∇, 1) && bin <= size(h∇, 2) && feat <= size(h∇, 3) && node <= size(h∇, 4)
+        total = zero(T)
+        for seg in 1:size(h∇_segments, 5)
+            total += h∇_segments[grad_dim, bin, feat, node, seg]
+        end
+        h∇[grad_dim, bin, feat, node] = total
+    end
+end
+
+# NEW: Count observations per node for smarter subtraction
+@kernel function count_node_obs_kernel!(
+    node_counts::AbstractVector{Int32},
+    @Const(nidx),
+    @Const(is),
+)
+    i = @index(Global)
+    @inbounds if i <= length(is)
+        obs = is[i]
+        node = nidx[obs]
+        if node > 0
+            Atomix.@atomic node_counts[node] += Int32(1)
+        end
+    end
+end
+
+# NEW: Smart node separation based on observation counts
+@kernel function separate_nodes_smart_kernel!(
+    smaller_buf::AbstractVector{Int32},
+    larger_buf::AbstractVector{Int32},
+    smaller_count::AbstractVector{Int32},
+    larger_count::AbstractVector{Int32},
+    @Const(active_nodes),
+    @Const(node_counts),
 )
     idx = @index(Global)
     @inbounds if idx <= length(active_nodes)
         node = active_nodes[idx]
         if node > 0
-            if node & 1 == 0  # Left child (even)
-                pos = Atomix.@atomic left_count[1] += Int32(1)
-                if pos <= length(left_buf)
-                    left_buf[pos] = node
-                end
-            else  # Right child (odd)
-                pos = Atomix.@atomic right_count[1] += Int32(1)
-                if pos <= length(right_buf)
-                    right_buf[pos] = node
+            left_child = node << 1
+            right_child = left_child + 1
+            
+            if left_child <= length(node_counts) && right_child <= length(node_counts)
+                left_obs = node_counts[left_child]
+                right_obs = node_counts[right_child]
+                
+                # Put smaller child in smaller_buf for explicit computation
+                if left_obs <= right_obs
+                    pos = Atomix.@atomic smaller_count[1] += Int32(1)
+                    if pos <= length(smaller_buf)
+                        smaller_buf[pos] = left_child
+                    end
+                    pos = Atomix.@atomic larger_count[1] += Int32(1)
+                    if pos <= length(larger_buf)
+                        larger_buf[pos] = right_child
+                    end
+                else
+                    pos = Atomix.@atomic smaller_count[1] += Int32(1)
+                    if pos <= length(smaller_buf)
+                        smaller_buf[pos] = right_child
+                    end
+                    pos = Atomix.@atomic larger_count[1] += Int32(1)
+                    if pos <= length(larger_buf)
+                        larger_buf[pos] = left_child
+                    end
                 end
             end
         end
@@ -200,25 +251,26 @@ end
 @kernel function histogram_subtraction_kernel!(
     h∇::AbstractArray{T,4},
     @Const(h∇_parent),
-    @Const(left_nodes),
-    @Const(right_nodes),
+    @Const(smaller_nodes),
+    @Const(larger_nodes),
     @Const(js),
 ) where {T}
-    r_idx, j_idx, bin = @index(Global, NTuple)
+    idx, j_idx, bin = @index(Global, NTuple)
     
-    @inbounds if r_idx <= length(right_nodes) && j_idx <= length(js) && bin <= size(h∇, 2)
-        right_node = right_nodes[r_idx]
-        left_node = right_node - 1  # Left sibling
-        parent_node = right_node >> 1  # Parent
+    @inbounds if idx <= length(larger_nodes) && j_idx <= length(js) && bin <= size(h∇, 2)
+        larger_node = larger_nodes[idx]
+        smaller_node = smaller_nodes[idx]
+        parent_node = larger_node >> 1  # Parent of larger node
         feat = js[j_idx]
         
-        # right = parent - left
-        h∇[1, bin, feat, right_node] = h∇_parent[1, bin, feat, parent_node] - h∇[1, bin, feat, left_node]
-        h∇[2, bin, feat, right_node] = h∇_parent[2, bin, feat, parent_node] - h∇[2, bin, feat, left_node]
-        h∇[3, bin, feat, right_node] = h∇_parent[3, bin, feat, parent_node] - h∇[3, bin, feat, left_node]
+        # larger = parent - smaller
+        h∇[1, bin, feat, larger_node] = h∇_parent[1, bin, feat, parent_node] - h∇[1, bin, feat, smaller_node]
+        h∇[2, bin, feat, larger_node] = h∇_parent[2, bin, feat, parent_node] - h∇[2, bin, feat, smaller_node]
+        h∇[3, bin, feat, larger_node] = h∇_parent[3, bin, feat, parent_node] - h∇[3, bin, feat, smaller_node]
     end
 end
 
+# OPTIMIZED: Main function with better subtraction trick
 function update_hist_gpu!(
     h∇, h∇_parent, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
     left_nodes_buf, right_nodes_buf, target_mask_buf
@@ -226,58 +278,90 @@ function update_hist_gpu!(
     backend = KernelAbstractions.get_backend(h∇)
     n_active = length(active_nodes)
     
+    # Adaptive segmentation: more segments for problematic cases (high depth, small datasets)
+    n_obs = length(is)
+    if depth >= 8 && n_obs <= 1_000_000  # Target the bottleneck cases
+        n_segments = min(64, max(16, n_obs ÷ 2000 + 1))
+    elseif n_obs <= 100_000
+        n_segments = min(32, max(8, n_obs ÷ 5000 + 1))
+    else
+        n_segments = min(16, max(4, n_obs ÷ 25000 + 1))
+    end
+    
     if depth == 1
-        # Root node: build histogram from scratch
+        # Root node: build histogram using segmented approach
         h∇ .= 0
-        hist! = hist_kernel!(backend)
-        hist!(h∇, ∇, x_bin, nidx, js, is; ndrange = (length(is), length(js)))
+        h∇_segments = similar(h∇, size(h∇)..., n_segments)
+        h∇_segments .= 0
         
-        # Copy to parent for next iteration - only once at root
+        # Build histogram segments (no atomics)
+        hist_seg! = hist_kernel_segmented!(backend)
+        hist_seg!(h∇_segments, ∇, x_bin, nidx, js, is; 
+                 ndrange = (length(is), length(js), n_segments))
+        
+        # Reduce segments
+        reduce! = reduce_hist_segments_kernel!(backend)
+        reduce!(h∇, h∇_segments; 
+               ndrange = (size(h∇, 1), size(h∇, 2), size(h∇, 3), size(h∇, 4)))
+        
         copyto!(h∇_parent, h∇)
         
     elseif n_active > 0
-        # Store current state as parent before modifying
         copyto!(h∇_parent, h∇)
         
-        # Separate left and right children
-        left_count = KernelAbstractions.zeros(backend, Int32, 1)
-        right_count = KernelAbstractions.zeros(backend, Int32, 1)
-        
-        separate_nodes! = separate_nodes_kernel!(backend)
-        separate_nodes!(left_nodes_buf, right_nodes_buf, left_count, right_count, active_nodes; 
-                       ndrange = n_active)
+        # Count observations per node for smart subtraction
+        node_counts = KernelAbstractions.zeros(backend, Int32, size(h∇, 4))
+        count_obs! = count_node_obs_kernel!(backend)
+        count_obs!(node_counts, nidx, is; ndrange = length(is))
         KernelAbstractions.synchronize(backend)
         
-        n_left = Int(Array(left_count)[1])
-        n_right = Int(Array(right_count)[1])
+        # Smart separation: smaller child gets explicit computation, larger gets subtraction
+        smaller_count = KernelAbstractions.zeros(backend, Int32, 1)
+        larger_count = KernelAbstractions.zeros(backend, Int32, 1)
         
-        if n_left > 0
-            # Zero and build histograms for left children only
-            left_nodes = view(left_nodes_buf, 1:n_left)
+        separate_smart! = separate_nodes_smart_kernel!(backend)
+        separate_smart!(left_nodes_buf, right_nodes_buf, smaller_count, larger_count, 
+                       active_nodes, node_counts; ndrange = n_active)
+        KernelAbstractions.synchronize(backend)
+        
+        n_smaller = Int(Array(smaller_count)[1])
+        n_larger = Int(Array(larger_count)[1])
+        
+        if n_smaller > 0
+            # Compute histogram for smaller children only
+            smaller_nodes = view(left_nodes_buf, 1:n_smaller)
             
-            # Zero left children
+            # Zero smaller children
             zero_nodes! = zero_node_hist_kernel!(backend)
-            zero_nodes!(h∇, left_nodes, js; ndrange = (n_left, length(js), size(h∇, 2)))
+            zero_nodes!(h∇, smaller_nodes, js; ndrange = (n_smaller, length(js), size(h∇, 2)))
             
-            # Set target mask for left children
+            # Set target mask for smaller children
             target_mask_buf .= 0
             fill_mask! = fill_mask_kernel!(backend)
-            fill_mask!(target_mask_buf, left_nodes; ndrange = n_left)
+            fill_mask!(target_mask_buf, smaller_nodes; ndrange = n_smaller)
             
-            # Build histogram only for left children
-            hist_selective! = hist_kernel_selective!(backend)
-            hist_selective!(h∇, ∇, x_bin, nidx, js, is, target_mask_buf; 
-                           ndrange = (length(is), length(js)))
+            # Build histogram using segmented approach for smaller children only
+            h∇_segments = similar(h∇, size(h∇)..., n_segments)
+            h∇_segments .= 0
+            
+            hist_seg_selective! = hist_kernel_selective_segmented!(backend)
+            hist_seg_selective!(h∇_segments, ∇, x_bin, nidx, js, is, target_mask_buf; 
+                               ndrange = (length(is), length(js), n_segments))
+            
+            # Reduce segments for smaller children
+            reduce_selective! = reduce_hist_segments_kernel!(backend)
+            reduce_selective!(h∇, h∇_segments; 
+                            ndrange = (size(h∇, 1), size(h∇, 2), size(h∇, 3), size(h∇, 4)))
         end
         
-        if n_right > 0
-            # Compute right children by subtraction
-            right_nodes = view(right_nodes_buf, 1:n_right)
-            left_nodes = view(left_nodes_buf, 1:n_left)
+        if n_larger > 0
+            # Compute larger children by subtraction (much faster)
+            larger_nodes = view(right_nodes_buf, 1:n_larger)
+            smaller_nodes = view(left_nodes_buf, 1:n_smaller)
             
             subtract_hist! = histogram_subtraction_kernel!(backend)
-            subtract_hist!(h∇, h∇_parent, left_nodes, right_nodes, js; 
-                          ndrange = (n_right, length(js), size(h∇, 2)))
+            subtract_hist!(h∇, h∇_parent, smaller_nodes, larger_nodes, js; 
+                          ndrange = (n_larger, length(js), size(h∇, 2)))
         end
     end
     
