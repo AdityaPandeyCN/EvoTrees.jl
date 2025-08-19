@@ -38,14 +38,21 @@ end
 end
 
 @kernel function zero_node_hist_kernel!(h∇::AbstractArray{T,4}, @Const(nodes), @Const(js)) where {T}
-    idx, j_idx, bin = @index(Global, NTuple)
-    @inbounds if idx <= length(nodes) && j_idx <= length(js) && bin <= size(h∇, 2)
+    idx, j_idx, bin_chunk = @index(Global, NTuple)
+    @inbounds if idx <= length(nodes) && j_idx <= length(js)
         node = nodes[idx]
         feat = js[j_idx]
         if node > 0
-            h∇[1, bin, feat, node] = zero(T)
-            h∇[2, bin, feat, node] = zero(T)
-            h∇[3, bin, feat, node] = zero(T)
+            nbins = size(h∇, 2)
+            # Each thread handles 4 bins
+            @inbounds for b_offset in 0:3
+                bin = (bin_chunk - 1) * 4 + b_offset + 1
+                if bin <= nbins
+                    h∇[1, bin, feat, node] = zero(T)
+                    h∇[2, bin, feat, node] = zero(T)
+                    h∇[3, bin, feat, node] = zero(T)
+                end
+            end
         end
     end
 end
@@ -186,6 +193,34 @@ end
     end
 end
 
+@kernel function separate_nodes_kernel!(
+    left_buf::AbstractVector{Int32},
+    right_buf::AbstractVector{Int32},
+    parent_buf::AbstractVector{Int32},
+    left_count::AbstractVector{Int32},
+    right_count::AbstractVector{Int32},
+    @Const(active_nodes)
+)
+    idx = @index(Global)
+    @inbounds if idx <= length(active_nodes)
+        node = active_nodes[idx]
+        if node > 0
+            if node % 2 == 0  # Left child
+                pos = Atomix.@atomic left_count[1] += Int32(1)
+                if pos <= length(left_buf)
+                    left_buf[pos] = node
+                end
+            else  # Right child  
+                pos = Atomix.@atomic right_count[1] += Int32(1)
+                if pos <= length(right_buf) && pos <= length(parent_buf)
+                    right_buf[pos] = node
+                    parent_buf[pos] = node >> 1
+                end
+            end
+        end
+    end
+end
+
 @kernel function histogram_subtraction_kernel!(
     h∇::AbstractArray{T,4},
     @Const(h∇_parent),
@@ -205,26 +240,31 @@ end
         feat = js[j_idx]
         nbins = size(h∇, 2)
         
-        # If first feature, also compute parent sum (only once)
-        if j_idx == 1
-            p_sum1 = zero(T)
-            p_sum2 = zero(T)
-            p_sum3 = zero(T)
-            @inbounds for bin in 1:nbins
-                p_sum1 += h∇_parent[1, bin, feat, parent_node]
-                p_sum2 += h∇_parent[2, bin, feat, parent_node]
-                p_sum3 += h∇_parent[3, bin, feat, parent_node]
+        # Bounds checking for array access
+        if right_node <= size(h∇, 4) && parent_node <= size(h∇_parent, 4) && 
+           left_node <= size(h∇, 4) && feat <= size(h∇, 3) && parent_node <= size(nodes_sum, 2)
+            
+            # If first feature, also compute parent sum (only once)
+            if j_idx == 1
+                p_sum1 = zero(T)
+                p_sum2 = zero(T)
+                p_sum3 = zero(T)
+                @inbounds for bin in 1:nbins
+                    p_sum1 += h∇_parent[1, bin, feat, parent_node]
+                    p_sum2 += h∇_parent[2, bin, feat, parent_node]
+                    p_sum3 += h∇_parent[3, bin, feat, parent_node]
+                end
+                nodes_sum[1, parent_node] = p_sum1
+                nodes_sum[2, parent_node] = p_sum2
+                nodes_sum[3, parent_node] = p_sum3
             end
-            nodes_sum[1, parent_node] = p_sum1
-            nodes_sum[2, parent_node] = p_sum2
-            nodes_sum[3, parent_node] = p_sum3
-        end
-        
-        # Subtract: right = parent - left
-        @inbounds for bin in 1:nbins
-            h∇[1, bin, feat, right_node] = h∇_parent[1, bin, feat, parent_node] - h∇[1, bin, feat, left_node]
-            h∇[2, bin, feat, right_node] = h∇_parent[2, bin, feat, parent_node] - h∇[2, bin, feat, left_node]
-            h∇[3, bin, feat, right_node] = h∇_parent[3, bin, feat, parent_node] - h∇[3, bin, feat, left_node]
+            
+            # Subtract: right = parent - left
+            @inbounds for bin in 1:nbins
+                h∇[1, bin, feat, right_node] = h∇_parent[1, bin, feat, parent_node] - h∇[1, bin, feat, left_node]
+                h∇[2, bin, feat, right_node] = h∇_parent[2, bin, feat, parent_node] - h∇[2, bin, feat, left_node]
+                h∇[3, bin, feat, right_node] = h∇_parent[3, bin, feat, parent_node] - h∇[3, bin, feat, left_node]
+            end
         end
     end
 end
@@ -239,100 +279,80 @@ function update_hist_gpu!(
     if depth == 1
         # Root node - build histogram normally
         h∇ .= 0
-        obs_per_thread = Int32(max(32, min(256, div(length(is), 512))))
+        obs_per_thread = Int32(max(64, min(256, div(length(is), 1024))))
         n_tiles = Int(ceil(length(is) / obs_per_thread))
         hist_is_tiled! = hist_kernel_is_tiled!(backend)
         hist_is_tiled!(h∇, ∇, x_bin, nidx, js, is, obs_per_thread; ndrange = (n_tiles, length(js)))
-        
-        # Save root histogram as parent for next level
         copyto!(h∇_parent, h∇)
     else
-        # For deeper levels, separate left and right children
-        # Create vectors to separate nodes
-        left_nodes_vec = Vector{Int32}()
-        right_nodes_vec = Vector{Int32}()
-        parent_nodes_vec = Vector{Int32}()
+        # Use GPU kernel to separate nodes - NO CPU ALLOCATION!
+        left_count = KernelAbstractions.zeros(backend, Int32, 1)
+        right_count = KernelAbstractions.zeros(backend, Int32, 1)
         
-        # Copy active nodes to CPU to avoid scalar indexing
-        active_nodes_cpu = Array(active_nodes)
-        
-        # Separate nodes into left (even) and right (odd) children
-        for i in 1:n_active
-            node = active_nodes_cpu[i]
-            if node > 0
-                if node % 2 == 0  # Left child (even node number: 2*parent)
-                    push!(left_nodes_vec, node)
-                else  # Right child (odd node number: 2*parent + 1)
-                    push!(right_nodes_vec, node)
-                    push!(parent_nodes_vec, node >> 1)  # Parent of this node
-                end
-            end
+        # Use second half of left_nodes_buf for parent storage to avoid conflicts
+        if length(left_nodes_buf) < 2
+            error("left_nodes_buf too small for parent storage")
         end
+        max_parent_nodes = min(n_active, length(left_nodes_buf) ÷ 2)
+        parent_buf_start = length(left_nodes_buf) ÷ 2 + 1
+        parent_buf_end = min(parent_buf_start + max_parent_nodes - 1, length(left_nodes_buf))
+        parent_buf = view(left_nodes_buf, parent_buf_start:parent_buf_end)
         
-        # Convert to GPU arrays using the preallocated buffers
-        left_nodes_gpu = if length(left_nodes_vec) > 0
-            copyto!(view(left_nodes_buf, 1:length(left_nodes_vec)), left_nodes_vec)
-            view(left_nodes_buf, 1:length(left_nodes_vec))
-        else
-            view(left_nodes_buf, 1:0)  # Empty view
-        end
+        # Separate nodes entirely on GPU
+        separate_nodes! = separate_nodes_kernel!(backend)
+        separate_nodes!(view(left_nodes_buf, 1:length(left_nodes_buf)÷2), right_nodes_buf, parent_buf, 
+                       left_count, right_count, active_nodes; ndrange = n_active)
+        KernelAbstractions.synchronize(backend)
         
-        right_nodes_gpu = if length(right_nodes_vec) > 0
-            copyto!(view(right_nodes_buf, 1:length(right_nodes_vec)), right_nodes_vec)
-            view(right_nodes_buf, 1:length(right_nodes_vec))
-        else
-            view(right_nodes_buf, 1:0)  # Empty view
-        end
+        # Get counts (single scalar reads)
+        n_left = Int(Array(left_count)[1])
+        n_right = Int(Array(right_count)[1])
         
-        # For parent nodes, we'll use part of the target_mask_buf temporarily as storage
-        parent_nodes_gpu = if length(parent_nodes_vec) > 0
-            # Reinterpret part of target_mask_buf as Int32 for parent storage
-            parent_buf_reinterpreted = reinterpret(Int32, view(target_mask_buf, 1:(length(parent_nodes_vec)*4)))
-            copyto!(view(parent_buf_reinterpreted, 1:length(parent_nodes_vec)), parent_nodes_vec)
-            view(parent_buf_reinterpreted, 1:length(parent_nodes_vec))
-        else
-            reinterpret(Int32, view(target_mask_buf, 1:0))  # Empty view
-        end
+        # Ensure counts don't exceed buffer sizes
+        n_left = min(n_left, length(left_nodes_buf) ÷ 2)
+        n_right = min(n_right, length(right_nodes_buf), length(parent_buf))
+        
+        left_nodes_gpu = view(left_nodes_buf, 1:n_left)
+        right_nodes_gpu = view(right_nodes_buf, 1:n_right)
+        parent_nodes_gpu = view(parent_buf, 1:n_right)
         
         # Build histograms ONLY for left children
-        if length(left_nodes_vec) > 0
-            # Zero only left node histograms
+        if n_left > 0
+            # Zero with fewer threads - 16 instead of 64
             zero_nodes! = zero_node_hist_kernel!(backend)
-            zero_nodes!(h∇, left_nodes_gpu, js; ndrange = (length(left_nodes_vec), length(js), size(h∇, 2)))
+            zero_nodes!(h∇, left_nodes_gpu, js; ndrange = (n_left, length(js), 16))
             
-            # Build mask for left nodes - use second half of target_mask_buf
-            mask_offset = length(parent_nodes_vec) * 4  # Account for parent nodes storage
-            mask_view = view(target_mask_buf, mask_offset+1:length(target_mask_buf))
-            mask_view .= 0
+            # Clear and set mask
+            target_mask_buf .= 0
             fill_mask! = fill_mask_kernel!(backend)
-            fill_mask!(mask_view, left_nodes_gpu; ndrange = length(left_nodes_vec))
+            if n_left > 0
+                fill_mask!(target_mask_buf, left_nodes_gpu; ndrange = n_left)
+            end
             
-            # Build histograms for left children only
-            obs_per_thread = Int32(max(32, min(256, div(length(is), 1024))))
+            # Better tile size calculation
+            obs_per_thread = Int32(max(64, min(256, div(length(is), max(512, 1024 >> (depth-2))))))
             n_tiles = Int(ceil(length(is) / obs_per_thread))
+            
             hist_selective_mask_is_tiled! = hist_kernel_selective_mask_is_tiled!(backend)
-            hist_selective_mask_is_tiled!(h∇, ∇, x_bin, nidx, js, mask_view, is, obs_per_thread; 
+            hist_selective_mask_is_tiled!(h∇, ∇, x_bin, nidx, js, target_mask_buf, is, obs_per_thread; 
                                           ndrange = (n_tiles, length(js)))
         end
         
         # Compute right children by subtraction
-        if length(right_nodes_vec) > 0
+        if n_right > 0
             subtract_hist! = histogram_subtraction_kernel!(backend)
             subtract_hist!(h∇, h∇_parent, left_nodes_gpu, right_nodes_gpu, parent_nodes_gpu, js, nodes_sum_gpu; 
-                          ndrange = (length(right_nodes_vec), length(js)))
+                          ndrange = (n_right, length(js)))
         end
         
-        # Save current histograms as parent for next level
         copyto!(h∇_parent, h∇)
     end
     
-    # Find best splits (unchanged)
+    # Find best splits
     find_split! = find_best_split_from_hist_kernel!(backend)
-    find_split!(
-        gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
-        eltype(gains)(params.lambda), eltype(gains)(params.min_weight);
-        ndrange = n_active
-    )
+    find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
+                eltype(gains)(params.lambda), eltype(gains)(params.min_weight);
+                ndrange = n_active)
     
     KernelAbstractions.synchronize(backend)
     return nothing
