@@ -264,11 +264,11 @@ end
     @Const(js),
     @Const(is),
     @Const(active_nodes),
+    obs_tile::Int32,
 ) where {T}
     # Group over (node_idx, feature_idx), threads iterate observations with stride
     g_node, g_feat = @index(Group, NTuple)
     t = @index(Local)
-    nt = @groupsize()
 
     # Bounds check
     @inbounds if g_node <= length(active_nodes) && g_feat <= length(js)
@@ -280,15 +280,15 @@ end
         sh3 = @localmem(T, 64)
 
         # zero shared hist (each thread zeros a strided subset)
-        @inbounds for b = t:nt:64
+        @inbounds for b = t:obs_tile:64
             sh1[b] = zero(T)
             sh2[b] = zero(T)
             sh3[b] = zero(T)
         end
-        @barrier()
+        KernelAbstractions.barrier()
 
         # accumulate observations into shared hist (strided by thread id)
-        @inbounds for i = t:nt:length(is)
+        @inbounds for i = t:obs_tile:length(is)
             obs = is[i]
             if nidx[obs] == node
                 bin = Int(x_bin[obs, feat])
@@ -299,10 +299,10 @@ end
                 end
             end
         end
-        @barrier()
+        KernelAbstractions.barrier()
 
         # flush shared hist to global once per bin (strided across threads)
-        @inbounds for b = t:nt:64
+        @inbounds for b = t:obs_tile:64
             Atomix.@atomic h∇[1, b, feat, node] += sh1[b]
             Atomix.@atomic h∇[2, b, feat, node] += sh2[b]
             Atomix.@atomic h∇[3, b, feat, node] += sh3[b]
@@ -317,11 +317,11 @@ end
     @Const(nidx),
     @Const(js),
     @Const(is),
+    obs_tile::Int32,
 ) where {T}
     # Special case for depth 1: node is always 1
     g_feat = @index(Group)
     t = @index(Local)
-    nt = @groupsize()
 
     @inbounds if g_feat <= length(js)
         node = Int32(1)
@@ -331,14 +331,14 @@ end
         sh2 = @localmem(T, 64)
         sh3 = @localmem(T, 64)
 
-        @inbounds for b = t:nt:64
+        @inbounds for b = t:obs_tile:64
             sh1[b] = zero(T)
             sh2[b] = zero(T)
             sh3[b] = zero(T)
         end
-        @barrier()
+        KernelAbstractions.barrier()
 
-        @inbounds for i = t:nt:length(is)
+        @inbounds for i = t:obs_tile:length(is)
             obs = is[i]
             # nidx may be uninitialized for depth 1, but node is 1 for root
             bin = Int(x_bin[obs, feat])
@@ -348,9 +348,9 @@ end
                 Atomix.@atomic sh3[bin] += ∇[3, obs]
             end
         end
-        @barrier()
+        KernelAbstractions.barrier()
 
-        @inbounds for b = t:nt:64
+        @inbounds for b = t:obs_tile:64
             # write to global hist for root node
             Atomix.@atomic h∇[1, b, feat, node] += sh1[b]
             Atomix.@atomic h∇[2, b, feat, node] += sh2[b]
@@ -371,9 +371,7 @@ function update_hist_gpu!(
         h∇ .= 0
         # Shared-memory histogram for depth 1 (root node)
         hist_shared64_depth1! = hist_kernel_shared64_depth1!(backend)
-        hist_shared64_depth1!(h∇, ∇, x_bin, nidx, js, is; ndrange = length(js), workgroupsize = 128)
-        hist_shared64_depth1! = hist_kernel_shared64_depth1!(backend)
-        hist_shared64_depth1!(h∇, ∇, x_bin, nidx, js, is; ndrange = length(js))
+        hist_shared64_depth1!(h∇, ∇, x_bin, nidx, js, is, Int32(128); ndrange = length(js), workgroupsize = 128)
     else
         # Build histograms for the current active nodes (parents to split now)
         zero_nodes! = zero_node_hist_kernel!(backend)
@@ -385,7 +383,7 @@ function update_hist_gpu!(
 
         # Shared-memory histogram for active nodes
         hist_shared64! = hist_kernel_shared64!(backend)
-        hist_shared64!(h∇, ∇, x_bin, nidx, js, is, active_nodes; ndrange = (n_active, length(js)), workgroupsize = 128)
+        hist_shared64!(h∇, ∇, x_bin, nidx, js, is, active_nodes, Int32(128); ndrange = (n_active, length(js)), workgroupsize = 128)
     end
 
     # Compute best splits directly from histograms, writing nodes_sum
