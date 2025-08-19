@@ -37,83 +37,54 @@ end
     end
 end
 
-# NVIDIA-style two-phase histogram: Phase 1 - per-block shared memory histograms
-@kernel function hist_shared_phase1!(
-    h∇_blocks::AbstractArray{T,4},  # [gradients, bins, features, blocks]
+@kernel function hist_per_block_simple!(
+    block_hists::AbstractArray{T,5},
     @Const(∇),
     @Const(x_bin),
     @Const(nidx),
     @Const(js),
     @Const(is),
-    @Const(target_nodes),
     obs_per_block::Int32,
 ) where {T}
-    # NVIDIA-optimized thread layout
     block_id = @index(Group)
-    local_id = @index(Local)
+    thread_id = @index(Local)
     
-    # Each block processes obs_per_block observations
     start_obs = (block_id - 1) * obs_per_block + 1
     end_obs = min(block_id * obs_per_block, length(is))
     
-    # Shared memory for per-block histogram
-    shared_hist = @localmem T (3, size(h∇_blocks, 2), length(js))
-    
-    # Initialize shared memory (each thread initializes some bins)
-    @inbounds for idx in local_id:@groupsize()[1]:length(shared_hist)
-        shared_hist[idx] = zero(T)
-    end
-    @synchronize
-    
-    # Process observations assigned to this block
-    @inbounds for obs_idx in start_obs:end_obs
-        obs = is[obs_idx]
-        node = nidx[obs]
-        
-        # Only process if node is in target set
-        if node > 0 && target_nodes[node] != 0
-            # Process all features for this observation
-            @inbounds for j_idx in 1:length(js)
-                feat = js[j_idx]
-                bin = x_bin[obs, feat]
-                
-                if bin > 0 && bin <= size(h∇_blocks, 2)
-                    # Atomic add to shared memory
-                    Atomix.@atomic shared_hist[1, bin, j_idx] += ∇[1, obs]
-                    Atomix.@atomic shared_hist[2, bin, j_idx] += ∇[2, obs]
-                    Atomix.@atomic shared_hist[3, bin, j_idx] += ∇[3, obs]
+    @inbounds for obs_idx in (start_obs + thread_id - 1):@groupsize()[1]:end_obs
+        if obs_idx <= length(is)
+            obs = is[obs_idx]
+            node = nidx[obs]
+            if node > 0 && node <= size(block_hists, 4)
+                @inbounds for j_idx in 1:length(js)
+                    feat = js[j_idx]
+                    bin = x_bin[obs, feat]
+                    if (bin > 0 && bin <= size(block_hists, 2) && 
+                        feat <= size(block_hists, 3))
+                        Atomix.@atomic block_hists[1, bin, feat, node, block_id] += ∇[1, obs]
+                        Atomix.@atomic block_hists[2, bin, feat, node, block_id] += ∇[2, obs]
+                        Atomix.@atomic block_hists[3, bin, feat, node, block_id] += ∇[3, obs]
+                    end
                 end
             end
         end
     end
-    @synchronize
-    
-    # Copy shared histogram to global memory
-    @inbounds for idx in local_id:@groupsize()[1]:length(shared_hist)
-        h∇_blocks[idx + (block_id - 1) * length(shared_hist)] = shared_hist[idx]
-    end
 end
 
-# Phase 2 - accumulate per-block histograms into final result
-@kernel function hist_shared_phase2!(
+@kernel function accumulate_blocks_simple!(
     h∇::AbstractArray{T,4},
-    @Const(h∇_blocks),
-    @Const(target_nodes),
-    num_blocks::Int32,
+    @Const(block_hists),
 ) where {T}
-    grad_idx, bin_idx, feat_idx, node_idx = @index(Global, NTuple)
+    grad, bin, feat, node = @index(Global, NTuple)
     
-    @inbounds if (grad_idx <= 3 && bin_idx <= size(h∇, 2) && 
-                  feat_idx <= size(h∇, 3) && node_idx <= size(h∇, 4))
-        
-        node = node_idx  # Direct mapping for now
-        if node > 0 && target_nodes[node] != 0
-            total = zero(T)
-            @inbounds for block_id in 1:num_blocks
-                total += h∇_blocks[grad_idx, bin_idx, feat_idx, block_id]
-            end
-            h∇[grad_idx, bin_idx, feat_idx, node_idx] = total
+    @inbounds if (grad <= size(h∇, 1) && bin <= size(h∇, 2) && 
+                  feat <= size(h∇, 3) && node <= size(h∇, 4))
+        total = zero(T)
+        @inbounds for block_id in 1:size(block_hists, 5)
+            total += block_hists[grad, bin, feat, node, block_id]
         end
+        h∇[grad, bin, feat, node] = total
     end
 end
 
@@ -138,7 +109,6 @@ end
             feats[n_idx] = Int32(0)
         else
             nbins = size(h∇, 2)
-            # compute parent sums using first feature (identical across features)
             f_first = js[1]
             p_g1 = zero(T); p_g2 = zero(T); p_w = zero(T)
             @inbounds for b in 1:nbins
@@ -199,31 +169,20 @@ function update_hist_gpu!(
         return
     end
     
-    # Set target mask for active nodes
-    target_mask_buf .= 0
-    fill_mask! = fill_mask_kernel!(backend)
-    fill_mask!(target_mask_buf, active_nodes; ndrange = n_active)
+    max_blocks = 32
+    obs_per_block = Int32(max(256, div(length(is), max_blocks)))
+    num_blocks = min(max_blocks, Int32(ceil(length(is) / obs_per_block)))
     
-    # NVIDIA two-phase approach
-    # Phase 1: Per-block shared memory histograms
-    obs_per_block = max(256, div(length(is), 128))  # Optimize block size
-    num_blocks = Int32(ceil(length(is) / obs_per_block))
+    block_hists = similar(h∇, size(h∇, 1), size(h∇, 2), size(h∇, 3), size(h∇, 4), num_blocks)
+    block_hists .= 0
     
-    # Allocate temporary per-block histogram storage
-    h∇_blocks = similar(h∇, 3, size(h∇, 2), length(js), num_blocks)
-    h∇_blocks .= 0
-    
-    # Launch phase 1 with optimal thread layout
-    phase1! = hist_shared_phase1!(backend, 256)  # 256 threads per block
-    phase1!(h∇_blocks, ∇, x_bin, nidx, js, is, target_mask_buf, Int32(obs_per_block); 
+    phase1! = hist_per_block_simple!(backend)
+    phase1!(block_hists, ∇, x_bin, nidx, js, is, obs_per_block; 
             ndrange = (num_blocks * 256,), workgroupsize = (256,))
     
-    # Phase 2: Accumulate per-block histograms
-    phase2! = hist_shared_phase2!(backend)
-    phase2!(h∇, h∇_blocks, target_mask_buf, num_blocks; 
-            ndrange = (3, size(h∇, 2), length(js), size(h∇, 4)))
+    phase2! = accumulate_blocks_simple!(backend)
+    phase2!(h∇, block_hists; ndrange = size(h∇))
     
-    # Find best splits
     find_split! = find_best_split_from_hist_kernel!(backend)
     find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
                 eltype(gains)(params.lambda), eltype(gains)(params.min_weight);
