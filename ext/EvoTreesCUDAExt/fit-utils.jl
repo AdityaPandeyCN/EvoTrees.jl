@@ -37,23 +37,15 @@ end
     end
 end
 
-@kernel function zero_node_hist_kernel_optimized!(h∇::AbstractArray{T,4}, @Const(nodes), @Const(js)) where {T}
-    idx, j_idx, bin_chunk = @index(Global, NTuple)
-    @inbounds if idx <= length(nodes) && j_idx <= length(js)
+@kernel function zero_node_hist_kernel!(h∇::AbstractArray{T,4}, @Const(nodes), @Const(js)) where {T}
+    idx, j_idx, bin = @index(Global, NTuple)
+    @inbounds if idx <= length(nodes) && j_idx <= length(js) && bin <= size(h∇, 2)
         node = nodes[idx]
         feat = js[j_idx]
         if node > 0
-            nbins = size(h∇, 2)
-            base_bin = (bin_chunk - 1) << 3  # Process 8 bins per thread instead of 4
-            # Each thread handles 8 bins for better throughput
-            @inbounds for b_offset in 1:8
-                bin = base_bin + b_offset
-                if bin <= nbins
-                    h∇[1, bin, feat, node] = zero(T)
-                    h∇[2, bin, feat, node] = zero(T)
-                    h∇[3, bin, feat, node] = zero(T)
-                end
-            end
+            h∇[1, bin, feat, node] = zero(T)
+            h∇[2, bin, feat, node] = zero(T)
+            h∇[3, bin, feat, node] = zero(T)
         end
     end
 end
@@ -129,287 +121,46 @@ end
     end
 end
 
-@kernel function hist_kernel_is_tiled_optimized!(
+@kernel function hist_kernel!(
     h∇::AbstractArray{T,4},
     @Const(∇),
     @Const(x_bin),
     @Const(nidx),
     @Const(js),
     @Const(is),
-    obs_per_thread::Int32,
 ) where {T}
-    tile_i, j = @index(Global, NTuple)
-    
-    @inbounds if j <= length(js)
-        start_idx = (tile_i - 1) * obs_per_thread + 1
-        if start_idx <= length(is)
-            end_idx = min(tile_i * obs_per_thread, length(is))
-            jdx = js[j]
-            
-            # Process multiple observations per thread for better memory efficiency
-            @inbounds for i in start_idx:end_idx
-                obs = is[i]
-                node = nidx[obs]
-                if node > 0
-                    bin = x_bin[obs, jdx]
-                    if bin > 0 && bin <= size(h∇, 2)
-                        # Reduced atomic contention by grouping operations
-                        g1, g2, g3 = ∇[1, obs], ∇[2, obs], ∇[3, obs]
-                        Atomix.@atomic h∇[1, bin, jdx, node] += g1
-                        Atomix.@atomic h∇[2, bin, jdx, node] += g2
-                        Atomix.@atomic h∇[3, bin, jdx, node] += g3
-                    end
-                end
-            end
-        end
-    end
-end
-
-@kernel function hist_kernel_selective_mask_is_tiled_optimized!(
-    h∇::AbstractArray{T,4},
-    @Const(∇),
-    @Const(x_bin),
-    @Const(nidx),
-    @Const(js),
-    @Const(target_mask),
-    @Const(is),
-    obs_per_thread::Int32,
-) where {T}
-    tile_i, j = @index(Global, NTuple)
-    
-    @inbounds if j <= length(js)
-        start_idx = (tile_i - 1) * obs_per_thread + 1
-        if start_idx <= length(is)
-            end_idx = min(tile_i * obs_per_thread, length(is))
-            jdx = js[j]
-            
-            # Optimized loop with better memory access
-            @inbounds for i in start_idx:end_idx
-                obs = is[i]
-                node = nidx[obs]
-                # Early exit if node not in target mask
-                if node > 0 && target_mask[node] != 0
-                    bin = x_bin[obs, jdx]
-                    if bin > 0 && bin <= size(h∇, 2)
-                        # Cache gradient values to reduce memory reads
-                        g1, g2, g3 = ∇[1, obs], ∇[2, obs], ∇[3, obs]
-                        Atomix.@atomic h∇[1, bin, jdx, node] += g1
-                        Atomix.@atomic h∇[2, bin, jdx, node] += g2
-                        Atomix.@atomic h∇[3, bin, jdx, node] += g3
-                    end
-                end
-            end
-        end
-    end
-end
-
-@kernel function separate_nodes_kernel!(
-    left_buf::AbstractVector{Int32},
-    right_buf::AbstractVector{Int32},
-    parent_buf::AbstractVector{Int32},
-    left_count::AbstractVector{Int32},
-    right_count::AbstractVector{Int32},
-    @Const(active_nodes)
-)
-    idx = @index(Global)
-    @inbounds if idx <= length(active_nodes)
-        node = active_nodes[idx]
+    i, j = @index(Global, NTuple)
+    @inbounds if i <= length(is) && j <= length(js)
+        obs = is[i]
+        node = nidx[obs]
         if node > 0
-            if node & 1 == 0  # Left child (faster than % 2)
-                pos = Atomix.@atomic left_count[1] += Int32(1)
-                if pos <= length(left_buf)
-                    left_buf[pos] = node
-                end
-            else  # Right child  
-                pos = Atomix.@atomic right_count[1] += Int32(1)
-                if pos <= length(right_buf)
-                    right_buf[pos] = node
-                    parent_buf[pos] = node >> 1
-                end
+            feat = js[j]
+            bin = x_bin[obs, feat]
+            if bin > 0 && bin <= size(h∇, 2)
+                Atomix.@atomic h∇[1, bin, feat, node] += ∇[1, obs]
+                Atomix.@atomic h∇[2, bin, feat, node] += ∇[2, obs]
+                Atomix.@atomic h∇[3, bin, feat, node] += ∇[3, obs]
             end
         end
     end
-end
-
-@kernel function histogram_subtraction_kernel!(
-    h∇::AbstractArray{T,4},
-    @Const(h∇_parent),
-    @Const(left_nodes),
-    @Const(right_nodes), 
-    @Const(parent_nodes),
-    @Const(js),
-    nodes_sum
-) where {T}
-    r_idx, j_idx = @index(Global, NTuple)
-    
-    @inbounds if r_idx <= length(right_nodes) && j_idx <= length(js)
-        right_node = right_nodes[r_idx]
-        parent_node = parent_nodes[r_idx]
-        left_node = right_node - 1  # Left sibling is always right_node - 1
-        
-        feat = js[j_idx]
-        nbins = size(h∇, 2)
-        
-        # If first feature, compute parent sum (only once)
-        if j_idx == 1
-            p_sum1 = zero(T)
-            p_sum2 = zero(T)
-            p_sum3 = zero(T)
-            @inbounds for bin in 1:nbins
-                p_sum1 += h∇_parent[1, bin, feat, parent_node]
-                p_sum2 += h∇_parent[2, bin, feat, parent_node]
-                p_sum3 += h∇_parent[3, bin, feat, parent_node]
-            end
-            nodes_sum[1, parent_node] = p_sum1
-            nodes_sum[2, parent_node] = p_sum2
-            nodes_sum[3, parent_node] = p_sum3
-        end
-        
-        # Subtract: right = parent - left
-        @inbounds for bin in 1:nbins
-            h∇[1, bin, feat, right_node] = h∇_parent[1, bin, feat, parent_node] - h∇[1, bin, feat, left_node]
-            h∇[2, bin, feat, right_node] = h∇_parent[2, bin, feat, parent_node] - h∇[2, bin, feat, left_node]
-            h∇[3, bin, feat, right_node] = h∇_parent[3, bin, feat, parent_node] - h∇[3, bin, feat, left_node]
-        end
-    end
-end
-
-@kernel function histogram_subtraction_kernel_optimized!(
-    h∇::AbstractArray{T,4},
-    @Const(h∇_parent),
-    @Const(left_nodes),
-    @Const(right_nodes), 
-    @Const(parent_nodes),
-    @Const(js),
-    nodes_sum
-) where {T}
-    r_idx, j_idx, bin_chunk = @index(Global, NTuple)
-    
-    @inbounds if r_idx <= length(right_nodes) && j_idx <= length(js)
-        right_node = right_nodes[r_idx]
-        parent_node = parent_nodes[r_idx]
-        left_node = right_node - 1  # Left sibling is always right_node - 1
-        
-        feat = js[j_idx]
-        nbins = size(h∇, 2)
-        
-        # If first feature and first bin chunk, compute parent sum (only once)
-        if j_idx == 1 && bin_chunk == 1
-            p_sum1 = zero(T)
-            p_sum2 = zero(T)
-            p_sum3 = zero(T)
-            @inbounds for bin in 1:nbins
-                p_sum1 += h∇_parent[1, bin, feat, parent_node]
-                p_sum2 += h∇_parent[2, bin, feat, parent_node]
-                p_sum3 += h∇_parent[3, bin, feat, parent_node]
-            end
-            nodes_sum[1, parent_node] = p_sum1
-            nodes_sum[2, parent_node] = p_sum2
-            nodes_sum[3, parent_node] = p_sum3
-        end
-        
-        # Process 4 bins per thread for better throughput
-        base_bin = (bin_chunk - 1) << 2  # * 4
-        @inbounds for b_offset in 1:4
-            bin = base_bin + b_offset
-            if bin <= nbins
-                # Vectorized subtraction: right = parent - left
-                h∇[1, bin, feat, right_node] = h∇_parent[1, bin, feat, parent_node] - h∇[1, bin, feat, left_node]
-                h∇[2, bin, feat, right_node] = h∇_parent[2, bin, feat, parent_node] - h∇[2, bin, feat, left_node]
-                h∇[3, bin, feat, right_node] = h∇_parent[3, bin, feat, parent_node] - h∇[3, bin, feat, left_node]
-            end
-        end
-    end
-end
-
-function ensure_parent_hist!(h∇_parent_ref, h∇, backend)
-    if h∇_parent_ref[] === nothing
-        h∇_parent_ref[] = similar(h∇)
-    end
-    return h∇_parent_ref[]
 end
 
 function update_hist_gpu!(
-    h∇, h∇_parent_ref, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
+    h∇, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
     left_nodes_buf, right_nodes_buf, target_mask_buf
 )
     backend = KernelAbstractions.get_backend(h∇)
     n_active = length(active_nodes)
     
-    if depth == 1
-        # Root node - build histogram normally
-        h∇ .= 0
-        obs_per_thread = Int32(max(128, min(512, div(length(is), 512))))  # Increased tile size
-        n_tiles = Int(ceil(length(is) / obs_per_thread))
-        hist_is_tiled! = hist_kernel_is_tiled_optimized!(backend)
-        hist_is_tiled!(h∇, ∇, x_bin, nidx, js, is, obs_per_thread; ndrange = (n_tiles, length(js)))
-        # REMOVED: copyto!(h∇_parent, h∇) - expensive and unnecessary for depth 1
-    else
-        # Use GPU kernel to separate nodes - NO CPU ALLOCATION!
-        left_count = KernelAbstractions.zeros(backend, Int32, 1)
-        right_count = KernelAbstractions.zeros(backend, Int32, 1)
+    # Simple approach: just zero the needed nodes and rebuild histogram
+    if n_active > 0
+        # Zero histograms for active nodes
+        zero_nodes! = zero_node_hist_kernel!(backend)
+        zero_nodes!(h∇, active_nodes, js; ndrange = (n_active, length(js), size(h∇, 2)))
         
-        # Use second half of left_nodes_buf for parent storage
-        half_buf_size = length(left_nodes_buf) >> 1
-        parent_buf = view(left_nodes_buf, half_buf_size+1:length(left_nodes_buf))
-        
-        # Separate nodes entirely on GPU
-        separate_nodes! = separate_nodes_kernel!(backend)
-        separate_nodes!(view(left_nodes_buf, 1:half_buf_size), right_nodes_buf, parent_buf, 
-                       left_count, right_count, active_nodes; ndrange = n_active)
-        KernelAbstractions.synchronize(backend)
-        
-        # Get counts (single scalar reads)
-        n_left = Int(Array(left_count)[1])
-        n_right = Int(Array(right_count)[1])
-        
-        # Ensure counts don't exceed buffer sizes
-        n_left = min(n_left, half_buf_size)
-        n_right = min(n_right, length(right_nodes_buf))
-        
-        left_nodes_gpu = view(left_nodes_buf, 1:n_left)
-        right_nodes_gpu = view(right_nodes_buf, 1:n_right)
-        parent_nodes_gpu = view(parent_buf, 1:n_right)
-        
-        # Build histograms ONLY for left children - OPTIMIZED
-        if n_left > 0
-            # Zero with optimal threads - adjusted for 8 bins per thread
-            zero_nodes! = zero_node_hist_kernel_optimized!(backend)
-            zero_nodes!(h∇, left_nodes_gpu, js; ndrange = (n_left, length(js), 8))  # 8 threads per bin group
-            
-            # Clear and set mask
-            target_mask_buf .= 0
-            fill_mask! = fill_mask_kernel!(backend)
-            fill_mask!(target_mask_buf, left_nodes_gpu; ndrange = n_left)
-            
-            # OPTIMIZED tile size - adaptive based on depth
-            base_obs_per_thread = max(128, min(512, div(length(is), max(256, 512 >> (depth-2)))))
-            obs_per_thread = Int32(base_obs_per_thread)
-            n_tiles = Int(ceil(length(is) / obs_per_thread))
-            
-            hist_selective_mask_is_tiled! = hist_kernel_selective_mask_is_tiled_optimized!(backend)
-            hist_selective_mask_is_tiled!(h∇, ∇, x_bin, nidx, js, target_mask_buf, is, obs_per_thread; 
-                                          ndrange = (n_tiles, length(js)))
-        end
-        
-        # Smart parent histogram update - only allocate and copy when subtraction is needed
-        if n_right > 0
-            h∇_parent = ensure_parent_hist!(h∇_parent_ref, h∇, backend)
-            copyto!(h∇_parent, h∇)
-        end
-        
-        # Compute right children by subtraction - OPTIMIZED: only when needed
-        if n_right > 0
-            h∇_parent = h∇_parent_ref[]  # We know it exists now
-            subtract_hist! = histogram_subtraction_kernel_optimized!(backend)
-            # Calculate bin chunks for 4 bins per thread
-            nbins = size(h∇, 2)
-            bin_chunks = Int(ceil(nbins / 4))
-            subtract_hist!(h∇, h∇_parent, left_nodes_gpu, right_nodes_gpu, parent_nodes_gpu, js, nodes_sum_gpu; 
-                          ndrange = (n_right, length(js), bin_chunks))
-        end
-        
-        # REMOVED: copyto!(h∇_parent, h∇) - move this to only when needed
+        # Build histogram for all active nodes
+        hist! = hist_kernel!(backend)
+        hist!(h∇, ∇, x_bin, nidx, js, is; ndrange = (length(is), length(js)))
     end
     
     # Find best splits
