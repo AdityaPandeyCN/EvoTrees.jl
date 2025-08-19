@@ -50,8 +50,8 @@ function grow_tree!(
     js_gpu = KernelAbstractions.adapt(backend, js)
     is_gpu = KernelAbstractions.adapt(backend, is)
 
-    # ADD THIS: Create a copy buffer for parent histograms
-    h∇_parent = similar(h∇)  # Store parent histograms for subtraction
+    # OPTIMIZED: Lazily allocate parent histogram only when subtraction is needed
+    h∇_parent_ref = Ref{Union{Nothing, typeof(h∇)}}(nothing)  # Ref wrapper for lazy allocation
 
     tree_split_gpu = KernelAbstractions.zeros(backend, Bool, length(tree.split))
     tree_cond_bin_gpu = KernelAbstractions.zeros(backend, UInt8, length(tree.cond_bin))
@@ -78,7 +78,7 @@ function grow_tree!(
     nsamples = Float32(length(is_gpu))
     view(anodes_gpu, 1:1) .= 1
     update_hist_gpu!(
-        h∇, h∇_parent,  # Added h∇_parent, removed h∇L, h∇R
+        h∇, h∇_parent_ref,  # Updated to use h∇_parent_ref
         best_gain_gpu, best_bin_gpu, best_feat_gpu,
         ∇, x_bin, nidx, js_gpu, is_gpu,
         1, view(anodes_gpu, 1:1), nodes_sum_gpu, params,
@@ -104,7 +104,7 @@ function grow_tree!(
         
         if depth > 1
             update_hist_gpu!(
-                h∇, h∇_parent,  # Added h∇_parent, removed h∇L, h∇R
+                h∇, h∇_parent_ref,  # Updated to use h∇_parent_ref
                 view_gain, view_bin, view_feat,
                 ∇, x_bin, nidx, js_gpu, is_gpu,
                 depth, view(active_nodes_full, 1:n_active), nodes_sum_gpu, params,
