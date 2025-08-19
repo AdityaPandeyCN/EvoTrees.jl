@@ -135,14 +135,15 @@ end
     l_bin = @index(Local)
 
     @inbounds if g_node <= length(active_nodes) && g_feat <= length(js) && l_bin <= 64
-        node = active_nodes[g_node]
-        feat = js[g_feat]
+        node_i = Int(active_nodes[g_node])
+        node_u = UInt32(node_i)
+        feat_i = Int(js[g_feat])
         s1 = T(0); s2 = T(0); s3 = T(0)
         i = l_bin
         @inbounds while i <= length(is)
             obs = is[i]
-            if nidx[obs] == node
-                b = Int(x_bin[obs, feat])
+            if nidx[obs] == node_u
+                b = Int(x_bin[obs, feat_i])
                 if b == l_bin
                     s1 += ∇[1, obs]
                     s2 += ∇[2, obs]
@@ -151,9 +152,9 @@ end
             end
             i += 64
         end
-        Atomix.@atomic h∇[1, l_bin, feat, node] += s1
-        Atomix.@atomic h∇[2, l_bin, feat, node] += s2
-        Atomix.@atomic h∇[3, l_bin, feat, node] += s3
+        Atomix.@atomic h∇[1, l_bin, feat_i, node_i] += s1
+        Atomix.@atomic h∇[2, l_bin, feat_i, node_i] += s2
+        Atomix.@atomic h∇[3, l_bin, feat_i, node_i] += s3
     end
 end
 
@@ -168,13 +169,13 @@ end
     l_bin = @index(Local)
 
     @inbounds if g_feat <= length(js) && l_bin <= 64
-        node = Int32(1)
-        feat = js[g_feat]
+        node_i = Int32(1)
+        feat_i = Int(js[g_feat])
         s1 = T(0); s2 = T(0); s3 = T(0)
         i = l_bin
         @inbounds while i <= length(is)
             obs = is[i]
-            b = Int(x_bin[obs, feat])
+            b = Int(x_bin[obs, feat_i])
             if b == l_bin
                 s1 += ∇[1, obs]
                 s2 += ∇[2, obs]
@@ -182,9 +183,9 @@ end
             end
             i += 64
         end
-        Atomix.@atomic h∇[1, l_bin, feat, node] += s1
-        Atomix.@atomic h∇[2, l_bin, feat, node] += s2
-        Atomix.@atomic h∇[3, l_bin, feat, node] += s3
+        Atomix.@atomic h∇[1, l_bin, feat_i, node_i] += s1
+        Atomix.@atomic h∇[2, l_bin, feat_i, node_i] += s2
+        Atomix.@atomic h∇[3, l_bin, feat_i, node_i] += s3
     end
 end
 
