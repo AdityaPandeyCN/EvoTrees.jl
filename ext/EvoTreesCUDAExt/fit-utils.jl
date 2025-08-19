@@ -37,15 +37,82 @@ end
     end
 end
 
-@kernel function zero_node_hist_kernel!(h∇::AbstractArray{T,4}, @Const(nodes), @Const(js)) where {T}
-    idx, j_idx, bin = @index(Global, NTuple)
-    @inbounds if idx <= length(nodes) && j_idx <= length(js) && bin <= size(h∇, 2)
-        node = nodes[idx]
-        feat = js[j_idx]
-        if node > 0
-            h∇[1, bin, feat, node] = zero(T)
-            h∇[2, bin, feat, node] = zero(T)
-            h∇[3, bin, feat, node] = zero(T)
+# NVIDIA-style two-phase histogram: Phase 1 - per-block shared memory histograms
+@kernel function hist_shared_phase1!(
+    h∇_blocks::AbstractArray{T,4},  # [gradients, bins, features, blocks]
+    @Const(∇),
+    @Const(x_bin),
+    @Const(nidx),
+    @Const(js),
+    @Const(is),
+    @Const(target_nodes),
+    obs_per_block::Int32,
+) where {T}
+    # NVIDIA-optimized thread layout
+    block_id = @index(Group)
+    local_id = @index(Local)
+    
+    # Each block processes obs_per_block observations
+    start_obs = (block_id - 1) * obs_per_block + 1
+    end_obs = min(block_id * obs_per_block, length(is))
+    
+    # Shared memory for per-block histogram
+    shared_hist = @localmem T (3, size(h∇_blocks, 2), length(js))
+    
+    # Initialize shared memory (each thread initializes some bins)
+    @inbounds for idx in local_id:@groupsize()[1]:length(shared_hist)
+        shared_hist[idx] = zero(T)
+    end
+    @synchronize
+    
+    # Process observations assigned to this block
+    @inbounds for obs_idx in start_obs:end_obs
+        obs = is[obs_idx]
+        node = nidx[obs]
+        
+        # Only process if node is in target set
+        if node > 0 && target_nodes[node] != 0
+            # Process all features for this observation
+            @inbounds for j_idx in 1:length(js)
+                feat = js[j_idx]
+                bin = x_bin[obs, feat]
+                
+                if bin > 0 && bin <= size(h∇_blocks, 2)
+                    # Atomic add to shared memory
+                    Atomix.@atomic shared_hist[1, bin, j_idx] += ∇[1, obs]
+                    Atomix.@atomic shared_hist[2, bin, j_idx] += ∇[2, obs]
+                    Atomix.@atomic shared_hist[3, bin, j_idx] += ∇[3, obs]
+                end
+            end
+        end
+    end
+    @synchronize
+    
+    # Copy shared histogram to global memory
+    @inbounds for idx in local_id:@groupsize()[1]:length(shared_hist)
+        h∇_blocks[idx + (block_id - 1) * length(shared_hist)] = shared_hist[idx]
+    end
+end
+
+# Phase 2 - accumulate per-block histograms into final result
+@kernel function hist_shared_phase2!(
+    h∇::AbstractArray{T,4},
+    @Const(h∇_blocks),
+    @Const(target_nodes),
+    num_blocks::Int32,
+) where {T}
+    grad_idx, bin_idx, feat_idx, node_idx = @index(Global, NTuple)
+    
+    @inbounds if (grad_idx <= 3 && bin_idx <= size(h∇, 2) && 
+                  feat_idx <= size(h∇, 3) && node_idx <= size(h∇, 4))
+        
+        node = node_idx  # Direct mapping for now
+        if node > 0 && target_nodes[node] != 0
+            total = zero(T)
+            @inbounds for block_id in 1:num_blocks
+                total += h∇_blocks[grad_idx, bin_idx, feat_idx, block_id]
+            end
+            h∇[grad_idx, bin_idx, feat_idx, node_idx] = total
         end
     end
 end
@@ -121,104 +188,6 @@ end
     end
 end
 
-@kernel function hist_kernel!(
-    h∇::AbstractArray{T,4},
-    @Const(∇),
-    @Const(x_bin),
-    @Const(nidx),
-    @Const(js),
-    @Const(is),
-) where {T}
-    i, j = @index(Global, NTuple)
-    @inbounds if i <= length(is) && j <= length(js)
-        obs = is[i]
-        node = nidx[obs]
-        if node > 0
-            feat = js[j]
-            bin = x_bin[obs, feat]
-            if bin > 0 && bin <= size(h∇, 2)
-                Atomix.@atomic h∇[1, bin, feat, node] += ∇[1, obs]
-                Atomix.@atomic h∇[2, bin, feat, node] += ∇[2, obs]
-                Atomix.@atomic h∇[3, bin, feat, node] += ∇[3, obs]
-            end
-        end
-    end
-end
-
-@kernel function hist_kernel_selective!(
-    h∇::AbstractArray{T,4},
-    @Const(∇),
-    @Const(x_bin),
-    @Const(nidx),
-    @Const(js),
-    @Const(is),
-    @Const(target_nodes),
-) where {T}
-    i, j = @index(Global, NTuple)
-    @inbounds if i <= length(is) && j <= length(js)
-        obs = is[i]
-        node = nidx[obs]
-        # Only build histogram for target nodes
-        if node > 0 && target_nodes[node] != 0
-            feat = js[j]
-            bin = x_bin[obs, feat]
-            if bin > 0 && bin <= size(h∇, 2)
-                Atomix.@atomic h∇[1, bin, feat, node] += ∇[1, obs]
-                Atomix.@atomic h∇[2, bin, feat, node] += ∇[2, obs]
-                Atomix.@atomic h∇[3, bin, feat, node] += ∇[3, obs]
-            end
-        end
-    end
-end
-
-@kernel function separate_nodes_kernel!(
-    left_buf::AbstractVector{Int32},
-    right_buf::AbstractVector{Int32},
-    left_count::AbstractVector{Int32},
-    right_count::AbstractVector{Int32},
-    @Const(active_nodes)
-)
-    idx = @index(Global)
-    @inbounds if idx <= length(active_nodes)
-        node = active_nodes[idx]
-        if node > 0
-            if node & 1 == 0  # Left child (even)
-                pos = Atomix.@atomic left_count[1] += Int32(1)
-                if pos <= length(left_buf)
-                    left_buf[pos] = node
-                end
-            else  # Right child (odd)
-                pos = Atomix.@atomic right_count[1] += Int32(1)
-                if pos <= length(right_buf)
-                    right_buf[pos] = node
-                end
-            end
-        end
-    end
-end
-
-@kernel function histogram_subtraction_kernel!(
-    h∇::AbstractArray{T,4},
-    @Const(h∇_parent),
-    @Const(left_nodes),
-    @Const(right_nodes),
-    @Const(js),
-) where {T}
-    r_idx, j_idx, bin = @index(Global, NTuple)
-    
-    @inbounds if r_idx <= length(right_nodes) && j_idx <= length(js) && bin <= size(h∇, 2)
-        right_node = right_nodes[r_idx]
-        left_node = right_node - 1  # Left sibling
-        parent_node = right_node >> 1  # Parent
-        feat = js[j_idx]
-        
-        # right = parent - left
-        h∇[1, bin, feat, right_node] = h∇_parent[1, bin, feat, parent_node] - h∇[1, bin, feat, left_node]
-        h∇[2, bin, feat, right_node] = h∇_parent[2, bin, feat, parent_node] - h∇[2, bin, feat, left_node]
-        h∇[3, bin, feat, right_node] = h∇_parent[3, bin, feat, parent_node] - h∇[3, bin, feat, left_node]
-    end
-end
-
 function update_hist_gpu!(
     h∇, h∇_parent, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
     left_nodes_buf, right_nodes_buf, target_mask_buf
@@ -226,60 +195,33 @@ function update_hist_gpu!(
     backend = KernelAbstractions.get_backend(h∇)
     n_active = length(active_nodes)
     
-    if depth == 1
-        # Root node: build histogram from scratch
-        h∇ .= 0
-        hist! = hist_kernel!(backend)
-        hist!(h∇, ∇, x_bin, nidx, js, is; ndrange = (length(is), length(js)))
-        
-        # Copy to parent for next iteration - only once at root
-        copyto!(h∇_parent, h∇)
-        
-    elseif n_active > 0
-        # Store current state as parent before modifying
-        copyto!(h∇_parent, h∇)
-        
-        # Separate left and right children
-        left_count = KernelAbstractions.zeros(backend, Int32, 1)
-        right_count = KernelAbstractions.zeros(backend, Int32, 1)
-        
-        separate_nodes! = separate_nodes_kernel!(backend)
-        separate_nodes!(left_nodes_buf, right_nodes_buf, left_count, right_count, active_nodes; 
-                       ndrange = n_active)
-        KernelAbstractions.synchronize(backend)
-        
-        n_left = Int(Array(left_count)[1])
-        n_right = Int(Array(right_count)[1])
-        
-        if n_left > 0
-            # Zero and build histograms for left children only
-            left_nodes = view(left_nodes_buf, 1:n_left)
-            
-            # Zero left children
-            zero_nodes! = zero_node_hist_kernel!(backend)
-            zero_nodes!(h∇, left_nodes, js; ndrange = (n_left, length(js), size(h∇, 2)))
-            
-            # Set target mask for left children
-            target_mask_buf .= 0
-            fill_mask! = fill_mask_kernel!(backend)
-            fill_mask!(target_mask_buf, left_nodes; ndrange = n_left)
-            
-            # Build histogram only for left children
-            hist_selective! = hist_kernel_selective!(backend)
-            hist_selective!(h∇, ∇, x_bin, nidx, js, is, target_mask_buf; 
-                           ndrange = (length(is), length(js)))
-        end
-        
-        if n_right > 0
-            # Compute right children by subtraction
-            right_nodes = view(right_nodes_buf, 1:n_right)
-            left_nodes = view(left_nodes_buf, 1:n_left)
-            
-            subtract_hist! = histogram_subtraction_kernel!(backend)
-            subtract_hist!(h∇, h∇_parent, left_nodes, right_nodes, js; 
-                          ndrange = (n_right, length(js), size(h∇, 2)))
-        end
+    if n_active == 0
+        return
     end
+    
+    # Set target mask for active nodes
+    target_mask_buf .= 0
+    fill_mask! = fill_mask_kernel!(backend)
+    fill_mask!(target_mask_buf, active_nodes; ndrange = n_active)
+    
+    # NVIDIA two-phase approach
+    # Phase 1: Per-block shared memory histograms
+    obs_per_block = max(256, div(length(is), 128))  # Optimize block size
+    num_blocks = Int32(ceil(length(is) / obs_per_block))
+    
+    # Allocate temporary per-block histogram storage
+    h∇_blocks = similar(h∇, 3, size(h∇, 2), length(js), num_blocks)
+    h∇_blocks .= 0
+    
+    # Launch phase 1 with optimal thread layout
+    phase1! = hist_shared_phase1!(backend, 256)  # 256 threads per block
+    phase1!(h∇_blocks, ∇, x_bin, nidx, js, is, target_mask_buf, Int32(obs_per_block); 
+            ndrange = (num_blocks * 256,), workgroupsize = (256,))
+    
+    # Phase 2: Accumulate per-block histograms
+    phase2! = hist_shared_phase2!(backend)
+    phase2!(h∇, h∇_blocks, target_mask_buf, num_blocks; 
+            ndrange = (3, size(h∇, 2), length(js), size(h∇, 4)))
     
     # Find best splits
     find_split! = find_best_split_from_hist_kernel!(backend)
