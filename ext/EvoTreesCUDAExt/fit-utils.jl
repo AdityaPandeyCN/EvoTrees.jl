@@ -208,11 +208,15 @@ end
         if node > 0
             if node & 1 == 0  # Left child (faster than % 2)
                 pos = Atomix.@atomic left_count[1] += Int32(1)
-                left_buf[pos] = node
+                if pos <= length(left_buf)
+                    left_buf[pos] = node
+                end
             else  # Right child  
                 pos = Atomix.@atomic right_count[1] += Int32(1)
-                right_buf[pos] = node
-                parent_buf[pos] = node >> 1
+                if pos <= length(right_buf)
+                    right_buf[pos] = node
+                    parent_buf[pos] = node >> 1
+                end
             end
         end
     end
@@ -271,7 +275,7 @@ function update_hist_gpu!(
     if depth == 1
         # Root node - build histogram normally
         h∇ .= 0
-        obs_per_thread = Int32(min(128, max(64, div(length(is), 512))))
+        obs_per_thread = Int32(max(64, min(256, div(length(is), 1024))))
         n_tiles = Int(ceil(length(is) / obs_per_thread))
         hist_is_tiled! = hist_kernel_is_tiled!(backend)
         hist_is_tiled!(h∇, ∇, x_bin, nidx, js, is, obs_per_thread; ndrange = (n_tiles, length(js)))
@@ -295,13 +299,17 @@ function update_hist_gpu!(
         n_left = Int(Array(left_count)[1])
         n_right = Int(Array(right_count)[1])
         
+        # Ensure counts don't exceed buffer sizes
+        n_left = min(n_left, half_buf_size)
+        n_right = min(n_right, length(right_nodes_buf))
+        
         left_nodes_gpu = view(left_nodes_buf, 1:n_left)
         right_nodes_gpu = view(right_nodes_buf, 1:n_right)
         parent_nodes_gpu = view(parent_buf, 1:n_right)
         
         # Build histograms ONLY for left children
         if n_left > 0
-            # Zero with optimal thread count
+            # Zero with fewer threads - 16 instead of 64
             zero_nodes! = zero_node_hist_kernel!(backend)
             zero_nodes!(h∇, left_nodes_gpu, js; ndrange = (n_left, length(js), 16))
             
@@ -310,8 +318,8 @@ function update_hist_gpu!(
             fill_mask! = fill_mask_kernel!(backend)
             fill_mask!(target_mask_buf, left_nodes_gpu; ndrange = n_left)
             
-            # Optimized tile size
-            obs_per_thread = Int32(min(128, max(64, div(length(is), 1024))))
+            # Better tile size calculation
+            obs_per_thread = Int32(max(64, min(256, div(length(is), max(512, 1024 >> (depth-2))))))
             n_tiles = Int(ceil(length(is) / obs_per_thread))
             
             hist_selective_mask_is_tiled! = hist_kernel_selective_mask_is_tiled!(backend)
