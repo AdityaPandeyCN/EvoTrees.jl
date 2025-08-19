@@ -145,22 +145,140 @@ end
     end
 end
 
+@kernel function hist_kernel_selective!(
+    h∇::AbstractArray{T,4},
+    @Const(∇),
+    @Const(x_bin),
+    @Const(nidx),
+    @Const(js),
+    @Const(is),
+    @Const(target_nodes),
+) where {T}
+    i, j = @index(Global, NTuple)
+    @inbounds if i <= length(is) && j <= length(js)
+        obs = is[i]
+        node = nidx[obs]
+        # Only build histogram for target nodes
+        if node > 0 && target_nodes[node] != 0
+            feat = js[j]
+            bin = x_bin[obs, feat]
+            if bin > 0 && bin <= size(h∇, 2)
+                Atomix.@atomic h∇[1, bin, feat, node] += ∇[1, obs]
+                Atomix.@atomic h∇[2, bin, feat, node] += ∇[2, obs]
+                Atomix.@atomic h∇[3, bin, feat, node] += ∇[3, obs]
+            end
+        end
+    end
+end
+
+@kernel function separate_nodes_kernel!(
+    left_buf::AbstractVector{Int32},
+    right_buf::AbstractVector{Int32},
+    left_count::AbstractVector{Int32},
+    right_count::AbstractVector{Int32},
+    @Const(active_nodes)
+)
+    idx = @index(Global)
+    @inbounds if idx <= length(active_nodes)
+        node = active_nodes[idx]
+        if node > 0
+            if node & 1 == 0  # Left child (even)
+                pos = Atomix.@atomic left_count[1] += Int32(1)
+                if pos <= length(left_buf)
+                    left_buf[pos] = node
+                end
+            else  # Right child (odd)
+                pos = Atomix.@atomic right_count[1] += Int32(1)
+                if pos <= length(right_buf)
+                    right_buf[pos] = node
+                end
+            end
+        end
+    end
+end
+
+@kernel function histogram_subtraction_kernel!(
+    h∇::AbstractArray{T,4},
+    @Const(h∇_parent),
+    @Const(left_nodes),
+    @Const(right_nodes),
+    @Const(js),
+) where {T}
+    r_idx, j_idx, bin = @index(Global, NTuple)
+    
+    @inbounds if r_idx <= length(right_nodes) && j_idx <= length(js) && bin <= size(h∇, 2)
+        right_node = right_nodes[r_idx]
+        left_node = right_node - 1  # Left sibling
+        parent_node = right_node >> 1  # Parent
+        feat = js[j_idx]
+        
+        # right = parent - left
+        h∇[1, bin, feat, right_node] = h∇_parent[1, bin, feat, parent_node] - h∇[1, bin, feat, left_node]
+        h∇[2, bin, feat, right_node] = h∇_parent[2, bin, feat, parent_node] - h∇[2, bin, feat, left_node]
+        h∇[3, bin, feat, right_node] = h∇_parent[3, bin, feat, parent_node] - h∇[3, bin, feat, left_node]
+    end
+end
+
 function update_hist_gpu!(
-    h∇, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
+    h∇, h∇_parent, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
     left_nodes_buf, right_nodes_buf, target_mask_buf
 )
     backend = KernelAbstractions.get_backend(h∇)
     n_active = length(active_nodes)
     
-    # Simple approach: just zero the needed nodes and rebuild histogram
-    if n_active > 0
-        # Zero histograms for active nodes
-        zero_nodes! = zero_node_hist_kernel!(backend)
-        zero_nodes!(h∇, active_nodes, js; ndrange = (n_active, length(js), size(h∇, 2)))
-        
-        # Build histogram for all active nodes
+    if depth == 1
+        # Root node: build histogram from scratch
+        h∇ .= 0
         hist! = hist_kernel!(backend)
         hist!(h∇, ∇, x_bin, nidx, js, is; ndrange = (length(is), length(js)))
+        
+        # Copy to parent for next iteration - only once at root
+        copyto!(h∇_parent, h∇)
+        
+    elseif n_active > 0
+        # Store current state as parent before modifying
+        copyto!(h∇_parent, h∇)
+        
+        # Separate left and right children
+        left_count = KernelAbstractions.zeros(backend, Int32, 1)
+        right_count = KernelAbstractions.zeros(backend, Int32, 1)
+        
+        separate_nodes! = separate_nodes_kernel!(backend)
+        separate_nodes!(left_nodes_buf, right_nodes_buf, left_count, right_count, active_nodes; 
+                       ndrange = n_active)
+        KernelAbstractions.synchronize(backend)
+        
+        n_left = Int(Array(left_count)[1])
+        n_right = Int(Array(right_count)[1])
+        
+        if n_left > 0
+            # Zero and build histograms for left children only
+            left_nodes = view(left_nodes_buf, 1:n_left)
+            
+            # Zero left children
+            zero_nodes! = zero_node_hist_kernel!(backend)
+            zero_nodes!(h∇, left_nodes, js; ndrange = (n_left, length(js), size(h∇, 2)))
+            
+            # Set target mask for left children
+            target_mask_buf .= 0
+            fill_mask! = fill_mask_kernel!(backend)
+            fill_mask!(target_mask_buf, left_nodes; ndrange = n_left)
+            
+            # Build histogram only for left children
+            hist_selective! = hist_kernel_selective!(backend)
+            hist_selective!(h∇, ∇, x_bin, nidx, js, is, target_mask_buf; 
+                           ndrange = (length(is), length(js)))
+        end
+        
+        if n_right > 0
+            # Compute right children by subtraction
+            right_nodes = view(right_nodes_buf, 1:n_right)
+            left_nodes = view(left_nodes_buf, 1:n_left)
+            
+            subtract_hist! = histogram_subtraction_kernel!(backend)
+            subtract_hist!(h∇, h∇_parent, left_nodes, right_nodes, js; 
+                          ndrange = (n_right, length(js), size(h∇, 2)))
+        end
     end
     
     # Find best splits
