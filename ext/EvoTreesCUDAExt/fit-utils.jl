@@ -138,18 +138,16 @@ end
         node_u = UInt32(node_i)
         feat_i = Int(js[g_feat])
         s1 = T(0); s2 = T(0); s3 = T(0)
-        i = l_bin
-        @inbounds while i <= length(is)
+        @inbounds for i in 1:length(is)
             obs = is[i]
             if nidx[obs] == node_u
                 b = Int(x_bin[obs, feat_i])
-                if b == l_bin
+                if b > 0 && b == l_bin
                     s1 += ∇[1, obs]
                     s2 += ∇[2, obs]
                     s3 += ∇[3, obs]
                 end
             end
-            i += 64
         end
         Atomix.@atomic h∇[1, l_bin, feat_i, node_i] += s1
         Atomix.@atomic h∇[2, l_bin, feat_i, node_i] += s2
@@ -170,16 +168,14 @@ end
         node_i = Int32(1)
         feat_i = Int(js[g_feat])
         s1 = T(0); s2 = T(0); s3 = T(0)
-        i = l_bin
-        @inbounds while i <= length(is)
+        @inbounds for i in 1:length(is)
             obs = is[i]
             b = Int(x_bin[obs, feat_i])
-            if b == l_bin
+            if b > 0 && b == l_bin
                 s1 += ∇[1, obs]
                 s2 += ∇[2, obs]
                 s3 += ∇[3, obs]
             end
-            i += 64
         end
         Atomix.@atomic h∇[1, l_bin, feat_i, node_i] += s1
         Atomix.@atomic h∇[2, l_bin, feat_i, node_i] += s2
