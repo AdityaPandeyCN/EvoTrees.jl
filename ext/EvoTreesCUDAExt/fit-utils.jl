@@ -137,9 +137,9 @@ end
     @inbounds if g_node <= length(active_nodes) && g_feat <= length(js) && l_bin <= 64
         node = active_nodes[g_node]
         feat = js[g_feat]
-        s1 = zero(T); s2 = zero(T); s3 = zero(T)
-        wgs = @groupsize()
-        @inbounds for i in l_bin:wgs:length(is)
+        s1 = T(0); s2 = T(0); s3 = T(0)
+        i = l_bin
+        @inbounds while i <= length(is)
             obs = is[i]
             if nidx[obs] == node
                 b = Int(x_bin[obs, feat])
@@ -149,6 +149,7 @@ end
                     s3 += ∇[3, obs]
                 end
             end
+            i += 64
         end
         Atomix.@atomic h∇[1, l_bin, feat, node] += s1
         Atomix.@atomic h∇[2, l_bin, feat, node] += s2
@@ -169,9 +170,9 @@ end
     @inbounds if g_feat <= length(js) && l_bin <= 64
         node = Int32(1)
         feat = js[g_feat]
-        s1 = zero(T); s2 = zero(T); s3 = zero(T)
-        wgs = @groupsize()
-        @inbounds for i in l_bin:wgs:length(is)
+        s1 = T(0); s2 = T(0); s3 = T(0)
+        i = l_bin
+        @inbounds while i <= length(is)
             obs = is[i]
             b = Int(x_bin[obs, feat])
             if b == l_bin
@@ -179,6 +180,7 @@ end
                 s2 += ∇[2, obs]
                 s3 += ∇[3, obs]
             end
+            i += 64
         end
         Atomix.@atomic h∇[1, l_bin, feat, node] += s1
         Atomix.@atomic h∇[2, l_bin, feat, node] += s2
