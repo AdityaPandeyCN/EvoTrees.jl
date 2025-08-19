@@ -121,7 +121,7 @@ end
 end
 
 # 3D global-index histogram kernel: one thread per (node, feature, bin)
-@kernel function hist_kernel_bins_global!(
+@kernel function hist_kernel_bins_tiled!(
     h∇::AbstractArray{T,4},
     @Const(∇),
     @Const(x_bin),
@@ -130,53 +130,60 @@ end
     @Const(is),
     @Const(active_nodes),
 ) where {T}
-    g_node, g_feat, bin = @index(Global, NTuple)
-    @inbounds if g_node <= length(active_nodes) && g_feat <= length(js) && bin <= size(h∇, 2)
+    g_node, g_feat = @index(Group, NTuple)
+    l_bin = @index(Local)
+    
+    @inbounds if g_node <= length(active_nodes) && g_feat <= length(js) && l_bin <= size(h∇, 2)
         node_i = Int(active_nodes[g_node])
         node_u = UInt32(node_i)
         feat_i = Int(js[g_feat])
         s1 = T(0); s2 = T(0); s3 = T(0)
-        @inbounds for i in 1:length(is)
+        i = l_bin
+        @inbounds while i <= length(is)
             obs = is[i]
             if nidx[obs] == node_u
                 b = Int(x_bin[obs, feat_i])
-                if b == bin
+                if b == l_bin
                     s1 += ∇[1, obs]
                     s2 += ∇[2, obs]
                     s3 += ∇[3, obs]
                 end
             end
+            i += 64
         end
-        Atomix.@atomic h∇[1, bin, feat_i, node_i] += s1
-        Atomix.@atomic h∇[2, bin, feat_i, node_i] += s2
-        Atomix.@atomic h∇[3, bin, feat_i, node_i] += s3
+        Atomix.@atomic h∇[1, l_bin, feat_i, node_i] += s1
+        Atomix.@atomic h∇[2, l_bin, feat_i, node_i] += s2
+        Atomix.@atomic h∇[3, l_bin, feat_i, node_i] += s3
     end
 end
 
-@kernel function hist_kernel_bins_global_depth1!(
+@kernel function hist_kernel_bins_tiled_depth1!(
     h∇::AbstractArray{T,4},
     @Const(∇),
     @Const(x_bin),
     @Const(js),
     @Const(is),
 ) where {T}
-    g_feat, bin = @index(Global, NTuple)
-    @inbounds if g_feat <= length(js) && bin <= size(h∇, 2)
+    g_feat = @index(Group)
+    l_bin = @index(Local)
+    @inbounds if g_feat <= length(js) && l_bin <= size(h∇, 2)
         node_i = Int32(1)
         feat_i = Int(js[g_feat])
         s1 = T(0); s2 = T(0); s3 = T(0)
-        @inbounds for i in 1:length(is)
+        i = l_bin
+        @inbounds while i <= length(is)
             obs = is[i]
             b = Int(x_bin[obs, feat_i])
-            if b == bin
+            if b == l_bin
                 s1 += ∇[1, obs]
                 s2 += ∇[2, obs]
                 s3 += ∇[3, obs]
             end
+            i += 64
         end
-        Atomix.@atomic h∇[1, bin, feat_i, node_i] += s1
-        Atomix.@atomic h∇[2, bin, feat_i, node_i] += s2
-        Atomix.@atomic h∇[3, bin, feat_i, node_i] += s3
+        Atomix.@atomic h∇[1, l_bin, feat_i, node_i] += s1
+        Atomix.@atomic h∇[2, l_bin, feat_i, node_i] += s2
+        Atomix.@atomic h∇[3, l_bin, feat_i, node_i] += s3
     end
 end
 
@@ -190,17 +197,17 @@ function update_hist_gpu!(
     
     if depth == 1
         h∇ .= 0
-        # 3D global index: (features, bins)
-        hist_bins_d1! = hist_kernel_bins_global_depth1!(backend)
-        hist_bins_d1!(h∇, ∇, x_bin, js, is; ndrange = (length(js), size(h∇, 2)))
+        # One group per feature, 64 local threads (one per bin)
+        hist_bins_d1! = hist_kernel_bins_tiled_depth1!(backend)
+        hist_bins_d1!(h∇, ∇, x_bin, js, is; ndrange = length(js), workgroupsize = 64)
     else
         # Build histograms for the current active nodes
         zero_nodes! = zero_node_hist_kernel!(backend)
         zero_nodes!(h∇, active_nodes, js; ndrange = (n_active, length(js), size(h∇, 2)))
 
-        # 3D global index: (nodes, features, bins)
-        hist_bins! = hist_kernel_bins_global!(backend)
-        hist_bins!(h∇, ∇, x_bin, nidx, js, is, active_nodes; ndrange = (n_active, length(js), size(h∇, 2)))
+        # One group per (node, feature), 64 local threads (one per bin)
+        hist_bins! = hist_kernel_bins_tiled!(backend)
+        hist_bins!(h∇, ∇, x_bin, nidx, js, is, active_nodes; ndrange = (n_active, length(js)), workgroupsize = 64)
     end
 
     # Compute best splits directly from histograms, writing nodes_sum
