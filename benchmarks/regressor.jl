@@ -69,7 +69,17 @@ for device in device_list
                         _m_evo = fit_evotree(params_evo; x_train, y_train, x_eval=x_train, y_eval=y_train, metric=loss, device, print_every_n=100)
                         _m_evo(x_train; device)
                     end
-                    t_train_evo = @elapsed m_evo = fit_evotree(params_evo; x_train, y_train, x_eval=x_train, y_eval=y_train, metric=loss, device, print_every_n=100)
+                    
+                    # Add profiling for GPU performance analysis
+                    if device == :gpu
+                        println("Profiling GPU training...")
+                        CUDA.@profile begin
+                            t_train_evo = @elapsed m_evo = fit_evotree(params_evo; x_train, y_train, x_eval=x_train, y_eval=y_train, metric=loss, device, print_every_n=100)
+                        end
+                    else
+                        t_train_evo = @elapsed m_evo = fit_evotree(params_evo; x_train, y_train, x_eval=x_train, y_eval=y_train, metric=loss, device, print_every_n=100)
+                    end
+                    
                     @info "train" t_train_evo
                     t_infer_evo = @elapsed pred_evo = m_evo(x_train; device)
                     @info "predict" t_infer_evo
