@@ -127,20 +127,17 @@ function grow_tree!(
             
             # Compute histograms for even-indexed nodes by subtraction
             if !isempty(subtract_nodes)
-                h∇_cpu = Array(h∇)
                 for node in subtract_nodes
                     parent = node >> 1
-                    sibling = node ⊻ 1  # XOR to get sibling
+                    sibling = node ⊻ 1
                     
-                    if (parent <= size(h∇_cpu, 4) && sibling <= size(h∇_cpu, 4) && 
-                        node <= size(h∇_cpu, 4))
-                        # node = parent - sibling (histogram subtraction trick)
-                        h∇_cpu[:, :, :, node] .= h∇_cpu[:, :, :, parent] .- h∇_cpu[:, :, :, sibling]
+                    if (parent <= size(h∇, 4) && sibling <= size(h∇, 4) && node <= size(h∇, 4))
+                        # Do subtraction directly on GPU using broadcasting
+                        @views h∇[:, :, :, node] .= h∇[:, :, :, parent] .- h∇[:, :, :, sibling]
                     end
                 end
-                copyto!(h∇, h∇_cpu)
+                CUDA.synchronize()  # Make sure GPU operations complete
             end
-            
             # Find best splits for all active nodes
             find_split! = find_best_split_from_hist_kernel!(backend)
             find_split!(view_gain, view_bin, view_feat, h∇, nodes_sum_gpu, active_nodes_act, js_gpu,
@@ -260,3 +257,4 @@ end
     @inbounds w = nodes_sum[3, node]
     @inbounds nodes_gain[node] = p1^2 / (p2 + lambda * w + T(1e-8))
 end
+
