@@ -37,7 +37,7 @@ end
     end
 end
 
-@kernel function hist_kernel_optimized!(
+@kernel function hist_kernel_mainbranch_style!(
     h∇::AbstractArray{T,4},
     @Const(∇),
     @Const(x_bin),
@@ -45,25 +45,22 @@ end
     @Const(js),
     @Const(is),
 ) where {T}
-    gidx = @index(Global, Linear)
+    grad_idx, feat_idx, obs_idx = @index(Global, NTuple)
     
-    obs_per_thread = 4
-    start_idx = (gidx - 1) * obs_per_thread + 1
-    end_idx = min(start_idx + obs_per_thread - 1, length(is))
-    
-    @inbounds for obs_idx in start_idx:end_idx
-        if obs_idx <= length(is)
-            obs = is[obs_idx]
-            node = nidx[obs]
-            if node > 0 && node <= size(h∇, 4)
-                @inbounds for j_idx in 1:length(js)
-                    feat = js[j_idx]
-                    if feat <= size(h∇, 3)
+    @inbounds if feat_idx <= length(js) && grad_idx <= size(h∇, 1)
+        feat = js[feat_idx]
+        if feat <= size(h∇, 3)
+            obs_per_thread = div(length(is), @ndrange()[3]) + 1
+            
+            for iter in 1:obs_per_thread
+                i = obs_idx + (@ndrange()[3] * (iter - 1))
+                if i <= length(is)
+                    obs = is[i]
+                    node = nidx[obs]
+                    if node > 0 && node <= size(h∇, 4)
                         bin = x_bin[obs, feat]
                         if bin > 0 && bin <= size(h∇, 2)
-                            Atomix.@atomic h∇[1, bin, feat, node] += ∇[1, obs]
-                            Atomix.@atomic h∇[2, bin, feat, node] += ∇[2, obs]
-                            Atomix.@atomic h∇[3, bin, feat, node] += ∇[3, obs]
+                            Atomix.@atomic h∇[grad_idx, bin, feat, node] += ∇[grad_idx, obs]
                         end
                     end
                 end
@@ -155,9 +152,13 @@ function update_hist_gpu!(
     
     h∇ .= 0
     
-    num_threads = div(length(is), 4) + 1
-    hist_kernel! = hist_kernel_optimized!(backend)
-    hist_kernel!(h∇, ∇, x_bin, nidx, js, is; ndrange = num_threads)
+    k = size(h∇, 1)
+    ty = min(length(js), 64)
+    tx = min(64, length(is))
+    
+    hist_kernel! = hist_kernel_mainbranch_style!(backend)
+    hist_kernel!(h∇, ∇, x_bin, nidx, js, is; 
+                ndrange = (k, ty, tx), workgroupsize = (k, ty, tx))
     
     find_split! = find_best_split_from_hist_kernel!(backend)
     find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
