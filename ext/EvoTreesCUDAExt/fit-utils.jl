@@ -170,4 +170,3 @@ function update_hist_gpu!(
     
     KernelAbstractions.synchronize(backend)
 end
-

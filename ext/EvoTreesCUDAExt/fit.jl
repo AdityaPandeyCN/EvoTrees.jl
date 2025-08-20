@@ -260,4 +260,3 @@ end
     @inbounds w = nodes_sum[3, node]
     @inbounds nodes_gain[node] = p1^2 / (p2 + lambda * w + T(1e-8))
 end
-
