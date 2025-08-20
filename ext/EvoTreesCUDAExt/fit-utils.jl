@@ -37,71 +37,34 @@ end
     end
 end
 
-@kernel function hist_kernel_fast!(
+@kernel function hist_kernel_mainbranch_style!(
     h∇::AbstractArray{T,4},
     @Const(∇),
     @Const(x_bin),
     @Const(nidx),
     @Const(js),
     @Const(is),
-    target_nodes = nothing,
 ) where {T}
-    gidx = @index(Global, Linear)
+    grad_idx, feat_idx, obs_idx = @index(Global, NTuple)
     
-    obs_per_thread = 16
-    start_idx = (gidx - 1) * obs_per_thread + 1
-    end_idx = min(start_idx + obs_per_thread - 1, length(is))
-    
-    @inbounds for obs_idx in start_idx:end_idx
-        if obs_idx <= length(is)
-            obs = is[obs_idx]
-            node = nidx[obs]
+    @inbounds if feat_idx <= length(js) && grad_idx <= size(h∇, 1)
+        feat = js[feat_idx]
+        if feat <= size(h∇, 3)
+            obs_per_thread = div(length(is), @ndrange()[3]) + 1
             
-            process_node = if target_nodes === nothing
-                node > 0 && node <= size(h∇, 4)
-            else
-                node > 0 && node <= size(h∇, 4) && any(n -> n == node, target_nodes)
-            end
-            
-            if process_node
-                grad1 = ∇[1, obs]
-                grad2 = ∇[2, obs]
-                grad3 = ∇[3, obs]
-                
-                @inbounds for j_idx in 1:length(js)
-                    feat = js[j_idx]
-                    if feat <= size(h∇, 3)
+            for iter in 1:obs_per_thread
+                i = obs_idx + (@ndrange()[3] * (iter - 1))
+                if i <= length(is)
+                    obs = is[i]
+                    node = nidx[obs]
+                    if node > 0 && node <= size(h∇, 4)
                         bin = x_bin[obs, feat]
                         if bin > 0 && bin <= size(h∇, 2)
-                            Atomix.@atomic h∇[1, bin, feat, node] += grad1
-                            Atomix.@atomic h∇[2, bin, feat, node] += grad2
-                            Atomix.@atomic h∇[3, bin, feat, node] += grad3
+                            Atomix.@atomic h∇[grad_idx, bin, feat, node] += ∇[grad_idx, obs]
                         end
                     end
                 end
             end
-        end
-    end
-end
-
-@kernel function subtract_histogram!(
-    h∇::AbstractArray{T,4}, 
-    @Const(h∇_parent),
-    @Const(right_nodes),
-    n_right::Int32,
-) where {T}
-    grad, bin, feat, i = @index(Global, NTuple)
-    
-    @inbounds if (grad <= size(h∇, 1) && bin <= size(h∇, 2) && 
-                  feat <= size(h∇, 3) && i <= n_right)
-        right_node = right_nodes[i]
-        left_node = right_node - 1
-        parent_node = right_node ÷ 2
-        
-        if (right_node <= size(h∇, 4) && left_node <= size(h∇, 4) && 
-            parent_node <= size(h∇_parent, 4))
-            h∇[grad, bin, feat, right_node] = 
-                h∇_parent[grad, bin, feat, parent_node] - h∇[grad, bin, feat, left_node]
         end
     end
 end
@@ -187,24 +150,15 @@ function update_hist_gpu!(
         return
     end
     
-    num_threads = div(length(is), 16) + 1
-    hist_kernel! = hist_kernel_fast!(backend)
+    h∇ .= 0
     
-    if depth == 1
-        h∇ .= 0
-        hist_kernel!(h∇, ∇, x_bin, nidx, js, is; ndrange = num_threads)
-        copyto!(h∇_parent, h∇)
-    else
-        left_nodes_buf[1:n_active] .= active_nodes[1:n_active] .* 2
-        right_nodes_buf[1:n_active] .= active_nodes[1:n_active] .* 2 .+ 1
-        
-        h∇ .= 0
-        hist_kernel!(h∇, ∇, x_bin, nidx, js, is, view(left_nodes_buf, 1:n_active); ndrange = num_threads)
-        
-        subtract_kernel! = subtract_histogram!(backend)
-        subtract_kernel!(h∇, h∇_parent, view(right_nodes_buf, 1:n_active), Int32(n_active); 
-                        ndrange = (size(h∇, 1), size(h∇, 2), size(h∇, 3), n_active))
-    end
+    k = size(h∇, 1)
+    ty = min(length(js), 64)
+    tx = min(64, length(is))
+    
+    hist_kernel! = hist_kernel_mainbranch_style!(backend)
+    hist_kernel!(h∇, ∇, x_bin, nidx, js, is; 
+                ndrange = (k, ty, tx), workgroupsize = (k, ty, tx))
     
     find_split! = find_best_split_from_hist_kernel!(backend)
     find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
@@ -213,4 +167,3 @@ function update_hist_gpu!(
     
     KernelAbstractions.synchronize(backend)
 end
-
