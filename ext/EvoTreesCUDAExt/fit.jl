@@ -50,7 +50,6 @@ function grow_tree!(
     js_gpu = KernelAbstractions.adapt(backend, js)
     is_gpu = KernelAbstractions.adapt(backend, is)
 
-    # Add parent histogram buffer for subtraction trick
     h∇_parent = similar(h∇)
 
     tree_split_gpu = KernelAbstractions.zeros(backend, Bool, length(tree.split))
@@ -74,7 +73,6 @@ function grow_tree!(
     
     nidx .= 1
     
-    # compute root sums on GPU from hist scan of depth 1
     nsamples = Float32(length(is_gpu))
     view(anodes_gpu, 1:1) .= 1
     update_hist_gpu!(
@@ -102,12 +100,40 @@ function grow_tree!(
         view_feat = view(best_feat_gpu, 1:n_nodes_level)
         
         if depth > 1
-            update_hist_gpu!(
-                h∇, h∇_parent, view_gain, view_bin, view_feat,
-                ∇, x_bin, nidx, js_gpu, is_gpu,
-                depth, view(active_nodes_full, 1:n_active), nodes_sum_gpu, params,
-                left_nodes_buf, right_nodes_buf, target_mask_buf
-            )
+            # Main branch optimization: only compute histograms for half the nodes
+            active_nodes_subset = view(active_nodes_full, 1:n_active)
+            
+            # Build histograms for first half of nodes
+            n_compute = div(n_active + 1, 2)
+            if n_compute > 0
+                update_hist_gpu!(
+                    h∇, h∇_parent, view_gain, view_bin, view_feat,
+                    ∇, x_bin, nidx, js_gpu, is_gpu,
+                    depth, view(active_nodes_subset, 1:n_compute), nodes_sum_gpu, params,
+                    left_nodes_buf, right_nodes_buf, target_mask_buf
+                )
+            end
+            
+            # Compute remaining histograms by subtraction (CPU operation)
+            if n_active > n_compute
+                h∇_cpu = Array(h∇)
+                for i in (n_compute+1):n_active
+                    node = active_nodes_subset[i]
+                    parent_node = node >> 1
+                    sibling_node = node ⊻ 1  # XOR to get sibling
+                    
+                    if sibling_node <= size(h∇_cpu, 4) && parent_node <= size(h∇_cpu, 4)
+                        # parent - sibling = current
+                        h∇_cpu[:, :, :, node] .= h∇_cpu[:, :, :, parent_node] .- h∇_cpu[:, :, :, sibling_node]
+                    end
+                end
+                copyto!(h∇, h∇_cpu)
+            end
+            
+            # Find splits for all nodes
+            find_split! = find_best_split_from_hist_kernel!(backend)
+            find_split!(view_gain, view_bin, view_feat, h∇, nodes_sum_gpu, active_nodes_subset, js_gpu,
+                       Float32(params.lambda), Float32(params.min_weight); ndrange = n_active)
         end
 
         n_next_active_gpu .= 0
@@ -169,7 +195,6 @@ end
     n_idx = @index(Global)
     node = active_nodes[n_idx]
 
-    # typed epsilon to avoid Float64 promotion
     epsv = eltype(tree_pred)(1e-8)
 
     @inbounds if depth < max_depth && best_gain[n_idx] > gamma
@@ -181,7 +206,6 @@ end
         child_l, child_r = node << 1, (node << 1) + 1
         feat, bin = Int(tree_feat[node]), Int(tree_cond_bin[node])
 
-        # compute left sums by prefix-sum of h∇ up to bin
         s1 = zero(eltype(nodes_sum)); s2 = zero(eltype(nodes_sum)); s3 = zero(eltype(nodes_sum))
         @inbounds for b in 1:bin
             s1 += h∇[1, b, feat, node]
@@ -205,7 +229,6 @@ end
         n_next[idx_base - 1] = child_l
         n_next[idx_base] = child_r
 
-        # compute leaf prediction at this split for both children
         tree_pred[1, child_l] = - (nodes_sum[1, child_l]) / (nodes_sum[2, child_l] + lambda * nodes_sum[3, child_l] + epsv)
         tree_pred[1, child_r] = - (nodes_sum[1, child_r]) / (nodes_sum[2, child_r] + lambda * nodes_sum[3, child_r] + epsv)
     else
