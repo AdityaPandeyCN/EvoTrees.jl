@@ -37,54 +37,60 @@ end
     end
 end
 
-@kernel function hist_per_block_simple!(
-    block_hists::AbstractArray{T,5},
+@kernel function hist_shared_memory!(
+    h∇::AbstractArray{T,4},
     @Const(∇),
     @Const(x_bin),
     @Const(nidx),
     @Const(js),
     @Const(is),
-    obs_per_block::Int32,
 ) where {T}
-    block_id = @index(Group)
-    thread_id = @index(Local)
+    @uniform num_bins = size(h∇, 2)
+    @uniform num_feats = length(js)
+    @uniform num_nodes = size(h∇, 4)
     
-    start_obs = (block_id - 1) * obs_per_block + 1
-    end_obs = min(block_id * obs_per_block, length(is))
+    local_hist = @localmem T (3, num_bins, 1, 1)
     
-    @inbounds for obs_idx in (start_obs + thread_id - 1):@groupsize()[1]:end_obs
-        if obs_idx <= length(is)
-            obs = is[obs_idx]
-            node = nidx[obs]
-            if node > 0 && node <= size(block_hists, 4)
-                @inbounds for j_idx in 1:length(js)
-                    feat = js[j_idx]
-                    bin = x_bin[obs, feat]
-                    if (bin > 0 && bin <= size(block_hists, 2) && 
-                        feat <= size(block_hists, 3))
-                        Atomix.@atomic block_hists[1, bin, feat, node, block_id] += ∇[1, obs]
-                        Atomix.@atomic block_hists[2, bin, feat, node, block_id] += ∇[2, obs]
-                        Atomix.@atomic block_hists[3, bin, feat, node, block_id] += ∇[3, obs]
+    group_id = @index(Group, Linear)
+    local_id = @index(Local, Linear)
+    group_size = @groupsize()[1]
+    
+    obs_per_group = div(length(is) + @ndrange()[1] - 1, @ndrange()[1]) * group_size
+    start_obs = (group_id - 1) * obs_per_group + 1
+    end_obs = min(group_id * obs_per_group, length(is))
+    
+    for feat_idx in 1:num_feats
+        feat = js[feat_idx]
+        for node in 1:num_nodes
+            if local_id <= num_bins
+                local_hist[1, local_id, 1, 1] = zero(T)
+                local_hist[2, local_id, 1, 1] = zero(T)
+                local_hist[3, local_id, 1, 1] = zero(T)
+            end
+            @synchronize()
+            
+            for obs_idx in (start_obs + local_id - 1):group_size:end_obs
+                if obs_idx <= length(is)
+                    obs = is[obs_idx]
+                    if nidx[obs] == node
+                        bin = x_bin[obs, feat]
+                        if bin > 0 && bin <= num_bins
+                            Atomix.@atomic local_hist[1, bin, 1, 1] += ∇[1, obs]
+                            Atomix.@atomic local_hist[2, bin, 1, 1] += ∇[2, obs]
+                            Atomix.@atomic local_hist[3, bin, 1, 1] += ∇[3, obs]
+                        end
                     end
                 end
             end
+            @synchronize()
+            
+            if local_id <= num_bins
+                Atomix.@atomic h∇[1, local_id, feat, node] += local_hist[1, local_id, 1, 1]
+                Atomix.@atomic h∇[2, local_id, feat, node] += local_hist[2, local_id, 1, 1]
+                Atomix.@atomic h∇[3, local_id, feat, node] += local_hist[3, local_id, 1, 1]
+            end
+            @synchronize()
         end
-    end
-end
-
-@kernel function accumulate_blocks_simple!(
-    h∇::AbstractArray{T,4},
-    @Const(block_hists),
-) where {T}
-    grad, bin, feat, node = @index(Global, NTuple)
-    
-    @inbounds if (grad <= size(h∇, 1) && bin <= size(h∇, 2) && 
-                  feat <= size(h∇, 3) && node <= size(h∇, 4))
-        total = zero(T)
-        @inbounds for block_id in 1:size(block_hists, 5)
-            total += block_hists[grad, bin, feat, node, block_id]
-        end
-        h∇[grad, bin, feat, node] = total
     end
 end
 
@@ -169,19 +175,11 @@ function update_hist_gpu!(
         return
     end
     
-    max_blocks = 32
-    obs_per_block = Int32(max(256, div(length(is), max_blocks)))
-    num_blocks = min(max_blocks, Int32(ceil(length(is) / obs_per_block)))
+    h∇ .= 0
     
-    block_hists = similar(h∇, size(h∇, 1), size(h∇, 2), size(h∇, 3), size(h∇, 4), num_blocks)
-    block_hists .= 0
-    
-    phase1! = hist_per_block_simple!(backend)
-    phase1!(block_hists, ∇, x_bin, nidx, js, is, obs_per_block; 
-            ndrange = (num_blocks * 256,), workgroupsize = (256,))
-    
-    phase2! = accumulate_blocks_simple!(backend)
-    phase2!(h∇, block_hists; ndrange = size(h∇))
+    hist_kernel! = hist_shared_memory!(backend)
+    hist_kernel!(h∇, ∇, x_bin, nidx, js, is; 
+                ndrange = (32 * 256,), workgroupsize = (256,))
     
     find_split! = find_best_split_from_hist_kernel!(backend)
     find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
