@@ -117,8 +117,9 @@ function grow_tree!(
             # Compute remaining histograms by subtraction (CPU operation)
             if n_active > n_compute
                 h∇_cpu = Array(h∇)
+                active_nodes_cpu = Array(active_nodes_subset)
                 for i in (n_compute+1):n_active
-                    node = active_nodes_subset[i]
+                    node = active_nodes_cpu[i]
                     parent_node = node >> 1
                     sibling_node = node ⊻ 1  # XOR to get sibling
                     
