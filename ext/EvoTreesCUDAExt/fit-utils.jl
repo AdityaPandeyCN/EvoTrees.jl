@@ -37,17 +37,18 @@ end
     end
 end
 
-@kernel function hist_kernel_final!(
+@kernel function hist_kernel_fast!(
     h∇::AbstractArray{T,4},
     @Const(∇),
     @Const(x_bin),
     @Const(nidx),
     @Const(js),
     @Const(is),
+    target_nodes = nothing,
 ) where {T}
     gidx = @index(Global, Linear)
     
-    obs_per_thread = 8
+    obs_per_thread = 16
     start_idx = (gidx - 1) * obs_per_thread + 1
     end_idx = min(start_idx + obs_per_thread - 1, length(is))
     
@@ -55,7 +56,14 @@ end
         if obs_idx <= length(is)
             obs = is[obs_idx]
             node = nidx[obs]
-            if node > 0 && node <= size(h∇, 4)
+            
+            process_node = if target_nodes === nothing
+                node > 0 && node <= size(h∇, 4)
+            else
+                node > 0 && node <= size(h∇, 4) && any(n -> n == node, target_nodes)
+            end
+            
+            if process_node
                 grad1 = ∇[1, obs]
                 grad2 = ∇[2, obs]
                 grad3 = ∇[3, obs]
@@ -71,6 +79,22 @@ end
                         end
                     end
                 end
+            end
+        end
+    end
+end
+
+@kernel function subtract_histogram!(h∇::AbstractArray{T,4}, @Const(h∇_parent)) where {T}
+    grad, bin, feat, node = @index(Global, NTuple)
+    
+    @inbounds if (grad <= size(h∇, 1) && bin <= size(h∇, 2) && 
+                  feat <= size(h∇, 3) && node <= size(h∇, 4))
+        parent_node = node ÷ 2
+        if parent_node > 0 && parent_node <= size(h∇_parent, 4)
+            sibling_node = node % 2 == 0 ? node + 1 : node - 1
+            if sibling_node <= size(h∇, 4)
+                h∇[grad, bin, feat, node] = 
+                    h∇_parent[grad, bin, feat, parent_node] - h∇[grad, bin, feat, sibling_node]
             end
         end
     end
@@ -157,11 +181,27 @@ function update_hist_gpu!(
         return
     end
     
-    h∇ .= 0
+    num_threads = div(length(is), 16) + 1
+    hist_kernel! = hist_kernel_fast!(backend)
     
-    num_threads = div(length(is), 8) + 1
-    hist_kernel! = hist_kernel_final!(backend)
-    hist_kernel!(h∇, ∇, x_bin, nidx, js, is; ndrange = num_threads)
+    if depth == 1
+        h∇ .= 0
+        hist_kernel!(h∇, ∇, x_bin, nidx, js, is; ndrange = num_threads)
+        copyto!(h∇_parent, h∇)
+    else
+        left_nodes = [node * 2 for node in active_nodes if node * 2 <= size(h∇, 4)]
+        right_nodes = [node * 2 + 1 for node in active_nodes if node * 2 + 1 <= size(h∇, 4)]
+        
+        h∇ .= 0
+        if !isempty(left_nodes)
+            hist_kernel!(h∇, ∇, x_bin, nidx, js, is, left_nodes; ndrange = num_threads)
+        end
+        
+        if !isempty(right_nodes)
+            subtract_kernel! = subtract_histogram!(backend)
+            subtract_kernel!(h∇, h∇_parent; ndrange = size(h∇))
+        end
+    end
     
     find_split! = find_best_split_from_hist_kernel!(backend)
     find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
