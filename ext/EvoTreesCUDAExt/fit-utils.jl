@@ -153,12 +153,20 @@ function update_hist_gpu!(
     h∇ .= 0
     
     k = size(h∇, 1)
-    ty = min(length(js), 64)
-    tx = min(64, length(is))
+    max_threads = 1024
+    ty = max(1, min(length(js), div(max_threads, k)))
+    tx = min(64, max(1, min(length(is), div(max_threads, k * ty))))
+    threads = (k, ty, tx)
+    
+    max_blocks = 65535
+    by = div(length(js) + ty - 1, ty)
+    bx = min(div(max_blocks, by), div(length(is) + tx - 1, tx))
+    ndrange_config = (k * bx, ty * by, tx)
+    workgroup_config = threads
     
     hist_kernel! = hist_kernel_mainbranch_style!(backend)
     hist_kernel!(h∇, ∇, x_bin, nidx, js, is; 
-                ndrange = (k, ty, tx), workgroupsize = (k, ty, tx))
+                ndrange = ndrange_config, workgroupsize = workgroup_config)
     
     find_split! = find_best_split_from_hist_kernel!(backend)
     find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
