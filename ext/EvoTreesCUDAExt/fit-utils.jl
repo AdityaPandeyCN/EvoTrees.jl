@@ -37,7 +37,7 @@ end
     end
 end
 
-@kernel function hist_shared_memory!(
+@kernel function hist_kernel_optimized!(
     h∇::AbstractArray{T,4},
     @Const(∇),
     @Const(x_bin),
@@ -45,51 +45,29 @@ end
     @Const(js),
     @Const(is),
 ) where {T}
-    @uniform num_bins = size(h∇, 2)
-    @uniform num_feats = length(js)
-    @uniform num_nodes = size(h∇, 4)
+    gidx = @index(Global, Linear)
     
-    local_hist = @localmem T (3, num_bins, 1, 1)
+    obs_per_thread = 4
+    start_idx = (gidx - 1) * obs_per_thread + 1
+    end_idx = min(start_idx + obs_per_thread - 1, length(is))
     
-    group_id = @index(Group, Linear)
-    local_id = @index(Local, Linear)
-    group_size = @groupsize()[1]
-    
-    obs_per_group = div(length(is) + @ndrange()[1] - 1, @ndrange()[1]) * group_size
-    start_obs = (group_id - 1) * obs_per_group + 1
-    end_obs = min(group_id * obs_per_group, length(is))
-    
-    for feat_idx in 1:num_feats
-        feat = js[feat_idx]
-        for node in 1:num_nodes
-            if local_id <= num_bins
-                local_hist[1, local_id, 1, 1] = zero(T)
-                local_hist[2, local_id, 1, 1] = zero(T)
-                local_hist[3, local_id, 1, 1] = zero(T)
-            end
-            @synchronize()
-            
-            for obs_idx in (start_obs + local_id - 1):group_size:end_obs
-                if obs_idx <= length(is)
-                    obs = is[obs_idx]
-                    if nidx[obs] == node
+    @inbounds for obs_idx in start_idx:end_idx
+        if obs_idx <= length(is)
+            obs = is[obs_idx]
+            node = nidx[obs]
+            if node > 0 && node <= size(h∇, 4)
+                @inbounds for j_idx in 1:length(js)
+                    feat = js[j_idx]
+                    if feat <= size(h∇, 3)
                         bin = x_bin[obs, feat]
-                        if bin > 0 && bin <= num_bins
-                            Atomix.@atomic local_hist[1, bin, 1, 1] += ∇[1, obs]
-                            Atomix.@atomic local_hist[2, bin, 1, 1] += ∇[2, obs]
-                            Atomix.@atomic local_hist[3, bin, 1, 1] += ∇[3, obs]
+                        if bin > 0 && bin <= size(h∇, 2)
+                            Atomix.@atomic h∇[1, bin, feat, node] += ∇[1, obs]
+                            Atomix.@atomic h∇[2, bin, feat, node] += ∇[2, obs]
+                            Atomix.@atomic h∇[3, bin, feat, node] += ∇[3, obs]
                         end
                     end
                 end
             end
-            @synchronize()
-            
-            if local_id <= num_bins
-                Atomix.@atomic h∇[1, local_id, feat, node] += local_hist[1, local_id, 1, 1]
-                Atomix.@atomic h∇[2, local_id, feat, node] += local_hist[2, local_id, 1, 1]
-                Atomix.@atomic h∇[3, local_id, feat, node] += local_hist[3, local_id, 1, 1]
-            end
-            @synchronize()
         end
     end
 end
@@ -177,9 +155,9 @@ function update_hist_gpu!(
     
     h∇ .= 0
     
-    hist_kernel! = hist_shared_memory!(backend)
-    hist_kernel!(h∇, ∇, x_bin, nidx, js, is; 
-                ndrange = (32 * 256,), workgroupsize = (256,))
+    num_threads = div(length(is), 4) + 1
+    hist_kernel! = hist_kernel_optimized!(backend)
+    hist_kernel!(h∇, ∇, x_bin, nidx, js, is; ndrange = num_threads)
     
     find_split! = find_best_split_from_hist_kernel!(backend)
     find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
