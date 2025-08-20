@@ -37,7 +37,7 @@ end
     end
 end
 
-@kernel function hist_kernel_mainbranch_style!(
+@kernel function hist_kernel_final!(
     h∇::AbstractArray{T,4},
     @Const(∇),
     @Const(x_bin),
@@ -45,22 +45,29 @@ end
     @Const(js),
     @Const(is),
 ) where {T}
-    grad_idx, feat_idx, obs_idx = @index(Global, NTuple)
+    gidx = @index(Global, Linear)
     
-    @inbounds if feat_idx <= length(js) && grad_idx <= size(h∇, 1)
-        feat = js[feat_idx]
-        if feat <= size(h∇, 3)
-            obs_per_thread = div(length(is), @ndrange()[3]) + 1
-            
-            for iter in 1:obs_per_thread
-                i = obs_idx + (@ndrange()[3] * (iter - 1))
-                if i <= length(is)
-                    obs = is[i]
-                    node = nidx[obs]
-                    if node > 0 && node <= size(h∇, 4)
+    obs_per_thread = 8
+    start_idx = (gidx - 1) * obs_per_thread + 1
+    end_idx = min(start_idx + obs_per_thread - 1, length(is))
+    
+    @inbounds for obs_idx in start_idx:end_idx
+        if obs_idx <= length(is)
+            obs = is[obs_idx]
+            node = nidx[obs]
+            if node > 0 && node <= size(h∇, 4)
+                grad1 = ∇[1, obs]
+                grad2 = ∇[2, obs]
+                grad3 = ∇[3, obs]
+                
+                @inbounds for j_idx in 1:length(js)
+        feat = js[j_idx]
+                    if feat <= size(h∇, 3)
                         bin = x_bin[obs, feat]
                         if bin > 0 && bin <= size(h∇, 2)
-                            Atomix.@atomic h∇[grad_idx, bin, feat, node] += ∇[grad_idx, obs]
+                            Atomix.@atomic h∇[1, bin, feat, node] += grad1
+                            Atomix.@atomic h∇[2, bin, feat, node] += grad2
+                            Atomix.@atomic h∇[3, bin, feat, node] += grad3
                         end
                     end
                 end
@@ -152,21 +159,9 @@ function update_hist_gpu!(
     
     h∇ .= 0
     
-    k = size(h∇, 1)
-    max_threads = 1024
-    ty = max(1, min(length(js), div(max_threads, k)))
-    tx = min(64, max(1, min(length(is), div(max_threads, k * ty))))
-    threads = (k, ty, tx)
-    
-    max_blocks = 65535
-    by = div(length(js) + ty - 1, ty)
-    bx = min(div(max_blocks, by), div(length(is) + tx - 1, tx))
-    ndrange_config = (k * bx, ty * by, tx)
-    workgroup_config = threads
-    
-    hist_kernel! = hist_kernel_mainbranch_style!(backend)
-    hist_kernel!(h∇, ∇, x_bin, nidx, js, is; 
-                ndrange = ndrange_config, workgroupsize = workgroup_config)
+    num_threads = div(length(is), 8) + 1
+    hist_kernel! = hist_kernel_final!(backend)
+    hist_kernel!(h∇, ∇, x_bin, nidx, js, is; ndrange = num_threads)
     
     find_split! = find_best_split_from_hist_kernel!(backend)
     find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
@@ -175,3 +170,4 @@ function update_hist_gpu!(
     
     KernelAbstractions.synchronize(backend)
 end
+

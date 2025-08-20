@@ -77,7 +77,7 @@ for device in device_list
                             t_train_evo = @elapsed m_evo = fit_evotree(params_evo; x_train, y_train, x_eval=x_train, y_eval=y_train, metric=loss, device, print_every_n=100)
                         end
                     else
-                        t_train_evo = @elapsed m_evo = fit_evotree(params_evo; x_train, y_train, x_eval=x_train, y_eval=y_train, metric=loss, device, print_every_n=100)
+                    t_train_evo = @elapsed m_evo = fit_evotree(params_evo; x_train, y_train, x_eval=x_train, y_eval=y_train, metric=loss, device, print_every_n=100)
                     end
                     
                     @info "train" t_train_evo
