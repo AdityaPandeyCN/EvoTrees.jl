@@ -84,18 +84,24 @@ end
     end
 end
 
-@kernel function subtract_histogram!(h∇::AbstractArray{T,4}, @Const(h∇_parent)) where {T}
-    grad, bin, feat, node = @index(Global, NTuple)
+@kernel function subtract_histogram!(
+    h∇::AbstractArray{T,4}, 
+    @Const(h∇_parent),
+    @Const(right_nodes),
+    n_right::Int32,
+) where {T}
+    grad, bin, feat, i = @index(Global, NTuple)
     
     @inbounds if (grad <= size(h∇, 1) && bin <= size(h∇, 2) && 
-                  feat <= size(h∇, 3) && node <= size(h∇, 4))
-        parent_node = node ÷ 2
-        if parent_node > 0 && parent_node <= size(h∇_parent, 4)
-            sibling_node = node % 2 == 0 ? node + 1 : node - 1
-            if sibling_node <= size(h∇, 4)
-                h∇[grad, bin, feat, node] = 
-                    h∇_parent[grad, bin, feat, parent_node] - h∇[grad, bin, feat, sibling_node]
-            end
+                  feat <= size(h∇, 3) && i <= n_right)
+        right_node = right_nodes[i]
+        left_node = right_node - 1
+        parent_node = right_node ÷ 2
+        
+        if (right_node <= size(h∇, 4) && left_node <= size(h∇, 4) && 
+            parent_node <= size(h∇_parent, 4))
+            h∇[grad, bin, feat, right_node] = 
+                h∇_parent[grad, bin, feat, parent_node] - h∇[grad, bin, feat, left_node]
         end
     end
 end
@@ -196,7 +202,8 @@ function update_hist_gpu!(
         hist_kernel!(h∇, ∇, x_bin, nidx, js, is, view(left_nodes_buf, 1:n_active); ndrange = num_threads)
         
         subtract_kernel! = subtract_histogram!(backend)
-        subtract_kernel!(h∇, h∇_parent; ndrange = size(h∇))
+        subtract_kernel!(h∇, h∇_parent, view(right_nodes_buf, 1:n_active), Int32(n_active); 
+                        ndrange = (size(h∇, 1), size(h∇, 2), size(h∇, 3), n_active))
     end
     
     find_split! = find_best_split_from_hist_kernel!(backend)
