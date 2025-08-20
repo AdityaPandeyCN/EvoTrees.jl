@@ -189,18 +189,14 @@ function update_hist_gpu!(
         hist_kernel!(h∇, ∇, x_bin, nidx, js, is; ndrange = num_threads)
         copyto!(h∇_parent, h∇)
     else
-        left_nodes = [node * 2 for node in active_nodes if node * 2 <= size(h∇, 4)]
-        right_nodes = [node * 2 + 1 for node in active_nodes if node * 2 + 1 <= size(h∇, 4)]
+        left_nodes_buf[1:n_active] .= active_nodes[1:n_active] .* 2
+        right_nodes_buf[1:n_active] .= active_nodes[1:n_active] .* 2 .+ 1
         
         h∇ .= 0
-        if !isempty(left_nodes)
-            hist_kernel!(h∇, ∇, x_bin, nidx, js, is, left_nodes; ndrange = num_threads)
-        end
+        hist_kernel!(h∇, ∇, x_bin, nidx, js, is, view(left_nodes_buf, 1:n_active); ndrange = num_threads)
         
-        if !isempty(right_nodes)
-            subtract_kernel! = subtract_histogram!(backend)
-            subtract_kernel!(h∇, h∇_parent; ndrange = size(h∇))
-        end
+        subtract_kernel! = subtract_histogram!(backend)
+        subtract_kernel!(h∇, h∇_parent; ndrange = size(h∇))
     end
     
     find_split! = find_best_split_from_hist_kernel!(backend)
