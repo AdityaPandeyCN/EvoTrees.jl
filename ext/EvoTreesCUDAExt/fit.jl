@@ -50,8 +50,6 @@ function grow_tree!(
     js_gpu = KernelAbstractions.adapt(backend, js)
     is_gpu = KernelAbstractions.adapt(backend, is)
 
-    h∇_parent = similar(h∇)
-
     tree_split_gpu = KernelAbstractions.zeros(backend, Bool, length(tree.split))
     tree_cond_bin_gpu = KernelAbstractions.zeros(backend, UInt8, length(tree.cond_bin))
     tree_feat_gpu = KernelAbstractions.zeros(backend, Int32, length(tree.feat))
@@ -76,7 +74,7 @@ function grow_tree!(
     nsamples = Float32(length(is_gpu))
     view(anodes_gpu, 1:1) .= 1
     update_hist_gpu!(
-        h∇, h∇_parent, best_gain_gpu, best_bin_gpu, best_feat_gpu,
+        h∇, best_gain_gpu, best_bin_gpu, best_feat_gpu,
         ∇, x_bin, nidx, js_gpu, is_gpu,
         1, view(anodes_gpu, 1:1), nodes_sum_gpu, params,
         left_nodes_buf, right_nodes_buf, target_mask_buf
@@ -100,40 +98,52 @@ function grow_tree!(
         view_feat = view(best_feat_gpu, 1:n_nodes_level)
         
         if depth > 1
-            # Main branch optimization: only compute histograms for half the nodes
-            active_nodes_subset = view(active_nodes_full, 1:n_active)
+            active_nodes_act = view(active_nodes_full, 1:n_active)
+            active_cpu = Array(active_nodes_act)
             
-            # Build histograms for first half of nodes
-            n_compute = div(n_active + 1, 2)
-            if n_compute > 0
+            # Main branch strategy: Build histograms for odd-indexed active nodes only
+            # Even-indexed nodes computed by subtraction: parent - sibling
+            build_nodes = Int32[]
+            subtract_nodes = Int32[]
+            
+            for i in 1:n_active
+                if i % 2 == 1  # Odd positions in active list
+                    push!(build_nodes, active_cpu[i])
+                else  # Even positions in active list  
+                    push!(subtract_nodes, active_cpu[i])
+                end
+            end
+            
+            # Build histograms only for odd-indexed nodes (50% reduction)
+            if !isempty(build_nodes)
+                build_nodes_gpu = KernelAbstractions.adapt(backend, build_nodes)
                 update_hist_gpu!(
-                    h∇, h∇_parent, view_gain, view_bin, view_feat,
+                    h∇, view_gain, view_bin, view_feat,
                     ∇, x_bin, nidx, js_gpu, is_gpu,
-                    depth, view(active_nodes_subset, 1:n_compute), nodes_sum_gpu, params,
+                    depth, build_nodes_gpu, nodes_sum_gpu, params,
                     left_nodes_buf, right_nodes_buf, target_mask_buf
                 )
             end
             
-            # Compute remaining histograms by subtraction (CPU operation)
-            if n_active > n_compute
+            # Compute histograms for even-indexed nodes by subtraction
+            if !isempty(subtract_nodes)
                 h∇_cpu = Array(h∇)
-                active_nodes_cpu = Array(active_nodes_subset)
-                for i in (n_compute+1):n_active
-                    node = active_nodes_cpu[i]
-                    parent_node = node >> 1
-                    sibling_node = node ⊻ 1  # XOR to get sibling
+                for node in subtract_nodes
+                    parent = node >> 1
+                    sibling = node ⊻ 1  # XOR to get sibling
                     
-                    if sibling_node <= size(h∇_cpu, 4) && parent_node <= size(h∇_cpu, 4)
-                        # parent - sibling = current
-                        h∇_cpu[:, :, :, node] .= h∇_cpu[:, :, :, parent_node] .- h∇_cpu[:, :, :, sibling_node]
+                    if (parent <= size(h∇_cpu, 4) && sibling <= size(h∇_cpu, 4) && 
+                        node <= size(h∇_cpu, 4))
+                        # node = parent - sibling (histogram subtraction trick)
+                        h∇_cpu[:, :, :, node] .= h∇_cpu[:, :, :, parent] .- h∇_cpu[:, :, :, sibling]
                     end
                 end
                 copyto!(h∇, h∇_cpu)
             end
             
-            # Find splits for all nodes
+            # Find best splits for all active nodes
             find_split! = find_best_split_from_hist_kernel!(backend)
-            find_split!(view_gain, view_bin, view_feat, h∇, nodes_sum_gpu, active_nodes_subset, js_gpu,
+            find_split!(view_gain, view_bin, view_feat, h∇, nodes_sum_gpu, active_nodes_act, js_gpu,
                        Float32(params.lambda), Float32(params.min_weight); ndrange = n_active)
         end
 

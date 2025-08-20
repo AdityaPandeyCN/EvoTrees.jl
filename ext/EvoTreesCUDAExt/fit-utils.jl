@@ -147,7 +147,7 @@ end
 end
 
 function update_hist_gpu!(
-    h∇, h∇_parent, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
+    h∇, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
     left_nodes_buf, right_nodes_buf, target_mask_buf
 )
     backend = KernelAbstractions.get_backend(h∇)
