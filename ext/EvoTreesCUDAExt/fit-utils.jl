@@ -37,7 +37,7 @@ end
     end
 end
 
-@kernel function hist_kernel_final!(
+@kernel function hist_kernel!(
     h∇::AbstractArray{T,4},
     @Const(∇),
     @Const(x_bin),
@@ -160,7 +160,7 @@ function update_hist_gpu!(
     h∇ .= 0
     
     num_threads = div(length(is), 8) + 1
-    hist_kernel! = hist_kernel_final!(backend)
+    hist_kernel! = hist_kernel!(backend)
     hist_kernel!(h∇, ∇, x_bin, nidx, js, is; ndrange = num_threads)
     
     find_split! = find_best_split_from_hist_kernel!(backend)
@@ -170,3 +170,4 @@ function update_hist_gpu!(
     
     KernelAbstractions.synchronize(backend)
 end
+

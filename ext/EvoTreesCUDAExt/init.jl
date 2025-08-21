@@ -111,7 +111,6 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes{L}, ::Type{<:EvoTrees.GPU}
     right_nodes_buf = CUDA.zeros(Int32, max_nodes_level)
     target_mask_buf = CUDA.zeros(UInt8, 2^(params.max_depth + 1))
 
-    # build cache
     cache = (
         info=Dict(:nrounds => 0),
         x_bin=x_bin,
@@ -130,7 +129,6 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes{L}, ::Type{<:EvoTrees.GPU}
         h∇=h∇,
         h∇L=h∇L,
         h∇R=h∇R,
-        # gains removed for GPU path;
         fnames=fnames,
         edges=edges,
         featbins=featbins,
@@ -146,3 +144,4 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes{L}, ::Type{<:EvoTrees.GPU}
     )
     return m, cache
 end
+
