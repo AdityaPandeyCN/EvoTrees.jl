@@ -47,30 +47,36 @@ end
 ) where {T}
     gidx = @index(Global, Linear)
     
-    obs_per_thread = 8
-    start_idx = (gidx - 1) * obs_per_thread + 1
-    end_idx = min(start_idx + obs_per_thread - 1, length(is))
+    n_feats = length(js)
+    n_obs = length(is)
+    total_work_items = n_feats * cld(n_obs, 8)  # cld = ceiling division
+    
+    if gidx > total_work_items
+        return
+    end
+    
+    # Each thread handles specific feature and observation chunk
+    feat_idx = (gidx - 1) % n_feats + 1
+    obs_chunk = (gidx - 1) ÷ n_feats
+    
+    feat = js[feat_idx]
+    
+    # Each chunk processes 8 observations
+    start_idx = obs_chunk * 8 + 1
+    end_idx = min(start_idx + 7, n_obs)
     
     @inbounds for obs_idx in start_idx:end_idx
-        if obs_idx <= length(is)
-            obs = is[obs_idx]
-            node = nidx[obs]
-            if node > 0 && node <= size(h∇, 4)
+        obs = is[obs_idx]
+        node = nidx[obs]
+        if node > 0 && node <= size(h∇, 4)
+            bin = x_bin[obs, feat]
+            if bin > 0 && bin <= size(h∇, 2)
                 grad1 = ∇[1, obs]
                 grad2 = ∇[2, obs]
                 grad3 = ∇[3, obs]
-                
-                @inbounds for j_idx in 1:length(js)
-        feat = js[j_idx]
-                    if feat <= size(h∇, 3)
-                        bin = x_bin[obs, feat]
-                        if bin > 0 && bin <= size(h∇, 2)
-                            Atomix.@atomic h∇[1, bin, feat, node] += grad1
-                            Atomix.@atomic h∇[2, bin, feat, node] += grad2
-                            Atomix.@atomic h∇[3, bin, feat, node] += grad3
-                        end
-                    end
-                end
+                Atomix.@atomic h∇[1, bin, feat, node] += grad1
+                Atomix.@atomic h∇[2, bin, feat, node] += grad2
+                Atomix.@atomic h∇[3, bin, feat, node] += grad3
             end
         end
     end
@@ -159,9 +165,13 @@ function update_hist_gpu!(
     
     h∇ .= 0
     
-    num_threads = div(length(is), 8) + 1
-    hist_kernel! = hist_kernel!(backend)
-    hist_kernel!(h∇, ∇, x_bin, nidx, js, is; ndrange = num_threads)
+    # NEW: Launch threads based on features * observation chunks
+    n_feats = length(js)
+    n_obs_chunks = cld(length(is), 8)  # ceiling division
+    num_threads = n_feats * n_obs_chunks
+    
+    hist_kernel_f! = hist_kernel!(backend)
+    hist_kernel_f!(h∇, ∇, x_bin, nidx, js, is; ndrange = num_threads)
     
     find_split! = find_best_split_from_hist_kernel!(backend)
     find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
