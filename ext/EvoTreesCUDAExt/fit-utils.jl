@@ -73,8 +73,8 @@ end
                     grad2 = ∇[2, obs]
                     grad3 = ∇[3, obs]
                     Atomix.@atomic h∇[1, bin, feat, node] += grad1
-                    Atomix.@atomic h∇[2, bin, feat, node] += grad2
                     Atomix.@atomic h∇[3, bin, feat, node] += grad3
+                    Atomix.@atomic h∇[2, bin, feat, node] += grad2
                 end
             end
         end
