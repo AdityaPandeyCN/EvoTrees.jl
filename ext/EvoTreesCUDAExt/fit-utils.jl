@@ -49,34 +49,33 @@ end
     
     n_feats = length(js)
     n_obs = length(is)
-    total_work_items = n_feats * cld(n_obs, 8)  # cld = ceiling division
+    total_work_items = n_feats * cld(n_obs, 8)
     
-    if gidx > total_work_items
-        return
-    end
-    
-    # Each thread handles specific feature and observation chunk
-    feat_idx = (gidx - 1) % n_feats + 1
-    obs_chunk = (gidx - 1) ÷ n_feats
-    
-    feat = js[feat_idx]
-    
-    # Each chunk processes 8 observations
-    start_idx = obs_chunk * 8 + 1
-    end_idx = min(start_idx + 7, n_obs)
-    
-    @inbounds for obs_idx in start_idx:end_idx
-        obs = is[obs_idx]
-        node = nidx[obs]
-        if node > 0 && node <= size(h∇, 4)
-            bin = x_bin[obs, feat]
-            if bin > 0 && bin <= size(h∇, 2)
-                grad1 = ∇[1, obs]
-                grad2 = ∇[2, obs]
-                grad3 = ∇[3, obs]
-                Atomix.@atomic h∇[1, bin, feat, node] += grad1
-                Atomix.@atomic h∇[2, bin, feat, node] += grad2
-                Atomix.@atomic h∇[3, bin, feat, node] += grad3
+    # Just wrap everything in the condition instead of using return
+    if gidx <= total_work_items
+        # Each thread handles specific feature and observation chunk
+        feat_idx = (gidx - 1) % n_feats + 1
+        obs_chunk = (gidx - 1) ÷ n_feats
+        
+        feat = js[feat_idx]
+        
+        # Each chunk processes 8 observations
+        start_idx = obs_chunk * 8 + 1
+        end_idx = min(start_idx + 7, n_obs)
+        
+        @inbounds for obs_idx in start_idx:end_idx
+            obs = is[obs_idx]
+            node = nidx[obs]
+            if node > 0 && node <= size(h∇, 4)
+                bin = x_bin[obs, feat]
+                if bin > 0 && bin <= size(h∇, 2)
+                    grad1 = ∇[1, obs]
+                    grad2 = ∇[2, obs]
+                    grad3 = ∇[3, obs]
+                    Atomix.@atomic h∇[1, bin, feat, node] += grad1
+                    Atomix.@atomic h∇[2, bin, feat, node] += grad2
+                    Atomix.@atomic h∇[3, bin, feat, node] += grad3
+                end
             end
         end
     end
