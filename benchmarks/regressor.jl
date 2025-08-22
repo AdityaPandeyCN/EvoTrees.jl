@@ -70,35 +70,87 @@ for device in device_list
                         _m_evo(x_train; device)
                     end
                     
-                    # Add profiling for GPU performance analysis
+                    # Enhanced profiling for GPU performance analysis
                     if device == :gpu
-                        println("Profiling GPU training...")
-                        CUDA.@profile begin
-                            t_train_evo = @elapsed m_evo = fit_evotree(params_evo; x_train, y_train, x_eval=x_train, y_eval=y_train, metric=loss, device, print_every_n=100)
+                        println("\n" * "="^60)
+                        println("GPU PERFORMANCE PROFILING")
+                        println("="^60)
+                        
+                        # Profile just a few trees to understand kernel breakdown
+                        params_profile = EvoTreeRegressor(;
+                            loss=loss,
+                            nrounds=5,  # Just 5 trees for detailed profiling
+                            alpha=0.5,
+                            lambda=0.0,
+                            gamma=0.0,
+                            eta=0.05,
+                            max_depth,
+                            min_weight=1.0,
+                            rowsample=0.5,
+                            colsample=0.5,
+                            nbins=64,
+                            tree_type,
+                            rng=123,
+                        )
+                        
+                        println("\nProfiling 5 trees to identify bottlenecks...")
+                        
+                        # Time individual components
+                        profile_times = Float64[]
+                        
+                        # Run profiling 3 times and take average
+                        for run in 1:3
+                            t_profile = CUDA.@elapsed begin
+                                m_profile = fit_evotree(params_profile; x_train, y_train, device, print_every_n=0, verbosity=0)
+                            end
+                            push!(profile_times, t_profile)
                         end
+                        
+                        avg_time_per_5trees = mean(profile_times)
+                        avg_time_per_tree = avg_time_per_5trees / 5
+                        estimated_200trees = avg_time_per_tree * 200
+                        
+                        println("Average time per tree: $(round(avg_time_per_tree*1000, digits=2))ms")
+                        println("Estimated time for 200 trees: $(round(estimated_200trees, digits=2))s")
+                        
+                        # Now run with CUDA profiling for kernel breakdown
+                        println("\nKernel-level profiling (1 tree):")
+                        params_single = EvoTreeRegressor(;
+                            loss=loss,
+                            nrounds=1,
+                            alpha=0.5,
+                            lambda=0.0,
+                            gamma=0.0,
+                            eta=0.05,
+                            max_depth,
+                            min_weight=1.0,
+                            rowsample=0.5,
+                            colsample=0.5,
+                            nbins=64,
+                            tree_type,
+                            rng=123,
+                        )
+                        
+                        CUDA.@time begin
+                            m_single = fit_evotree(params_single; x_train, y_train, device, print_every_n=0, verbosity=0)
+                        end
+                        
+                        # Memory usage check
+                        println("\nGPU Memory Usage:")
+                        CUDA.memory_status()
+                        
+                        println("="^60 * "\n")
+                        
+                        # Now run the full training
+                        println("Running full training (200 trees)...")
+                        t_train_evo = @elapsed m_evo = fit_evotree(params_evo; x_train, y_train, x_eval=x_train, y_eval=y_train, metric=loss, device, print_every_n=100)
                     else
-                    t_train_evo = @elapsed m_evo = fit_evotree(params_evo; x_train, y_train, x_eval=x_train, y_eval=y_train, metric=loss, device, print_every_n=100)
+                        t_train_evo = @elapsed m_evo = fit_evotree(params_evo; x_train, y_train, x_eval=x_train, y_eval=y_train, metric=loss, device, print_every_n=100)
                     end
                     
                     @info "train" t_train_evo
                     t_infer_evo = @elapsed pred_evo = m_evo(x_train; device)
                     @info "predict" t_infer_evo
-
-                    params_evo = EvoTreeRegressor(;
-                        loss,
-                        nrounds,
-                        max_depth,
-                        lambda=0.0,
-                        gamma=0.0,
-                        eta=0.05,
-                        min_weight=1.0,
-                        rowsample=0.5,
-                        colsample=0.5,
-                        nbins=64,
-                        tree_type,
-                        rng=123,
-                        device
-                    )
 
                     _df = hcat(_df, DataFrame(
                         :train_evo => t_train_evo,

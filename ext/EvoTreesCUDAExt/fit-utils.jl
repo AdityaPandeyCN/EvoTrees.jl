@@ -45,65 +45,36 @@ end
     @Const(js),
     @Const(is),
 ) where {T}
-    tid = @index(Local)
-    gid = @index(Group)
+    gidx = @index(Global, Linear)
     
     n_feats = length(js)
     n_obs = length(is)
-    n_bins = size(h∇, 2)
+    total_work_items = n_feats * cld(n_obs, 8)
     
-    # Shared memory - using fixed size for now (adjust based on your max bins)
-    # Assuming max 64 bins based on your benchmarks
-    shared_hist = @localmem T (3, 64)
-    
-    # Each block processes one feature
-    if gid <= n_feats
-        feat = js[gid]
+    # Just wrap everything in the condition instead of using return
+    if gidx <= total_work_items
+        # Each thread handles specific feature and observation chunk
+        feat_idx = (gidx - 1) % n_feats + 1
+        obs_chunk = (gidx - 1) ÷ n_feats
         
-        # Initialize shared memory to zero
-        @inbounds for b in tid:@groupsize()[1]:64
-            if b <= n_bins
-                shared_hist[1, b] = zero(T)
-                shared_hist[2, b] = zero(T)
-                shared_hist[3, b] = zero(T)
-            end
-        end
-        @synchronize()
+        feat = js[feat_idx]
         
-        # Each thread processes a subset of observations
-        @inbounds for obs_idx in tid:@groupsize()[1]:n_obs
-            if obs_idx <= n_obs
-                obs = is[obs_idx]
-                node = nidx[obs]
-                
-                if node > 0 && node <= size(h∇, 4)
-                    bin = x_bin[obs, feat]
-                    if bin > 0 && bin <= min(n_bins, 64)  # Ensure we don't exceed shared memory
-                        grad1 = ∇[1, obs]
-                        grad2 = ∇[2, obs]
-                        grad3 = ∇[3, obs]
-                        Atomix.@atomic shared_hist[1, bin] += grad1
-                        Atomix.@atomic shared_hist[2, bin] += grad2
-                        Atomix.@atomic shared_hist[3, bin] += grad3
-                    end
-                end
-            end
-        end
-        @synchronize()
+        # Each chunk processes 8 observations
+        start_idx = obs_chunk * 8 + 1
+        end_idx = min(start_idx + 7, n_obs)
         
-        # Write shared memory to global (one thread per bin)
-        @inbounds for b in tid:@groupsize()[1]:min(n_bins, 64)
-            if b <= n_bins
-                val1 = shared_hist[1, b]
-                val2 = shared_hist[2, b]
-                val3 = shared_hist[3, b]
-                
-                if val1 != zero(T) || val2 != zero(T) || val3 != zero(T)
-                    for node in 1:size(h∇, 4)
-                        Atomix.@atomic h∇[1, b, feat, node] += val1
-                        Atomix.@atomic h∇[2, b, feat, node] += val2
-                        Atomix.@atomic h∇[3, b, feat, node] += val3
-                    end
+        @inbounds for obs_idx in start_idx:end_idx
+            obs = is[obs_idx]
+            node = nidx[obs]
+            if node > 0 && node <= size(h∇, 4)
+                bin = x_bin[obs, feat]
+                if bin > 0 && bin <= size(h∇, 2)
+                    grad1 = ∇[1, obs]
+                    grad2 = ∇[2, obs]
+                    grad3 = ∇[3, obs]
+                    Atomix.@atomic h∇[1, bin, feat, node] += grad1
+                    Atomix.@atomic h∇[2, bin, feat, node] += grad2
+                    Atomix.@atomic h∇[3, bin, feat, node] += grad3
                 end
             end
         end
@@ -193,12 +164,13 @@ function update_hist_gpu!(
     
     h∇ .= 0
     
-    # NEW: Launch one block per feature with 256 threads per block
+    # NEW: Launch threads based on features * observation chunks
     n_feats = length(js)
+    n_obs_chunks = cld(length(is), 8)  # ceiling division
+    num_threads = n_feats * n_obs_chunks
+    
     hist_kernel_f! = hist_kernel!(backend)
-    hist_kernel_f!(h∇, ∇, x_bin, nidx, js, is; 
-                   ndrange = n_feats * 256,  # total threads
-                   workgroupsize = 256)       # threads per block
+    hist_kernel_f!(h∇, ∇, x_bin, nidx, js, is; ndrange = num_threads)
     
     find_split! = find_best_split_from_hist_kernel!(backend)
     find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
@@ -207,4 +179,3 @@ function update_hist_gpu!(
     
     KernelAbstractions.synchronize(backend)
 end
-
