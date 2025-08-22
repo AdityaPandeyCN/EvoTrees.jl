@@ -1,3 +1,6 @@
+using KernelAbstractions
+using Atomix
+
 function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.EvoTypes{L}, ::Type{<:EvoTrees.GPU}) where {L,K}
     EvoTrees.update_grads!(cache.∇, cache.pred, cache.y, params)
     is = EvoTrees.subsample(cache.is_in, cache.is_out, cache.mask, params.rowsample, params.rng)
@@ -14,8 +17,6 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.E
         is,
         cache.js,
         cache.h∇,
-        cache.h∇L,
-        cache.h∇R,
         cache.x_bin,
         cache.feattypes_gpu,
         cache.left_nodes_buf,
@@ -28,6 +29,37 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.E
     return nothing
 end
 
+@kernel function separate_nodes_kernel!(
+    build_nodes, build_count,
+    subtract_nodes, subtract_count,
+    @Const(active_nodes)
+)
+    idx = @index(Global)
+    node = active_nodes[idx]
+    
+    if node > 0
+        if idx % 2 == 1
+            pos = Atomix.@atomic build_count[1] += 1
+            build_nodes[pos] = node
+        else
+            pos = Atomix.@atomic subtract_count[1] += 1
+            subtract_nodes[pos] = node
+        end
+    end
+end
+
+@kernel function subtract_hist_kernel!(h∇, @Const(subtract_nodes))
+    idx = @index(Global)
+    node = subtract_nodes[idx]
+    
+    parent = node >> 1
+    sibling = node ⊻ 1
+    
+    @inbounds for j in 1:size(h∇, 3), b in 1:size(h∇, 2), k in 1:size(h∇, 1)
+        h∇[k, b, j, node] = h∇[k, b, j, parent] - h∇[k, b, j, sibling]
+    end
+end
+
 function grow_tree!(
     tree::EvoTrees.Tree{L,K},
     params::EvoTrees.EvoTypes{L},
@@ -37,8 +69,6 @@ function grow_tree!(
     is,
     js,
     h∇::CuArray,
-    h∇L::CuArray,
-    h∇R::CuArray,
     x_bin::CuMatrix,
     feattypes_gpu::CuVector{Bool},
     left_nodes_buf::CuArray{Int32},
@@ -99,46 +129,40 @@ function grow_tree!(
         
         if depth > 1
             active_nodes_act = view(active_nodes_full, 1:n_active)
-            active_cpu = Array(active_nodes_act)
-            
-            # Main branch strategy: Build histograms for odd-indexed active nodes only
-            # Even-indexed nodes computed by subtraction: parent - sibling
-            build_nodes = Int32[]
-            subtract_nodes = Int32[]
-            
-            for i in 1:n_active
-                if i % 2 == 1  # Odd positions in active list
-                    push!(build_nodes, active_cpu[i])
-                else  # Even positions in active list  
-                    push!(subtract_nodes, active_cpu[i])
-                end
-            end
-            
-            # Build histograms only for odd-indexed nodes (50% reduction)
-            if !isempty(build_nodes)
-                build_nodes_gpu = KernelAbstractions.adapt(backend, build_nodes)
+
+            build_nodes_gpu = KernelAbstractions.zeros(backend, Int32, n_active)
+            subtract_nodes_gpu = KernelAbstractions.zeros(backend, Int32, n_active)
+            build_count = KernelAbstractions.zeros(backend, Int32, 1)
+            subtract_count = KernelAbstractions.zeros(backend, Int32, 1)
+
+            separate_kernel! = separate_nodes_kernel!(backend)
+            separate_kernel!(
+                build_nodes_gpu, build_count,
+                subtract_nodes_gpu, subtract_count,
+                active_nodes_act;
+                ndrange=n_active
+            )
+
+            n_build = Array(build_count)[1]
+            n_subtract = Array(subtract_count)[1]
+
+            if n_build > 0
+                build_nodes_view = view(build_nodes_gpu, 1:n_build)
                 update_hist_gpu!(
                     h∇, view_gain, view_bin, view_feat,
                     ∇, x_bin, nidx, js_gpu, is_gpu,
-                    depth, build_nodes_gpu, nodes_sum_gpu, params,
+                    depth, build_nodes_view, nodes_sum_gpu, params,
                     left_nodes_buf, right_nodes_buf, target_mask_buf
                 )
             end
             
-            # Compute histograms for even-indexed nodes by subtraction
-            if !isempty(subtract_nodes)
-                for node in subtract_nodes
-                    parent = node >> 1
-                    sibling = node ⊻ 1
-                    
-                    if (parent <= size(h∇, 4) && sibling <= size(h∇, 4) && node <= size(h∇, 4))
-                        # Do subtraction directly on GPU using broadcasting
-                        @views h∇[:, :, :, node] .= h∇[:, :, :, parent] .- h∇[:, :, :, sibling]
-                    end
-                end
-                CUDA.synchronize()  # Make sure GPU operations complete
+            if n_subtract > 0
+                subtract_nodes_view = view(subtract_nodes_gpu, 1:n_subtract)
+                subtract_hist_kernel!(backend)(h∇, subtract_nodes_view; ndrange=n_subtract)
             end
-            # Find best splits for all active nodes
+            
+            KernelAbstractions.synchronize(backend)
+
             find_split! = find_best_split_from_hist_kernel!(backend)
             find_split!(view_gain, view_bin, view_feat, h∇, nodes_sum_gpu, active_nodes_act, js_gpu,
                        Float32(params.lambda), Float32(params.min_weight); ndrange = n_active)
@@ -179,7 +203,6 @@ function grow_tree!(
     copyto!(tree.cond_bin, Array(tree_cond_bin_gpu))
     copyto!(tree.feat, Array(tree_feat_gpu))
     copyto!(tree.gain, Array(tree_gain_gpu))
-
     copyto!(tree.pred, Array(tree_pred_gpu .* Float32(params.eta)))
     
     for i in eachindex(tree.split)
