@@ -130,7 +130,9 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.E
             if n_subtract > 0
                 subtract_nodes_view = view(subtract_nodes_gpu, 1:n_subtract)
                 subtract_kernel! = subtract_hist_kernel!(backend)
-                subtract_kernel!(h∇, subtract_nodes_view, n_subtract; ndrange = n_subtract)
+                # Launch more threads for parallel subtraction
+                n_work = n_subtract * size(h∇, 1) * size(h∇, 2) * size(h∇, 3)
+                subtract_kernel!(h∇, subtract_nodes_view, n_subtract; ndrange = n_work)
                 KernelAbstractions.synchronize(backend)
             end
             

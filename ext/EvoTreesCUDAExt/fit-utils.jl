@@ -51,15 +51,12 @@ end
     n_obs = length(is)
     total_work_items = n_feats * cld(n_obs, 8)
     
-    # Just wrap everything in the condition instead of using return
     if gidx <= total_work_items
-        # Each thread handles specific feature and observation chunk
         feat_idx = (gidx - 1) % n_feats + 1
         obs_chunk = (gidx - 1) ÷ n_feats
         
         feat = js[feat_idx]
         
-        # Each chunk processes 8 observations
         start_idx = obs_chunk * 8 + 1
         end_idx = min(start_idx + 7, n_obs)
         
@@ -164,9 +161,8 @@ function update_hist_gpu!(
     
     h∇ .= 0
     
-    # NEW: Launch threads based on features * observation chunks
     n_feats = length(js)
-    n_obs_chunks = cld(length(is), 8)  # ceiling division
+    n_obs_chunks = cld(length(is), 8)
     num_threads = n_feats * n_obs_chunks
     
     hist_kernel_f! = hist_kernel!(backend)
@@ -190,10 +186,10 @@ end
     if idx <= n_active
         node = active_nodes[idx]
         if node > 0
-            if idx % 2 == 1  # Odd position
+            if idx % 2 == 1
                 pos = Atomix.@atomic build_count[1] += 1
                 build_nodes[pos] = node
-            else  # Even position
+            else
                 pos = Atomix.@atomic subtract_count[1] += 1
                 subtract_nodes[pos] = node
             end
@@ -206,19 +202,34 @@ end
     @Const(subtract_nodes),
     n_subtract
 )
-    idx = @index(Global)
-    if idx <= n_subtract
-        node = subtract_nodes[idx]
-        parent = node >> 1
-        sibling = node ⊻ 1
+    gidx = @index(Global)
+    
+    n_gradients = size(h∇, 1)
+    n_bins = size(h∇, 2)
+    n_feats = size(h∇, 3)
+    
+    total_elements = n_gradients * n_bins * n_feats
+    elements_per_node = total_elements
+    total_work = n_subtract * elements_per_node
+    
+    if gidx <= total_work
+        node_idx = (gidx - 1) ÷ elements_per_node + 1
+        element_idx = (gidx - 1) % elements_per_node
         
-        @inbounds if parent <= size(h∇, 4) && sibling <= size(h∇, 4) && node <= size(h∇, 4)
-            for k in 1:size(h∇, 1)
-                for b in 1:size(h∇, 2)
-                    for f in 1:size(h∇, 3)
-                        h∇[k, b, f, node] = h∇[k, b, f, parent] - h∇[k, b, f, sibling]
-                    end
-                end
+        grad_idx = element_idx ÷ (n_bins * n_feats) + 1
+        rem1 = element_idx % (n_bins * n_feats)
+        bin_idx = rem1 ÷ n_feats + 1
+        feat_idx = rem1 % n_feats + 1
+        
+        if node_idx <= n_subtract
+            node = subtract_nodes[node_idx]
+            parent = node >> 1
+            sibling = node ⊻ 1
+            
+            @inbounds if parent <= size(h∇, 4) && sibling <= size(h∇, 4) && node <= size(h∇, 4)
+                h∇[grad_idx, bin_idx, feat_idx, node] = 
+                    h∇[grad_idx, bin_idx, feat_idx, parent] - 
+                    h∇[grad_idx, bin_idx, feat_idx, sibling]
             end
         end
     end
