@@ -1,7 +1,9 @@
 function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.EvoTypes{L}, ::Type{<:EvoTrees.GPU}) where {L,K}
     EvoTrees.update_grads!(cache.∇, cache.pred, cache.y, params)
     is = EvoTrees.subsample(cache.is_in, cache.is_out, cache.mask, params.rowsample, params.rng)
-    EvoTrees.sample!(params.rng, cache.js_, cache.js, replace=false, ordered=true)
+    js_cpu = Vector{eltype(cache.js)}(undef, length(cache.js))
+    EvoTrees.sample!(params.rng, cache.js_, js_cpu, replace=false, ordered=true)
+    copyto!(cache.js, js_cpu)  
  
     tree = EvoTrees.Tree{L,K}(params.max_depth)
     grow! = params.tree_type == "oblivious" ? grow_otree! : grow_tree!
@@ -45,11 +47,9 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.E
     right_nodes_buf::CuArray{Int32},
     target_mask_buf::CuArray{UInt8},
  ) where {L,K}
-    @info "Data types" typeof_is=typeof(is) typeof_js=typeof(js)
-    
+
     backend = KernelAbstractions.get_backend(x_bin)
-    js_gpu = KernelAbstractions.adapt(backend, js)
-    is_gpu = KernelAbstractions.adapt(backend, is)
+    js_gpu = js 
  
     tree_split_gpu = KernelAbstractions.zeros(backend, Bool, length(tree.split))
     tree_cond_bin_gpu = KernelAbstractions.zeros(backend, UInt8, length(tree.cond_bin))
