@@ -52,32 +52,33 @@ end
     n_obs = length(is)
     n_bins = size(h∇, 2)
     
-    # Shared memory for local histogram accumulation
-    # Size: 3 gradients × max_bins × 1 feature (process one feature at a time per block)
-    shared_hist = @localmem T (3, n_bins)
+    # Shared memory - using fixed size for now (adjust based on your max bins)
+    # Assuming max 64 bins based on your benchmarks
+    shared_hist = @localmem T (3, 64)
     
     # Each block processes one feature
     if gid <= n_feats
         feat = js[gid]
         
-        # Initialize shared memory to zero (each thread helps)
-        for b in tid:@groupsize()[1]:n_bins
-            shared_hist[1, b] = zero(T)
-            shared_hist[2, b] = zero(T)
-            shared_hist[3, b] = zero(T)
+        # Initialize shared memory to zero
+        @inbounds for b in tid:@groupsize()[1]:64
+            if b <= n_bins
+                shared_hist[1, b] = zero(T)
+                shared_hist[2, b] = zero(T)
+                shared_hist[3, b] = zero(T)
+            end
         end
         @synchronize()
         
         # Each thread processes a subset of observations
-        for obs_idx in tid:@groupsize()[1]:n_obs
+        @inbounds for obs_idx in tid:@groupsize()[1]:n_obs
             if obs_idx <= n_obs
                 obs = is[obs_idx]
                 node = nidx[obs]
                 
-                @inbounds if node > 0 && node <= size(h∇, 4)
+                if node > 0 && node <= size(h∇, 4)
                     bin = x_bin[obs, feat]
-                    if bin > 0 && bin <= n_bins
-                        # Accumulate in shared memory (still needs atomics but much faster)
+                    if bin > 0 && bin <= min(n_bins, 64)  # Ensure we don't exceed shared memory
                         grad1 = ∇[1, obs]
                         grad2 = ∇[2, obs]
                         grad3 = ∇[3, obs]
@@ -91,13 +92,17 @@ end
         @synchronize()
         
         # Write shared memory to global (one thread per bin)
-        for b in tid:@groupsize()[1]:n_bins
+        @inbounds for b in tid:@groupsize()[1]:min(n_bins, 64)
             if b <= n_bins
-                for node in 1:size(h∇, 4)
-                    @inbounds if shared_hist[1, b] != zero(T) || shared_hist[2, b] != zero(T) || shared_hist[3, b] != zero(T)
-                        Atomix.@atomic h∇[1, b, feat, node] += shared_hist[1, b]
-                        Atomix.@atomic h∇[2, b, feat, node] += shared_hist[2, b]
-                        Atomix.@atomic h∇[3, b, feat, node] += shared_hist[3, b]
+                val1 = shared_hist[1, b]
+                val2 = shared_hist[2, b]
+                val3 = shared_hist[3, b]
+                
+                if val1 != zero(T) || val2 != zero(T) || val3 != zero(T)
+                    for node in 1:size(h∇, 4)
+                        Atomix.@atomic h∇[1, b, feat, node] += val1
+                        Atomix.@atomic h∇[2, b, feat, node] += val2
+                        Atomix.@atomic h∇[3, b, feat, node] += val3
                     end
                 end
             end
