@@ -22,7 +22,7 @@ function grow_evotree!(m::EvoTree{L,K}, cache, params::EvoTypes{L}, ::Type{<:Dev
         params,
         cache.∇,
         cache.edges,
-        cache.nidx,
+        node_idx,
         is,
         cache.js,
         cache.h∇,
