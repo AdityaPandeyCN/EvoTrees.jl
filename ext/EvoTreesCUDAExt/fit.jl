@@ -45,7 +45,8 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.E
     right_nodes_buf::CuArray{Int32},
     target_mask_buf::CuArray{UInt8},
  ) where {L,K}
- 
+    @info "Data types" typeof_is=typeof(is) typeof_js=typeof(js)
+    
     backend = KernelAbstractions.get_backend(x_bin)
     js_gpu = KernelAbstractions.adapt(backend, js)
     is_gpu = KernelAbstractions.adapt(backend, is)
