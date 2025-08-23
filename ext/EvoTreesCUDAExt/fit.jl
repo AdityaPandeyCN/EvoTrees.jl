@@ -94,13 +94,11 @@ function grow_tree!(
         view_feat = view(best_feat_gpu, 1:n_nodes_level)
         
         if depth > 1
-            active_nodes_act = view(active_nodes_full, 1:n_active)
-
+            # Always prepare for both build and subtract
             build_nodes_gpu = KernelAbstractions.zeros(backend, Int32, n_active)
             subtract_nodes_gpu = KernelAbstractions.zeros(backend, Int32, n_active)
-            build_count = KernelAbstractions.zeros(backend, Int32, 1)
-            subtract_count = KernelAbstractions.zeros(backend, Int32, 1)
-
+            
+            # This kernel already sets build_count and subtract_count atomically
             separate_kernel! = separate_nodes_kernel!(backend)
             separate_kernel!(
                 build_nodes_gpu, build_count,
@@ -109,33 +107,30 @@ function grow_tree!(
                 ndrange=n_active
             )
             
-            n_build = CUDA.@allowscalar build_count[1]
-            n_subtract = CUDA.@allowscalar subtract_count[1]
-
-            if n_build > 0
-                build_nodes_view = view(build_nodes_gpu, 1:n_build)
-                update_hist_gpu!(
-                    h∇, view_gain, view_bin, view_feat,
-                    ∇, x_bin, nidx, js, is,
-                    depth, build_nodes_view, nodes_sum_gpu, params,
-                    left_nodes_buf, right_nodes_buf, target_mask_buf
-                )
-            end
+            # REMOVE THE SCALAR READS - just launch both kernels unconditionally
+            # The kernels will handle empty cases gracefully
             
-            if n_subtract > 0
-                subtract_nodes_view = view(subtract_nodes_gpu, 1:n_subtract)
-                subtract_kernel! = subtract_hist_kernel!(backend)
-                n_work = n_subtract * size(h∇, 1) * size(h∇, 2) * size(h∇, 3)
-                subtract_kernel!(h∇, subtract_nodes_view; ndrange = n_work)
-            end
+            # Always run update_hist for potential build nodes
+            update_hist_gpu!(
+                h∇, view_gain, view_bin, view_feat,
+                ∇, x_bin, nidx, js, is,
+                depth, build_nodes_gpu, nodes_sum_gpu, params,  # Pass full array
+                left_nodes_buf, right_nodes_buf, target_mask_buf
+            )
             
+            # Always run subtract kernel - it will do nothing if no nodes to process
+            subtract_kernel! = subtract_hist_kernel!(backend)
+            n_work = n_active * size(h∇, 1) * size(h∇, 2) * size(h∇, 3)  # Max possible work
+            subtract_kernel!(h∇, subtract_nodes_gpu; ndrange = n_work)
+            
+            # Only synchronize once before find_split
             KernelAbstractions.synchronize(backend)
             
             find_split! = find_best_split_from_hist_kernel!(backend)
             find_split!(view_gain, view_bin, view_feat, h∇, nodes_sum_gpu, active_nodes_act, js,
                        Float32(params.lambda), Float32(params.min_weight); ndrange = n_active)
         end
-        
+
         n_next_active_gpu .= 0
         view_gain_act  = view(view_gain, 1:n_active)
         view_bin_act   = view(view_bin, 1:n_active)
@@ -154,7 +149,7 @@ function grow_tree!(
             ndrange = n_active
         )
         
-        n_active = CUDA.@allowscalar Int(n_next_active_gpu[1])
+        n_active = min(2 * n_active, 2^depth)
         if n_active > 0
             copyto!(view(anodes_gpu, 1:n_active), view(n_next_gpu, 1:n_active))
         end

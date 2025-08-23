@@ -177,6 +177,10 @@ end
 
     node_idx = (gidx - 1) ÷ n_elements_per_node + 1
     
+    if node_idx > length(subtract_nodes)
+        return
+    end
+    
     remainder = (gidx - 1) % n_elements_per_node
     j = remainder ÷ (n_k * n_b) + 1
     
@@ -186,6 +190,10 @@ end
     k = remainder % n_k + 1
     
     @inbounds node = subtract_nodes[node_idx]
+    
+    if node == 0
+        return
+    end
     
     parent = node >> 1
     sibling = node ⊻ 1
@@ -200,10 +208,6 @@ function update_hist_gpu!(
     backend = KernelAbstractions.get_backend(h∇)
     n_active = length(active_nodes)
     
-    if n_active == 0
-        return
-    end
-    
     h∇ .= 0
     
     n_feats = length(js)
@@ -216,8 +220,5 @@ function update_hist_gpu!(
     find_split! = find_best_split_from_hist_kernel!(backend)
     find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
                 eltype(gains)(params.lambda), eltype(gains)(params.min_weight);
-                ndrange = n_active)
-    
-    KernelAbstractions.synchronize(backend)
+                ndrange = max(n_active, 1))
 end
-
