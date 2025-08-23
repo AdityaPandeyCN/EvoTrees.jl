@@ -1,3 +1,4 @@
+# fit-utils.jl
 using KernelAbstractions
 using Atomix
 
@@ -159,7 +160,7 @@ function update_hist_gpu!(
         return
     end
     
-    h∇ .= 0
+    fill!(h∇, zero(eltype(h∇)))
     
     n_feats = length(js)
     n_obs_chunks = cld(length(is), 8)

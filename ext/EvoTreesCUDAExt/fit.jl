@@ -1,9 +1,11 @@
+# fit.jl
 function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.EvoTypes{L}, ::Type{<:EvoTrees.GPU}) where {L,K}
     EvoTrees.update_grads!(cache.∇, cache.pred, cache.y, params)
     is = EvoTrees.subsample(cache.is_in, cache.is_out, cache.mask, params.rowsample, params.rng)
+    
     js_cpu = Vector{eltype(cache.js)}(undef, length(cache.js))
     EvoTrees.sample!(params.rng, cache.js_, js_cpu, replace=false, ordered=true)
-    copyto!(cache.js, js_cpu)  
+    copyto!(cache.js, js_cpu)
  
     tree = EvoTrees.Tree{L,K}(params.max_depth)
     grow! = params.tree_type == "oblivious" ? grow_otree! : grow_tree!
@@ -47,9 +49,10 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.E
     right_nodes_buf::CuArray{Int32},
     target_mask_buf::CuArray{UInt8},
  ) where {L,K}
-
+ 
     backend = KernelAbstractions.get_backend(x_bin)
-    js_gpu = js 
+    js_gpu = js
+    is_gpu = is
  
     tree_split_gpu = KernelAbstractions.zeros(backend, Bool, length(tree.split))
     tree_cond_bin_gpu = KernelAbstractions.zeros(backend, UInt8, length(tree.cond_bin))
@@ -70,13 +73,13 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.E
     best_bin_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level)
     best_feat_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level)
     
-    nidx .= 1
+    fill!(nidx, UInt32(1))
     
-    nsamples = Float32(length(is))
-    view(anodes_gpu, 1:1) .= 1
+    nsamples = Float32(length(is_gpu))
+    anodes_gpu[1] = 1
     update_hist_gpu!(
         h∇, best_gain_gpu, best_bin_gpu, best_feat_gpu,
-        ∇, x_bin, nidx, js_gpu, is,
+        ∇, x_bin, nidx, js_gpu, is_gpu,
         1, view(anodes_gpu, 1:1), nodes_sum_gpu, params,
         left_nodes_buf, right_nodes_buf, target_mask_buf
     )
@@ -91,7 +94,7 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.E
         active_nodes_full = view(anodes_gpu, 1:n_nodes_level)
         
         if n_active < n_nodes_level
-            view(anodes_gpu, n_active+1:n_nodes_level) .= 0
+            fill!(view(anodes_gpu, n_active+1:n_nodes_level), Int32(0))
         end
  
         view_gain = view(best_gain_gpu, 1:n_nodes_level)
@@ -122,7 +125,7 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.E
                 build_nodes_view = view(build_nodes_gpu, 1:n_build)
                 update_hist_gpu!(
                     h∇, view_gain, view_bin, view_feat,
-                    ∇, x_bin, nidx, js_gpu, is,
+                    ∇, x_bin, nidx, js_gpu, is_gpu,
                     depth, build_nodes_view, nodes_sum_gpu, params,
                     left_nodes_buf, right_nodes_buf, target_mask_buf
                 )
@@ -131,7 +134,6 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.E
             if n_subtract > 0
                 subtract_nodes_view = view(subtract_nodes_gpu, 1:n_subtract)
                 subtract_kernel! = subtract_hist_kernel!(backend)
-                # Launch more threads for parallel subtraction
                 n_work = n_subtract * size(h∇, 1) * size(h∇, 2) * size(h∇, 3)
                 subtract_kernel!(h∇, subtract_nodes_view, n_subtract; ndrange = n_work)
                 KernelAbstractions.synchronize(backend)
@@ -142,7 +144,7 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.E
                        Float32(params.lambda), Float32(params.min_weight); ndrange = n_active)
         end
         
-        n_next_active_gpu .= 0
+        fill!(n_next_active_gpu, Int32(0))
         view_gain_act  = view(view_gain, 1:n_active)
         view_bin_act   = view(view_bin, 1:n_active)
         view_feat_act  = view(view_feat, 1:n_active)
@@ -167,8 +169,8 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.E
  
         if depth < params.max_depth && n_active > 0
             update_nodes_idx_kernel!(backend)(
-                nidx, is, x_bin, tree_feat_gpu, tree_cond_bin_gpu, feattypes_gpu;
-                ndrange = length(is)
+                nidx, is_gpu, x_bin, tree_feat_gpu, tree_cond_bin_gpu, feattypes_gpu;
+                ndrange = length(is_gpu)
             )
         end
     end
