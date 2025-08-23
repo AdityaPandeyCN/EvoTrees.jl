@@ -191,7 +191,7 @@ end
 
     epsv = eltype(tree_pred)(1e-8)
 
-    @inboards if depth < max_depth && best_gain[n_idx] > gamma
+    @inbounds if depth < max_depth && best_gain[n_idx] > gamma
         tree_split[node] = true
         tree_cond_bin[node] = best_bin[n_idx]
         tree_feat[node] = best_feat[n_idx]
