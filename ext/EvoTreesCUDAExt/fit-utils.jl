@@ -177,28 +177,24 @@ end
 
     node_idx = (gidx - 1) ÷ n_elements_per_node + 1
     
-    if node_idx > length(subtract_nodes)
-        return
+    if node_idx <= length(subtract_nodes)
+        remainder = (gidx - 1) % n_elements_per_node
+        j = remainder ÷ (n_k * n_b) + 1
+        
+        remainder = remainder % (n_k * n_b)
+        b = remainder ÷ n_k + 1
+        
+        k = remainder % n_k + 1
+        
+        @inbounds node = subtract_nodes[node_idx]
+        
+        if node > 0
+            parent = node >> 1
+            sibling = node ⊻ 1
+            
+            @inbounds h∇[k, b, j, node] = h∇[k, b, j, parent] - h∇[k, b, j, sibling]
+        end
     end
-    
-    remainder = (gidx - 1) % n_elements_per_node
-    j = remainder ÷ (n_k * n_b) + 1
-    
-    remainder = remainder % (n_k * n_b)
-    b = remainder ÷ n_k + 1
-    
-    k = remainder % n_k + 1
-    
-    @inbounds node = subtract_nodes[node_idx]
-    
-    if node == 0
-        return
-    end
-    
-    parent = node >> 1
-    sibling = node ⊻ 1
-    
-    @inbounds h∇[k, b, j, node] = h∇[k, b, j, parent] - h∇[k, b, j, sibling]
 end
 
 function update_hist_gpu!(
