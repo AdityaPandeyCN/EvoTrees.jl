@@ -94,41 +94,40 @@ function grow_tree!(
         view_feat = view(best_feat_gpu, 1:n_nodes_level)
         
         if depth > 1
-            # Always prepare for both build and subtract
+            active_nodes_act = view(active_nodes_full, 1:n_active)  # Define this first
+
             build_nodes_gpu = KernelAbstractions.zeros(backend, Int32, n_active)
             subtract_nodes_gpu = KernelAbstractions.zeros(backend, Int32, n_active)
-            
-            # This kernel already sets build_count and subtract_count atomically
+            build_count = KernelAbstractions.zeros(backend, Int32, 1)
+            subtract_count = KernelAbstractions.zeros(backend, Int32, 1)
+
             separate_kernel! = separate_nodes_kernel!(backend)
             separate_kernel!(
                 build_nodes_gpu, build_count,
                 subtract_nodes_gpu, subtract_count,
-                active_nodes_act;
+                active_nodes_act;  # Now it's defined
                 ndrange=n_active
             )
             
-            # REMOVE THE SCALAR READS - just launch both kernels unconditionally
-            # The kernels will handle empty cases gracefully
-            
-            # Always run update_hist for potential build nodes
+            # Remove the scalar reads - just launch both kernels unconditionally
+            build_nodes_view = view(build_nodes_gpu, 1:n_active)
             update_hist_gpu!(
                 h∇, view_gain, view_bin, view_feat,
                 ∇, x_bin, nidx, js, is,
-                depth, build_nodes_gpu, nodes_sum_gpu, params,  # Pass full array
+                depth, build_nodes_view, nodes_sum_gpu, params,
                 left_nodes_buf, right_nodes_buf, target_mask_buf
             )
             
-            # Always run subtract kernel - it will do nothing if no nodes to process
+            subtract_nodes_view = view(subtract_nodes_gpu, 1:n_active)
             subtract_kernel! = subtract_hist_kernel!(backend)
-            n_work = n_active * size(h∇, 1) * size(h∇, 2) * size(h∇, 3)  # Max possible work
-            subtract_kernel!(h∇, subtract_nodes_gpu; ndrange = n_work)
+            n_work = n_active * size(h∇, 1) * size(h∇, 2) * size(h∇, 3)
+            subtract_kernel!(h∇, subtract_nodes_view; ndrange = n_work)
             
-            # Only synchronize once before find_split
             KernelAbstractions.synchronize(backend)
             
             find_split! = find_best_split_from_hist_kernel!(backend)
             find_split!(view_gain, view_bin, view_feat, h∇, nodes_sum_gpu, active_nodes_act, js,
-                       Float32(params.lambda), Float32(params.min_weight); ndrange = n_active)
+                      Float32(params.lambda), Float32(params.min_weight); ndrange = n_active)
         end
 
         n_next_active_gpu .= 0
@@ -191,7 +190,7 @@ end
 
     epsv = eltype(tree_pred)(1e-8)
 
-    @inboards if depth < max_depth && best_gain[n_idx] > gamma
+    @inbounds if depth < max_depth && best_gain[n_idx] > gamma
         tree_split[node] = true
         tree_cond_bin[node] = best_bin[n_idx]
         tree_feat[node] = best_feat[n_idx]
