@@ -197,24 +197,111 @@ end
     end
 end
 
+function update_hist_cpu!(h∇, ∇, x_bin, nidx, js, is, active_nodes)
+    h∇ .= 0
+    
+    @inbounds for node in active_nodes
+        node == 0 && continue
+        
+        for feat_idx in 1:length(js)
+            feat = js[feat_idx]
+            
+            @simd for idx in 1:length(is)
+                obs = is[idx]
+                if nidx[obs] == node
+                    bin = x_bin[obs, feat]
+                    if bin > 0 && bin <= size(h∇, 2)
+                        h∇[1, bin, feat, node] += ∇[1, obs]
+                        h∇[2, bin, feat, node] += ∇[2, obs]
+                        h∇[3, bin, feat, node] += ∇[3, obs]
+                    end
+                end
+            end
+        end
+    end
+end
+
+function find_best_split_cpu!(gains, bins, feats, h∇, nodes_sum, active_nodes, js, lambda, min_weight)
+    @inbounds Threads.@threads for n_idx in 1:length(active_nodes)
+        node = active_nodes[n_idx]
+        
+        if node == 0
+            gains[n_idx] = -Inf32
+            bins[n_idx] = Int32(0)
+            feats[n_idx] = Int32(0)
+            continue
+        end
+        
+        nbins = size(h∇, 2)
+        
+        p_g1, p_g2, p_w = 0.0f0, 0.0f0, 0.0f0
+        for f in js
+            @simd for b in 1:nbins
+                p_g1 += h∇[1, b, f, node]
+                p_g2 += h∇[2, b, f, node]
+                p_w  += h∇[3, b, f, node]
+            end
+        end
+        
+        nodes_sum[1, node] = p_g1
+        nodes_sum[2, node] = p_g2
+        nodes_sum[3, node] = p_w
+        
+        gain_p = p_g1^2 / (p_g2 + lambda * p_w + 1e-8f0)
+        
+        g_best, b_best, f_best = -Inf32, Int32(0), Int32(0)
+        
+        for f in js
+            s1, s2, s3 = 0.0f0, 0.0f0, 0.0f0
+            
+            @simd for b in 1:(nbins - 1)
+                s1 += h∇[1, b, f, node]
+                s2 += h∇[2, b, f, node]
+                s3 += h∇[3, b, f, node]
+                
+                if s3 >= min_weight && (p_w - s3) >= min_weight
+                    gain_l = s1^2 / (s3 * lambda + s2 + 1e-8f0)
+                    gain_r = (p_g1 - s1)^2 / ((p_w - s3) * lambda + (p_g2 - s2) + 1e-8f0)
+                    
+                    g = gain_l + gain_r - gain_p
+                    if g > g_best
+                        g_best = g
+                        b_best = Int32(b)
+                        f_best = Int32(f)
+                    end
+                end
+            end
+        end
+        
+        gains[n_idx] = g_best
+        bins[n_idx] = b_best
+        feats[n_idx] = f_best
+    end
+end
+
 function update_hist_gpu!(
     h∇, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
     left_nodes_buf, right_nodes_buf, target_mask_buf
 )
-    backend = KernelAbstractions.get_backend(h∇)
-    n_active = length(active_nodes)
-    
-    h∇ .= 0
-    
-    n_feats = length(js)
-    n_obs_chunks = cld(length(is), 8)
-    num_threads = n_feats * n_obs_chunks
-    
-    hist_kernel_f! = hist_kernel!(backend)
-    hist_kernel_f!(h∇, ∇, x_bin, nidx, js, is; ndrange = num_threads)
-    
-    find_split! = find_best_split_from_hist_kernel!(backend)
-    find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
-                eltype(gains)(params.lambda), eltype(gains)(params.min_weight);
-                ndrange = max(n_active, 1))
+    if isa(h∇, Array)
+        update_hist_cpu!(h∇, ∇, x_bin, nidx, js, is, active_nodes)
+        find_best_split_cpu!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
+                             Float32(params.lambda), Float32(params.min_weight))
+    else
+        backend = KernelAbstractions.get_backend(h∇)
+        
+        h∇ .= 0
+        
+        n_feats = length(js)
+        n_obs_chunks = cld(length(is), 8)
+        num_threads = n_feats * n_obs_chunks
+        
+        hist_kernel_f! = hist_kernel!(backend)
+        hist_kernel_f!(h∇, ∇, x_bin, nidx, js, is; ndrange = num_threads)
+        
+        find_split! = find_best_split_from_hist_kernel!(backend)
+        find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
+                    eltype(gains)(params.lambda), eltype(gains)(params.min_weight);
+                    ndrange = max(length(active_nodes), 1))
+    end
 end

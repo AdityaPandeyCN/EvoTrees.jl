@@ -94,22 +94,21 @@ function grow_tree!(
         view_feat = view(best_feat_gpu, 1:n_nodes_level)
         
         if depth > 1
-            active_nodes_act = view(active_nodes_full, 1:n_active)  # Define this first
-
+            active_nodes_act = view(active_nodes_full, 1:n_active)
+        
             build_nodes_gpu = KernelAbstractions.zeros(backend, Int32, n_active)
             subtract_nodes_gpu = KernelAbstractions.zeros(backend, Int32, n_active)
             build_count = KernelAbstractions.zeros(backend, Int32, 1)
             subtract_count = KernelAbstractions.zeros(backend, Int32, 1)
-
+        
             separate_kernel! = separate_nodes_kernel!(backend)
             separate_kernel!(
                 build_nodes_gpu, build_count,
                 subtract_nodes_gpu, subtract_count,
-                active_nodes_act;  # Now it's defined
+                active_nodes_act;
                 ndrange=n_active
             )
             
-            # Remove the scalar reads - just launch both kernels unconditionally
             build_nodes_view = view(build_nodes_gpu, 1:n_active)
             update_hist_gpu!(
                 h∇, view_gain, view_bin, view_feat,
@@ -127,7 +126,7 @@ function grow_tree!(
             
             find_split! = find_best_split_from_hist_kernel!(backend)
             find_split!(view_gain, view_bin, view_feat, h∇, nodes_sum_gpu, active_nodes_act, js,
-                      Float32(params.lambda), Float32(params.min_weight); ndrange = n_active)
+                       Float32(params.lambda), Float32(params.min_weight); ndrange = n_active)
         end
 
         n_next_active_gpu .= 0
