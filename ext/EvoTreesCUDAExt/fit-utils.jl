@@ -49,6 +49,7 @@ end
     
     n_feats = length(js)
     n_obs = length(is)
+    n_grads = size(∇, 1)  # Support variable gradient dimensions
     total_work_items = n_feats * cld(n_obs, 8)
     
     if gidx <= total_work_items
@@ -66,12 +67,11 @@ end
             if node > 0 && node <= size(h∇, 4)
                 bin = x_bin[obs, feat]
                 if bin > 0 && bin <= size(h∇, 2)
-                    grad1 = ∇[1, obs]
-                    grad2 = ∇[2, obs]
-                    grad3 = ∇[3, obs]
-                    Atomix.@atomic h∇[1, bin, feat, node] += grad1
-                    Atomix.@atomic h∇[2, bin, feat, node] += grad2
-                    Atomix.@atomic h∇[3, bin, feat, node] += grad3
+                    # Support variable gradient dimensions instead of hard-coded 3
+                    for k in 1:n_grads
+                        grad_val = ∇[k, obs]
+                        Atomix.@atomic h∇[k, bin, feat, node] += grad_val
+                    end
                 end
             end
         end
@@ -86,6 +86,8 @@ end
     nodes_sum,
     @Const(active_nodes),
     @Const(js),
+    @Const(feattypes),
+    @Const(monotone_constraints), # Add monotonic constraints support
     lambda::T,
     min_weight::T,
 ) where {T}
@@ -99,44 +101,75 @@ end
             feats[n_idx] = Int32(0)
         else
             nbins = size(h∇, 2)
+            n_grads = size(h∇, 1)
             
-            p_g1, p_g2, p_w = zero(T), zero(T), zero(T)
+            # Calculate parent node statistics - support variable dimensions
+            p_stats = ntuple(_ -> zero(T), n_grads)
             for j_idx in 1:length(js)
                 f = js[j_idx]
                 for b in 1:nbins
-                    p_g1 += h∇[1, b, f, node]
-                    p_g2 += h∇[2, b, f, node]
-                    p_w  += h∇[3, b, f, node]
+                    for k in 1:n_grads
+                        p_stats = Base.setindex(p_stats, p_stats[k] + h∇[k, b, f, node], k)
+                    end
                 end
             end
-            nodes_sum[1, node] = p_g1
-            nodes_sum[2, node] = p_g2
-            nodes_sum[3, node] = p_w
             
+            # Store parent statistics
+            for k in 1:n_grads
+                nodes_sum[k, node] = p_stats[k]
+            end
+            
+            # Calculate parent gain (assumes first grad is gradient, second is hessian, third is weight)
+            p_g1, p_g2, p_w = p_stats[1], p_stats[2], p_stats[n_grads]
             gain_p = p_g1^2 / (p_g2 + lambda * p_w + T(1e-8))
             
             g_best, b_best, f_best = T(-Inf), Int32(0), Int32(0)
             
             for j_idx in 1:length(js)
                 f = js[j_idx]
-                s1, s2, s3 = zero(T), zero(T), zero(T)
-                for b in 1:(nbins - 1)
-                    s1 += h∇[1, b, f, node]
-                    s2 += h∇[2, b, f, node]
-                    s3 += h∇[3, b, f, node]
+                constraint = monotone_constraints[f]
+                feattype = feattypes[f]
+                
+                # Initialize left statistics
+                l_stats = ntuple(_ -> zero(T), n_grads)
+                
+                split_end = feattype ? (nbins - 1) : nbins  # Handle categorical vs numerical
+                
+                for b in 1:split_end
+                    # Accumulate left statistics
+                    for k in 1:n_grads
+                        l_stats = Base.setindex(l_stats, l_stats[k] + h∇[k, b, f, node], k)
+                    end
                     
-                    if s3 >= min_weight && (p_w - s3) >= min_weight
-                        l_g1, l_g2 = s1, s2
+                    l_w = l_stats[n_grads]  # weight is last element
+                    r_w = p_w - l_w
+                    
+                    if l_w >= min_weight && r_w >= min_weight
+                        l_g1, l_g2 = l_stats[1], l_stats[2]
                         r_g1, r_g2 = p_g1 - l_g1, p_g2 - l_g2
                         
-                        gain_l = l_g1^2 / (s3 * lambda + l_g2 + T(1e-8))
-                        gain_r = r_g1^2 / ((p_w - s3) * lambda + r_g2 + T(1e-8))
+                        # Check monotonic constraints
+                        valid_split = true
+                        if constraint != 0
+                            # Calculate predictions for constraint checking
+                            pred_l = -l_g1 / (l_g2 + lambda * l_w + T(1e-8))
+                            pred_r = -r_g1 / (r_g2 + lambda * r_w + T(1e-8))
+                            
+                            valid_split = (constraint == 0) || 
+                                        (constraint == -1 && pred_l > pred_r) || 
+                                        (constraint == 1 && pred_l < pred_r)
+                        end
                         
-                        g = gain_l + gain_r - gain_p
-                        if g > g_best
-                            g_best = g
-                            b_best = Int32(b)
-                            f_best = Int32(f)
+                        if valid_split
+                            gain_l = l_g1^2 / (l_w * lambda + l_g2 + T(1e-8))
+                            gain_r = r_g1^2 / (r_w * lambda + r_g2 + T(1e-8))
+                            
+                            g = gain_l + gain_r - gain_p
+                            if g > g_best
+                                g_best = g
+                                b_best = Int32(b)
+                                f_best = Int32(f)
+                            end
                         end
                     end
                 end
@@ -154,15 +187,17 @@ end
     @Const(active_nodes)
 )
     idx = @index(Global)
-    @inbounds node = active_nodes[idx]
-    
-    if node > 0
-        if idx % 2 == 1
-            pos = Atomix.@atomic build_count[1] += 1
-            build_nodes[pos] = node
-        else
-            pos = Atomix.@atomic subtract_count[1] += 1
-            subtract_nodes[pos] = node
+    @inbounds if idx <= length(active_nodes)
+        node = active_nodes[idx]
+        
+        if node > 0
+            if idx % 2 == 1
+                pos = Atomix.@atomic build_count[1] += 1
+                build_nodes[pos] = node
+            else
+                pos = Atomix.@atomic subtract_count[1] += 1
+                subtract_nodes[pos] = node
+            end
         end
     end
 end
@@ -210,11 +245,21 @@ function update_hist_gpu!(
     n_obs_chunks = cld(length(is), 8)
     num_threads = n_feats * n_obs_chunks
     
-    hist_kernel_f! = hist_kernel!(backend)
+    # Fix: Specify workgroup size (256 is typical for GPU)
+    workgroup_size = 256
+    hist_kernel_f! = hist_kernel!(backend, workgroup_size)
     hist_kernel_f!(h∇, ∇, x_bin, nidx, js, is; ndrange = num_threads)
     
-    find_split! = find_best_split_from_hist_kernel!(backend)
+    # Fix: Add synchronization
+    KernelAbstractions.synchronize(backend)
+    
+    find_split! = find_best_split_from_hist_kernel!(backend, workgroup_size)
     find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
+                params.feattypes_gpu, params.monotone_constraints_gpu,  # Add missing parameters
                 eltype(gains)(params.lambda), eltype(gains)(params.min_weight);
                 ndrange = max(n_active, 1))
+                
+    # Fix: Add synchronization
+    KernelAbstractions.synchronize(backend)
 end
+

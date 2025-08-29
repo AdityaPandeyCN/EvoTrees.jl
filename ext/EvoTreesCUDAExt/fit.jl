@@ -46,6 +46,10 @@ function grow_tree!(
 ) where {L,K}
 
     backend = KernelAbstractions.get_backend(x_bin)
+    workgroup_size = 256  # Standard GPU workgroup size
+
+    # Support variable gradient dimensions
+    n_grads = size(∇, 1)
 
     tree_split_gpu = KernelAbstractions.zeros(backend, Bool, length(tree.split))
     tree_cond_bin_gpu = KernelAbstractions.zeros(backend, UInt8, length(tree.cond_bin))
@@ -54,7 +58,8 @@ function grow_tree!(
     tree_pred_gpu = KernelAbstractions.zeros(backend, Float32, size(tree.pred, 1), size(tree.pred, 2))
 
     max_nodes_total = 2^(params.max_depth + 1)
-    nodes_sum_gpu = KernelAbstractions.zeros(backend, Float32, 3, max_nodes_total)
+    # Fix: Use variable gradient dimensions instead of hard-coded 3
+    nodes_sum_gpu = KernelAbstractions.zeros(backend, Float32, n_grads, max_nodes_total)
     nodes_gain_gpu = KernelAbstractions.zeros(backend, Float32, max_nodes_total)
 
     max_nodes_level = 2^params.max_depth
@@ -75,7 +80,10 @@ function grow_tree!(
         1, view(anodes_gpu, 1:1), nodes_sum_gpu, params,
         left_nodes_buf, right_nodes_buf, target_mask_buf
     )
-    get_gain_gpu!(backend)(nodes_gain_gpu, nodes_sum_gpu, view(anodes_gpu, 1:1), Float32(params.lambda); ndrange=1)
+    
+    get_gain_gpu_kernel! = get_gain_gpu!(backend, workgroup_size)
+    get_gain_gpu_kernel!(nodes_gain_gpu, nodes_sum_gpu, view(anodes_gpu, 1:1), Float32(params.lambda); ndrange=1)
+    KernelAbstractions.synchronize(backend)
 
     n_active = 1
 
@@ -94,22 +102,23 @@ function grow_tree!(
         view_feat = view(best_feat_gpu, 1:n_nodes_level)
         
         if depth > 1
-            active_nodes_act = view(active_nodes_full, 1:n_active)  # Define this first
+            active_nodes_act = view(active_nodes_full, 1:n_active)
 
             build_nodes_gpu = KernelAbstractions.zeros(backend, Int32, n_active)
             subtract_nodes_gpu = KernelAbstractions.zeros(backend, Int32, n_active)
             build_count = KernelAbstractions.zeros(backend, Int32, 1)
             subtract_count = KernelAbstractions.zeros(backend, Int32, 1)
 
-            separate_kernel! = separate_nodes_kernel!(backend)
+            # Fix: Add workgroup size
+            separate_kernel! = separate_nodes_kernel!(backend, workgroup_size)
             separate_kernel!(
                 build_nodes_gpu, build_count,
                 subtract_nodes_gpu, subtract_count,
-                active_nodes_act;  # Now it's defined
+                active_nodes_act;
                 ndrange=n_active
             )
+            KernelAbstractions.synchronize(backend)
             
-            # Remove the scalar reads - just launch both kernels unconditionally
             build_nodes_view = view(build_nodes_gpu, 1:n_active)
             update_hist_gpu!(
                 h∇, view_gain, view_bin, view_feat,
@@ -119,15 +128,18 @@ function grow_tree!(
             )
             
             subtract_nodes_view = view(subtract_nodes_gpu, 1:n_active)
-            subtract_kernel! = subtract_hist_kernel!(backend)
+            # Fix: Add workgroup size
+            subtract_kernel! = subtract_hist_kernel!(backend, workgroup_size)
             n_work = n_active * size(h∇, 1) * size(h∇, 2) * size(h∇, 3)
             subtract_kernel!(h∇, subtract_nodes_view; ndrange = n_work)
-            
             KernelAbstractions.synchronize(backend)
             
-            find_split! = find_best_split_from_hist_kernel!(backend)
+            # Fix: Add workgroup size  
+            find_split! = find_best_split_from_hist_kernel!(backend, workgroup_size)
             find_split!(view_gain, view_bin, view_feat, h∇, nodes_sum_gpu, active_nodes_act, js,
+                      feattypes_gpu, params.monotone_constraints_gpu,  # Add missing parameters
                       Float32(params.lambda), Float32(params.min_weight); ndrange = n_active)
+            KernelAbstractions.synchronize(backend)
         end
 
         n_next_active_gpu .= 0
@@ -137,16 +149,19 @@ function grow_tree!(
 
         active_nodes_act = view(active_nodes_full, 1:n_active)
 
-        apply_splits_kernel!(backend)(
+        # Fix: Add workgroup size
+        apply_splits_kernel_func! = apply_splits_kernel!(backend, workgroup_size)
+        apply_splits_kernel_func!(
             tree_split_gpu, tree_cond_bin_gpu, tree_feat_gpu, tree_gain_gpu, tree_pred_gpu,
             nodes_sum_gpu, nodes_gain_gpu,
             n_next_gpu, n_next_active_gpu,
             view_gain_act, view_bin_act, view_feat_act,
             h∇,
             active_nodes_act,
-            depth, params.max_depth, Float32(params.lambda), Float32(params.gamma);
+            depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), n_grads;  # Add n_grads
             ndrange = n_active
         )
+        KernelAbstractions.synchronize(backend)
         
         n_active = min(2 * n_active, 2^depth)
         if n_active > 0
@@ -154,10 +169,13 @@ function grow_tree!(
         end
 
         if depth < params.max_depth && n_active > 0
-            update_nodes_idx_kernel!(backend)(
+            # Fix: Add workgroup size
+            update_nodes_kernel! = update_nodes_idx_kernel!(backend, workgroup_size)
+            update_nodes_kernel!(
                 nidx, is, x_bin, tree_feat_gpu, tree_cond_bin_gpu, feattypes_gpu;
                 ndrange = length(is)
             )
+            KernelAbstractions.synchronize(backend)
         end
     end
 
@@ -176,6 +194,7 @@ function grow_tree!(
     return nothing
 end
 
+# Fix: Support variable gradient dimensions
 @kernel function apply_splits_kernel!(
     tree_split, tree_cond_bin, tree_feat, tree_gain, tree_pred,
     nodes_sum, nodes_gain,
@@ -183,7 +202,7 @@ end
     best_gain, best_bin, best_feat,
     h∇,
     active_nodes,
-    depth, max_depth, lambda, gamma
+    depth, max_depth, lambda, gamma, n_grads
 )
     n_idx = @index(Global)
     node = active_nodes[n_idx]
@@ -199,33 +218,31 @@ end
         child_l, child_r = node << 1, (node << 1) + 1
         feat, bin = Int(tree_feat[node]), Int(tree_cond_bin[node])
 
-        s1 = zero(eltype(nodes_sum)); s2 = zero(eltype(nodes_sum)); s3 = zero(eltype(nodes_sum))
-        @inbounds for b in 1:bin
-            s1 += h∇[1, b, feat, node]
-            s2 += h∇[2, b, feat, node]
-            s3 += h∇[3, b, feat, node]
+        # Fix: Support variable gradient dimensions
+        for k in 1:n_grads
+            s_k = zero(eltype(nodes_sum))
+            @inbounds for b in 1:bin
+                s_k += h∇[k, b, feat, node]
+            end
+            nodes_sum[k, child_l] = s_k
+            nodes_sum[k, child_r] = nodes_sum[k, node] - s_k
         end
-        nodes_sum[1, child_l] = s1
-        nodes_sum[2, child_l] = s2
-        nodes_sum[3, child_l] = s3
-        
-        nodes_sum[1, child_r] = nodes_sum[1, node] - nodes_sum[1, child_l]
-        nodes_sum[2, child_r] = nodes_sum[2, node] - nodes_sum[2, child_l]
-        nodes_sum[3, child_r] = nodes_sum[3, node] - nodes_sum[3, child_l]
 
-        p1_l, p2_l, w_l = nodes_sum[1, child_l], nodes_sum[2, child_l], nodes_sum[3, child_l]
+        # Calculate gains (assumes gradient[1], hessian[2], weight[n_grads])
+        p1_l, p2_l, w_l = nodes_sum[1, child_l], nodes_sum[2, child_l], nodes_sum[n_grads, child_l]
         nodes_gain[child_l] = p1_l^2 / (p2_l + lambda * w_l + epsv)
-        p1_r, p2_r, w_r = nodes_sum[1, child_r], nodes_sum[2, child_r], nodes_sum[3, child_r]
+        p1_r, p2_r, w_r = nodes_sum[1, child_r], nodes_sum[2, child_r], nodes_sum[n_grads, child_r]
         nodes_gain[child_r] = p1_r^2 / (p2_r + lambda * w_r + epsv)
         
         idx_base = Atomix.@atomic n_next_active[1] += 2
         n_next[idx_base - 1] = child_l
         n_next[idx_base] = child_r
 
-        tree_pred[1, child_l] = - (nodes_sum[1, child_l]) / (nodes_sum[2, child_l] + lambda * nodes_sum[3, child_l] + epsv)
-        tree_pred[1, child_r] = - (nodes_sum[1, child_r]) / (nodes_sum[2, child_r] + lambda * nodes_sum[3, child_r] + epsv)
+        tree_pred[1, child_l] = -(nodes_sum[1, child_l]) / (nodes_sum[2, child_l] + lambda * nodes_sum[n_grads, child_l] + epsv)
+        tree_pred[1, child_r] = -(nodes_sum[1, child_r]) / (nodes_sum[2, child_r] + lambda * nodes_sum[n_grads, child_r] + epsv)
     else
-        g, h, w = nodes_sum[1, node], nodes_sum[2, node], nodes_sum[3, node]
+        # Calculate leaf prediction with variable dimensions
+        g, h, w = nodes_sum[1, node], nodes_sum[2, node], nodes_sum[n_grads, node]
         if w <= zero(w) || h + lambda * w <= zero(h)
             tree_pred[1, node] = 0.0f0
         else
@@ -237,8 +254,10 @@ end
 @kernel function get_gain_gpu!(nodes_gain::AbstractVector{T}, nodes_sum::AbstractArray{T,2}, nodes, lambda::T) where {T}
     n_idx = @index(Global)
     node = nodes[n_idx]
+    n_grads = size(nodes_sum, 1)
     @inbounds p1 = nodes_sum[1, node]
     @inbounds p2 = nodes_sum[2, node]
-    @inbounds w = nodes_sum[3, node]
+    @inbounds w = nodes_sum[n_grads, node]  # Weight is last gradient dimension
     @inbounds nodes_gain[node] = p1^2 / (p2 + lambda * w + T(1e-8))
 end
+
