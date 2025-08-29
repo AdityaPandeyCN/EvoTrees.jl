@@ -134,15 +134,6 @@ function pred_scalar(∑::AbstractVector{T}, ::Type{L}, params::EvoTypes) where 
     return -params.eta / params.bagging_size * ∑[1] / max(ϵ, (∑[2] + params.lambda * ∑[3] + params.L2))
 end
 
-# Cred predictions
-function pred_leaf_cpu!(p::Matrix, n, ∑::AbstractVector{T}, ::Type{L}, params::EvoTypes) where {L<:Cred,T}
-    p[1, n] = params.eta / params.bagging_size * ∑[1] / (∑[3] + params.L2)
-    return nothing
-end
-function pred_scalar(∑::AbstractVector{T}, ::Type{L}, params::EvoTypes) where {L<:Cred,T}
-    return params.eta / params.bagging_size * ∑[1] / (∑[3] + params.L2)
-end
-
 # prediction in Leaf - MLE2P
 function pred_leaf_cpu!(p::Matrix, n, ∑::AbstractVector{T}, ::Type{L}, params::EvoTypes) where {L<:MLE2P,T}
     ϵ = eps(T)
