@@ -16,8 +16,8 @@ tree_type = "binary"
 T = Float64
 nthreads = Base.Threads.nthreads()
 
-device_list = [:cpu, :gpu]
-# device_list = [:gpu]
+# device_list = [:cpu, :gpu]
+device_list = [:gpu]
 
 # nobs_list = Int.([1e5, 1e6, 1e7])
 nobs_list = Int.([1e6])
@@ -131,3 +131,4 @@ for device in device_list
     path = joinpath(@__DIR__, "results", "regressor-$device.csv")
     CSV.write(path, df)
 end
+
