@@ -49,7 +49,7 @@ end
     
     n_feats = length(js)
     n_obs = length(is)
-    n_grads = size(∇, 1)  # Support variable gradient dimensions
+    n_grads = size(∇, 1)
     total_work_items = n_feats * cld(n_obs, 8)
     
     if gidx <= total_work_items
@@ -67,7 +67,6 @@ end
             if node > 0 && node <= size(h∇, 4)
                 bin = x_bin[obs, feat]
                 if bin > 0 && bin <= size(h∇, 2)
-                    # Support variable gradient dimensions instead of hard-coded 3
                     for k in 1:n_grads
                         grad_val = ∇[k, obs]
                         Atomix.@atomic h∇[k, bin, feat, node] += grad_val
@@ -87,7 +86,7 @@ end
     @Const(active_nodes),
     @Const(js),
     @Const(feattypes),
-    @Const(monotone_constraints), # Add monotonic constraints support
+    @Const(monotone_constraints),
     lambda::T,
     min_weight::T,
 ) where {T}
@@ -103,7 +102,6 @@ end
             nbins = size(h∇, 2)
             n_grads = size(h∇, 1)
             
-            # Calculate parent node statistics - support variable dimensions
             p_stats = ntuple(_ -> zero(T), n_grads)
             for j_idx in 1:length(js)
                 f = js[j_idx]
@@ -114,12 +112,10 @@ end
                 end
             end
             
-            # Store parent statistics
             for k in 1:n_grads
                 nodes_sum[k, node] = p_stats[k]
             end
             
-            # Calculate parent gain (assumes first grad is gradient, second is hessian, third is weight)
             p_g1, p_g2, p_w = p_stats[1], p_stats[2], p_stats[n_grads]
             gain_p = p_g1^2 / (p_g2 + lambda * p_w + T(1e-8))
             
@@ -130,28 +126,24 @@ end
                 constraint = monotone_constraints[f]
                 feattype = feattypes[f]
                 
-                # Initialize left statistics
                 l_stats = ntuple(_ -> zero(T), n_grads)
                 
-                split_end = feattype ? (nbins - 1) : nbins  # Handle categorical vs numerical
+                split_end = feattype ? (nbins - 1) : nbins
                 
                 for b in 1:split_end
-                    # Accumulate left statistics
                     for k in 1:n_grads
                         l_stats = Base.setindex(l_stats, l_stats[k] + h∇[k, b, f, node], k)
                     end
                     
-                    l_w = l_stats[n_grads]  # weight is last element
+                    l_w = l_stats[n_grads]
                     r_w = p_w - l_w
                     
                     if l_w >= min_weight && r_w >= min_weight
                         l_g1, l_g2 = l_stats[1], l_stats[2]
                         r_g1, r_g2 = p_g1 - l_g1, p_g2 - l_g2
                         
-                        # Check monotonic constraints
                         valid_split = true
                         if constraint != 0
-                            # Calculate predictions for constraint checking
                             pred_l = -l_g1 / (l_g2 + lambda * l_w + T(1e-8))
                             pred_r = -r_g1 / (r_g2 + lambda * r_w + T(1e-8))
                             
@@ -234,7 +226,7 @@ end
 
 function update_hist_gpu!(
     h∇, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
-    left_nodes_buf, right_nodes_buf, target_mask_buf
+    feattypes_gpu, left_nodes_buf, right_nodes_buf, target_mask_buf
 )
     backend = KernelAbstractions.get_backend(h∇)
     n_active = length(active_nodes)
@@ -245,21 +237,18 @@ function update_hist_gpu!(
     n_obs_chunks = cld(length(is), 8)
     num_threads = n_feats * n_obs_chunks
     
-    # Fix: Specify workgroup size (256 is typical for GPU)
     workgroup_size = 256
     hist_kernel_f! = hist_kernel!(backend, workgroup_size)
     hist_kernel_f!(h∇, ∇, x_bin, nidx, js, is; ndrange = num_threads)
     
-    # Fix: Add synchronization
     KernelAbstractions.synchronize(backend)
     
     find_split! = find_best_split_from_hist_kernel!(backend, workgroup_size)
     find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
-                params.feattypes_gpu, params.monotone_constraints_gpu,  # Add missing parameters
+                feattypes_gpu, params.monotone_constraints_gpu,
                 eltype(gains)(params.lambda), eltype(gains)(params.min_weight);
                 ndrange = max(n_active, 1))
                 
-    # Fix: Add synchronization
     KernelAbstractions.synchronize(backend)
 end
 
