@@ -218,3 +218,4 @@ function update_hist_gpu!(
                 eltype(gains)(params.lambda), eltype(gains)(params.min_weight);
                 ndrange = max(n_active, 1))
 end
+

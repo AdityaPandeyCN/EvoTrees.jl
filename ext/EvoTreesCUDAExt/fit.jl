@@ -1,32 +1,55 @@
-function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.EvoTypes{L}, ::Type{<:EvoTrees.GPU}) where {L,K}
+function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache::CacheGPU, params::EvoTrees.EvoTypes) where {L,K}
     EvoTrees.update_grads!(cache.∇, cache.pred, cache.y, params)
-    is = EvoTrees.subsample(cache.is_in, cache.is_out, cache.mask, params.rowsample, params.rng)
     
-    js_cpu = Vector{eltype(cache.js)}(undef, length(cache.js))
-    EvoTrees.sample!(params.rng, cache.js_, js_cpu, replace=false, ordered=true)
-    copyto!(cache.js, js_cpu)  
-
-    tree = EvoTrees.Tree{L,K}(params.max_depth)
-    grow! = params.tree_type == "oblivious" ? grow_otree! : grow_tree!
-    grow!(
-        tree,
-        params,
-        cache.∇,
-        cache.edges,
-        cache.nidx,
-        is,
-        cache.js,  
-        cache.h∇,
-        cache.x_bin,
-        cache.feattypes_gpu,
-        cache.left_nodes_buf,
-        cache.right_nodes_buf,
-        cache.target_mask_buf,
-    )
-    push!(evotree.trees, tree)
-    EvoTrees.predict!(cache.pred, tree, cache.x_bin, cache.feattypes_gpu)
-    cache[:info][:nrounds] += 1
+    for _ in 1:params.bagging_size
+        is = EvoTrees.subsample(cache.is_in, cache.is_out, cache.mask, params.rowsample, params.rng)
+        
+        js_cpu = Vector{eltype(cache.js)}(undef, length(cache.js))
+        EvoTrees.sample!(params.rng, cache.js_, js_cpu, replace=false, ordered=true)
+        copyto!(cache.js, js_cpu)
+        
+        tree = EvoTrees.Tree{L,K}(params.max_depth)
+        grow! = params.tree_type == :oblivious ? grow_otree! : grow_tree!
+        grow!(
+            tree,
+            params,
+            cache.∇,
+            cache.edges,
+            cache.nidx,
+            is,
+            cache.js,
+            cache.h∇,
+            cache.x_bin,
+            cache.feattypes_gpu,
+            cache.left_nodes_buf,
+            cache.right_nodes_buf,
+            cache.target_mask_buf,
+        )
+        push!(evotree.trees, tree)
+        EvoTrees.predict!(cache.pred, tree, cache.x_bin, cache.feattypes_gpu)
+    end
+    
+    evotree.info[:nrounds] += 1
     return nothing
+end
+
+function grow_otree!(
+    tree::EvoTrees.Tree{L,K},
+    params::EvoTrees.EvoTypes{L},
+    ∇::CuMatrix,
+    edges,
+    nidx::CuVector,
+    is::CuVector,
+    js::CuVector,
+    h∇::CuArray,
+    x_bin::CuMatrix,
+    feattypes_gpu::CuVector{Bool},
+    left_nodes_buf::CuArray{Int32},
+    right_nodes_buf::CuArray{Int32},
+    target_mask_buf::CuArray{UInt8},
+) where {L,K}
+    @warn "Oblivious tree GPU implementation not yet available, using standard tree" maxlog=1
+    grow_tree!(tree, params, ∇, edges, nidx, is, js, h∇, x_bin, feattypes_gpu, left_nodes_buf, right_nodes_buf, target_mask_buf)
 end
 
 function grow_tree!(
@@ -94,7 +117,7 @@ function grow_tree!(
         view_feat = view(best_feat_gpu, 1:n_nodes_level)
         
         if depth > 1
-            active_nodes_act = view(active_nodes_full, 1:n_active)  # Define this first
+            active_nodes_act = view(active_nodes_full, 1:n_active)
 
             build_nodes_gpu = KernelAbstractions.zeros(backend, Int32, n_active)
             subtract_nodes_gpu = KernelAbstractions.zeros(backend, Int32, n_active)
@@ -105,11 +128,10 @@ function grow_tree!(
             separate_kernel!(
                 build_nodes_gpu, build_count,
                 subtract_nodes_gpu, subtract_count,
-                active_nodes_act;  # Now it's defined
+                active_nodes_act;
                 ndrange=n_active
             )
             
-            # Remove the scalar reads - just launch both kernels unconditionally
             build_nodes_view = view(build_nodes_gpu, 1:n_active)
             update_hist_gpu!(
                 h∇, view_gain, view_bin, view_feat,
@@ -242,3 +264,4 @@ end
     @inbounds w = nodes_sum[3, node]
     @inbounds nodes_gain[node] = p1^2 / (p2 + lambda * w + T(1e-8))
 end
+
