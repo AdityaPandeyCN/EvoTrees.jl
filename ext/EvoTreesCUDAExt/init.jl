@@ -79,7 +79,7 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes{L}, ::Type{<:EvoTrees.GPU}
     end
 
     info = Dict(
-        :fnames => fnames,
+        :feature_names => fnames,
         :target_levels => target_levels,
         :edges => edges,
         :featbins => featbins,

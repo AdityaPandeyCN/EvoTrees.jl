@@ -13,7 +13,8 @@ function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
     y::CuVector,
-    ::EvoTrees.EvoTreeRegressor{<:EvoTrees.MSE};
+    ::Type{EvoTrees.MSE},
+    params::EvoTrees.EvoTypes;
     MAX_THREADS=1024
 )
     threads = min(MAX_THREADS, length(y))
@@ -24,7 +25,7 @@ function EvoTrees.update_grads!(
 end
 
 #####################
-# Logistic
+# LogLoss
 #####################
 function kernel_logloss_∇!(∇::CuDeviceMatrix, p::CuDeviceMatrix, y::CuDeviceVector)
     i = threadIdx().x + (blockIdx().x - 1) * blockDim().x
@@ -39,7 +40,8 @@ function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
     y::CuVector,
-    ::EvoTrees.EvoTreeRegressor{<:EvoTrees.LogLoss};
+    ::Type{EvoTrees.LogLoss},
+    params::EvoTrees.EvoTypes;
     MAX_THREADS=1024
 )
     threads = min(MAX_THREADS, length(y))
@@ -65,7 +67,8 @@ function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
     y::CuVector,
-    ::EvoTrees.EvoTreeCount{<:EvoTrees.Poisson};
+    ::Type{EvoTrees.Poisson},
+    params::EvoTrees.EvoTypes;
     MAX_THREADS=1024
 )
     threads = min(MAX_THREADS, length(y))
@@ -91,7 +94,8 @@ function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
     y::CuVector,
-    ::EvoTrees.EvoTreeRegressor{<:EvoTrees.Gamma};
+    ::Type{EvoTrees.Gamma},
+    params::EvoTrees.EvoTypes;
     MAX_THREADS=1024
 )
     threads = min(MAX_THREADS, length(y))
@@ -119,7 +123,8 @@ function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
     y::CuVector,
-    ::EvoTrees.EvoTreeRegressor{<:EvoTrees.Tweedie};
+    ::Type{EvoTrees.Tweedie},
+    params::EvoTrees.EvoTypes;
     MAX_THREADS=1024
 )
     threads = min(MAX_THREADS, length(y))
@@ -157,7 +162,8 @@ function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
     y::CuVector,
-    ::EvoTrees.EvoTreeClassifier{<:EvoTrees.MLogLoss};
+    ::Type{EvoTrees.MLogLoss},
+    params::EvoTrees.EvoTypes;
     MAX_THREADS=1024
 )
     threads = min(MAX_THREADS, length(y))
@@ -189,7 +195,8 @@ function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
     y::CuVector,
-    ::Union{EvoTrees.EvoTreeGaussian{<:EvoTrees.GaussianMLE},EvoTrees.EvoTreeMLE{<:EvoTrees.GaussianMLE}};
+    ::Type{EvoTrees.GaussianMLE},
+    params::EvoTrees.EvoTypes;
     MAX_THREADS=1024
 )
     threads = min(MAX_THREADS, length(y))
