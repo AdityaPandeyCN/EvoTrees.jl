@@ -22,6 +22,7 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache, params::EvoTrees.E
         cache.left_nodes_buf,
         cache.right_nodes_buf,
         cache.target_mask_buf,
+        cache.monotone_constraints_gpu
     )
     push!(evotree.trees, tree)
     EvoTrees.predict!(cache.pred, tree, cache.x_bin, cache.feattypes_gpu)
@@ -43,6 +44,7 @@ function grow_tree!(
     left_nodes_buf::CuArray{Int32},
     right_nodes_buf::CuArray{Int32},
     target_mask_buf::CuArray{UInt8},
+    monotone_constraints_gpu::CuArray{Int32} 
 ) where {L,K}
 
     backend = KernelAbstractions.get_backend(x_bin)
