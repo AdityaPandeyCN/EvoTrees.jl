@@ -234,7 +234,7 @@ end
 
 function update_hist_gpu!(
     h∇, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
-    left_nodes_buf, right_nodes_buf, target_mask_buf
+    left_nodes_buf, right_nodes_buf, target_mask_buf, feattypes_gpu, monotone_constraints_gpu
 )
     backend = KernelAbstractions.get_backend(h∇)
     n_active = length(active_nodes)
@@ -245,21 +245,18 @@ function update_hist_gpu!(
     n_obs_chunks = cld(length(is), 8)
     num_threads = n_feats * n_obs_chunks
     
-    # Fix: Specify workgroup size (256 is typical for GPU)
     workgroup_size = 256
     hist_kernel_f! = hist_kernel!(backend, workgroup_size)
     hist_kernel_f!(h∇, ∇, x_bin, nidx, js, is; ndrange = num_threads)
     
-    # Fix: Add synchronization
     KernelAbstractions.synchronize(backend)
     
     find_split! = find_best_split_from_hist_kernel!(backend, workgroup_size)
     find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
-                params.feattypes_gpu, params.monotone_constraints_gpu,  # Add missing parameters
+                feattypes_gpu, monotone_constraints_gpu,
                 eltype(gains)(params.lambda), eltype(gains)(params.min_weight);
                 ndrange = max(n_active, 1))
                 
-    # Fix: Add synchronization
     KernelAbstractions.synchronize(backend)
 end
 

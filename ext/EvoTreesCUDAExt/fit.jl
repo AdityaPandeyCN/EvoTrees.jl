@@ -78,7 +78,8 @@ function grow_tree!(
         h∇, best_gain_gpu, best_bin_gpu, best_feat_gpu,
         ∇, x_bin, nidx, js, is,
         1, view(anodes_gpu, 1:1), nodes_sum_gpu, params,
-        left_nodes_buf, right_nodes_buf, target_mask_buf
+        left_nodes_buf, right_nodes_buf, target_mask_buf,
+        feattypes_gpu, monotone_constraints_gpu
     )
     
     get_gain_gpu_kernel! = get_gain_gpu!(backend, workgroup_size)
@@ -124,7 +125,8 @@ function grow_tree!(
                 h∇, view_gain, view_bin, view_feat,
                 ∇, x_bin, nidx, js, is,
                 depth, build_nodes_view, nodes_sum_gpu, params,
-                left_nodes_buf, right_nodes_buf, target_mask_buf
+                left_nodes_buf, right_nodes_buf, target_mask_buf,
+                feattypes_gpu, monotone_constraints_gpu
             )
             
             subtract_nodes_view = view(subtract_nodes_gpu, 1:n_active)
