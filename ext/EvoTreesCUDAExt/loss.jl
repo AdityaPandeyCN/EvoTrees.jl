@@ -13,92 +13,12 @@ function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
     y::CuVector,
-    ::Type{EvoTrees.MSE},
-    params::EvoTrees.EvoTypes;
+    ::EvoTrees.EvoTreeRegressor{<:EvoTrees.MSE};
     MAX_THREADS=1024
 )
     threads = min(MAX_THREADS, length(y))
     blocks = cld(length(y), threads)
     @cuda blocks = blocks threads = threads kernel_mse_∇!(∇, p, y)
-    CUDA.synchronize()
-    return
-end
-
-#####################
-# MAE
-#####################
-function kernel_mae_∇!(∇::CuDeviceMatrix, p::CuDeviceMatrix, y::CuDeviceVector)
-    i = threadIdx().x + (blockIdx().x - 1) * blockDim().x
-    if i <= length(y)
-        @inbounds ∇[1, i] = (y[i] - p[1, i]) * ∇[3, i]
-    end
-    return
-end
-function EvoTrees.update_grads!(
-    ∇::CuMatrix,
-    p::CuMatrix,
-    y::CuVector,
-    ::Type{EvoTrees.MAE},
-    params::EvoTrees.EvoTypes;
-    MAX_THREADS=1024
-)
-    threads = min(MAX_THREADS, length(y))
-    blocks = cld(length(y), threads)
-    @cuda blocks = blocks threads = threads kernel_mae_∇!(∇, p, y)
-    CUDA.synchronize()
-    return
-end
-
-#####################
-# Credibility
-#####################
-function kernel_cred_∇!(∇::CuDeviceMatrix, p::CuDeviceMatrix, y::CuDeviceVector)
-    i = threadIdx().x + (blockIdx().x - 1) * blockDim().x
-    if i <= length(y)
-        @inbounds ∇[1, i] = (y[i] - p[1, i]) * ∇[3, i]
-        @inbounds ∇[2, i] = (y[i] - p[1, i])^2 * ∇[3, i]
-    end
-    return
-end
-function EvoTrees.update_grads!(
-    ∇::CuMatrix,
-    p::CuMatrix,
-    y::CuVector,
-    ::Type{<:EvoTrees.Cred},
-    params::EvoTrees.EvoTypes;
-    MAX_THREADS=1024
-)
-    threads = min(MAX_THREADS, length(y))
-    blocks = cld(length(y), threads)
-    @cuda blocks = blocks threads = threads kernel_cred_∇!(∇, p, y)
-    CUDA.synchronize()
-    return
-end
-
-#####################
-# Quantile
-#####################
-function kernel_quantile_∇!(∇::CuDeviceMatrix{T}, p::CuDeviceMatrix{T}, y::CuDeviceVector{T}, alpha::T) where {T<:AbstractFloat}
-    i = threadIdx().x + (blockIdx().x - 1) * blockDim().x
-    if i <= length(y)
-        @inbounds ∇[1, i] = (y[i] - p[1, i]) * ∇[3, i]
-        diff = (y[i] - p[1, i])
-        @inbounds ∇[1, i] = diff > 0 ? alpha * ∇[3, i] : (alpha - 1) * ∇[3, i]
-        @inbounds ∇[2, i] = diff
-    end
-    return
-end
-function EvoTrees.update_grads!(
-    ∇::CuMatrix{T},
-    p::CuMatrix{T},
-    y::CuVector{T},
-    ::Type{EvoTrees.Quantile},
-    params::EvoTrees.EvoTypes;
-    MAX_THREADS=1024
-) where {T<:AbstractFloat}
-    threads = min(MAX_THREADS, length(y))
-    blocks = cld(length(y), threads)
-    @cuda blocks = blocks threads = threads kernel_quantile_∇!(∇, p, y, T(params.alpha))
     CUDA.synchronize()
     return
 end
@@ -119,8 +39,7 @@ function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
     y::CuVector,
-    ::Type{EvoTrees.LogLoss},
-    params::EvoTrees.EvoTypes;
+    ::EvoTrees.EvoTreeRegressor{<:EvoTrees.LogLoss};
     MAX_THREADS=1024
 )
     threads = min(MAX_THREADS, length(y))
@@ -146,8 +65,7 @@ function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
     y::CuVector,
-    ::Type{EvoTrees.Poisson},
-    params::EvoTrees.EvoTypes;
+    ::EvoTrees.EvoTreeCount{<:EvoTrees.Poisson};
     MAX_THREADS=1024
 )
     threads = min(MAX_THREADS, length(y))
@@ -173,8 +91,7 @@ function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
     y::CuVector,
-    ::Type{EvoTrees.Gamma},
-    params::EvoTrees.EvoTypes;
+    ::EvoTrees.EvoTreeRegressor{<:EvoTrees.Gamma};
     MAX_THREADS=1024
 )
     threads = min(MAX_THREADS, length(y))
@@ -202,8 +119,7 @@ function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
     y::CuVector,
-    ::Type{EvoTrees.Tweedie},
-    params::EvoTrees.EvoTypes;
+    ::EvoTrees.EvoTreeRegressor{<:EvoTrees.Tweedie};
     MAX_THREADS=1024
 )
     threads = min(MAX_THREADS, length(y))
@@ -212,7 +128,6 @@ function EvoTrees.update_grads!(
     CUDA.synchronize()
     return
 end
-
 
 #####################
 # Softmax
@@ -242,8 +157,7 @@ function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
     y::CuVector,
-    ::Type{EvoTrees.MLogLoss},
-    params::EvoTrees.EvoTypes;
+    ::EvoTrees.EvoTreeClassifier{<:EvoTrees.MLogLoss};
     MAX_THREADS=1024
 )
     threads = min(MAX_THREADS, length(y))
@@ -252,7 +166,6 @@ function EvoTrees.update_grads!(
     CUDA.synchronize()
     return
 end
-
 
 ################################################################################
 # Gaussian - http://jrmeyer.github.io/machinelearning/2017/08/18/mle.html
@@ -276,8 +189,7 @@ function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
     y::CuVector,
-    ::Type{EvoTrees.GaussianMLE},
-    params::EvoTrees.EvoTypes;
+    ::Union{EvoTrees.EvoTreeGaussian{<:EvoTrees.GaussianMLE},EvoTrees.EvoTreeMLE{<:EvoTrees.GaussianMLE}};
     MAX_THREADS=1024
 )
     threads = min(MAX_THREADS, length(y))
@@ -286,3 +198,4 @@ function EvoTrees.update_grads!(
     CUDA.synchronize()
     return
 end
+
