@@ -35,8 +35,19 @@ function grow_tree!(
     reset_tree_buffers!(cache)
     cache.nidx .= 1
     
-    # Initialize root node processing
-    cache.anodes_gpu[1] = 1
+    # Initialize root node processing using a kernel
+    @kernel function init_root_kernel!(anodes)
+        idx = @index(Global)
+        @inbounds if idx == 1
+            anodes[idx] = 1
+        end
+    end
+    
+    init_root_kernel!(backend)(
+        cache.anodes_gpu;
+        ndrange = 1, workgroupsize = 1
+    )
+    KernelAbstractions.synchronize(backend)
     n_active = 1
     
     # Build histogram for root using h∇L and h∇R for split-build pattern
