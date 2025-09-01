@@ -226,7 +226,7 @@ end
     idx = @index(Global)
     @inbounds if idx <= length(active_nodes)
         node = active_nodes[idx]
-        node == 0 && return
+        if node > 0
         
         eps = eltype(tree_pred)(1e-8)
         
@@ -292,6 +292,7 @@ end
                     tree_pred[k, node] = zero(eltype(tree_pred))
                 end
             end
+        end
         end
     end
 end

@@ -57,25 +57,25 @@ end
     obs_per_thread = 8
     
     total_work = cld(n_obs, obs_per_thread) * n_feats
-    gidx > total_work && return
-    
-    feat_idx = (gidx - 1) % n_feats + 1
-    obs_chunk = (gidx - 1) ÷ n_feats
-    feat = js[feat_idx]
-    
-    start_idx = obs_chunk * obs_per_thread + 1
-    end_idx = min(start_idx + obs_per_thread - 1, n_obs)
-    
-    @inbounds for obs_idx in start_idx:end_idx
-        obs = is[obs_idx]
-        node = nidx[obs]
-        node > 0 && node <= size(h∇, 4) || continue
+    if gidx <= total_work
+        feat_idx = (gidx - 1) % n_feats + 1
+        obs_chunk = (gidx - 1) ÷ n_feats
+        feat = js[feat_idx]
         
-        bin = x_bin[obs, feat]
-        bin > 0 && bin <= size(h∇, 2) || continue
+        start_idx = obs_chunk * obs_per_thread + 1
+        end_idx = min(start_idx + obs_per_thread - 1, n_obs)
         
-        for k in 1:(2*K+1)
-            Atomix.@atomic h∇[k, bin, feat_idx, node] += ∇[k, obs]
+        @inbounds for obs_idx in start_idx:end_idx
+            obs = is[obs_idx]
+            node = nidx[obs]
+            if node > 0 && node <= size(h∇, 4)
+                bin = x_bin[obs, feat]
+                if bin > 0 && bin <= size(h∇, 2)
+                    for k in 1:(2*K+1)
+                        Atomix.@atomic h∇[k, bin, feat_idx, node] += ∇[k, obs]
+                    end
+                end
+            end
         end
     end
 end
@@ -99,94 +99,93 @@ end
     K::Int
 ) where {T}
     n_idx = @index(Global)
-    @inbounds n_idx > length(active_nodes) && return
-    
-    node = active_nodes[n_idx]
-    if node == 0
-        gains[n_idx], bins[n_idx], feats[n_idx] = T(-Inf), Int32(0), Int32(0)
-        return
-    end
-    
-    nbins = size(h∇, 2)
-    eps = T(1e-8)
-    
-    # Compute node statistics
-    for k in 1:(2*K+1)
-        sum_val = zero(T)
-        for j_idx in 1:length(js), b in 1:nbins
-            sum_val += h∇[k, b, j_idx, node]
-        end
-        nodes_sum[k, node] = sum_val
-    end
-    
-    # Parent gain
-    w_p = nodes_sum[2*K+1, node]
-    gain_p = zero(T)
-    for k in 1:K
-        g, h = nodes_sum[k, node], nodes_sum[K+k, node]
-        gain_p += g^2 / (h + lambda * w_p / K + eps)
-    end
-    
-    g_best, b_best, f_best = T(-Inf), Int32(0), Int32(0)
-    
-    # Find best split across features
-    for j_idx in 1:length(js)
-        f = js[j_idx]
-        is_numeric = feattypes[f]
-        constraint = monotone_constraints[f]
-        
-        # Accumulator for cumulative stats
-        cum = zeros(T, 2*K+1)
-        
-        for b in 1:(nbins - 1)
-            # Update cumulative stats
-            if is_numeric
-                for k in 1:(2*K+1)
-                    cum[k] += h∇[k, b, j_idx, node]
+    @inbounds if n_idx <= length(active_nodes)
+        node = active_nodes[n_idx]
+        if node == 0
+            gains[n_idx], bins[n_idx], feats[n_idx] = T(-Inf), Int32(0), Int32(0)
+        else
+            nbins = size(h∇, 2)
+            eps = T(1e-8)
+            
+            # Compute node statistics
+            for k in 1:(2*K+1)
+                sum_val = zero(T)
+                for j_idx in 1:length(js), b in 1:nbins
+                    sum_val += h∇[k, b, j_idx, node]
                 end
-            else
-                # For categorical, each bin is independent
-                for k in 1:(2*K+1)
-                    cum[k] = h∇[k, b, j_idx, node]
-                end
+                nodes_sum[k, node] = sum_val
             end
             
-            l_w, r_w = cum[2*K+1], w_p - cum[2*K+1]
-            l_w >= min_weight && r_w >= min_weight || continue
-            
-            # Check monotonic constraints and compute gain
-            gain_valid = true
-            gain_l = gain_r = zero(T)
-            
+            # Parent gain
+            w_p = nodes_sum[2*K+1, node]
+            gain_p = zero(T)
             for k in 1:K
-                l_g, l_h = cum[k], cum[K+k]
-                r_g, r_h = nodes_sum[k, node] - l_g, nodes_sum[K+k, node] - l_h
+                g, h = nodes_sum[k, node], nodes_sum[K+k, node]
+                gain_p += g^2 / (h + lambda * w_p / K + eps)
+            end
+            
+            g_best, b_best, f_best = T(-Inf), Int32(0), Int32(0)
+            
+            # Find best split across features
+            for j_idx in 1:length(js)
+                f = js[j_idx]
+                is_numeric = feattypes[f]
+                constraint = monotone_constraints[f]
                 
-                # Monotonic constraint check (only on first gradient for simplicity)
-                if k == 1 && constraint != 0
-                    pred_l = -l_g / (l_h + lambda * l_w / K + eps)
-                    pred_r = -r_g / (r_h + lambda * r_w / K + eps)
-                    if (constraint == -1 && pred_l <= pred_r) || 
-                       (constraint == 1 && pred_l >= pred_r)
-                        gain_valid = false
-                        break
+                # Accumulator for cumulative stats
+                cum = zeros(T, 2*K+1)
+                
+                for b in 1:(nbins - 1)
+                    # Update cumulative stats
+                    if is_numeric
+                        for k in 1:(2*K+1)
+                            cum[k] += h∇[k, b, j_idx, node]
+                        end
+                    else
+                        # For categorical, each bin is independent
+                        for k in 1:(2*K+1)
+                            cum[k] = h∇[k, b, j_idx, node]
+                        end
+                    end
+                    
+                    l_w, r_w = cum[2*K+1], w_p - cum[2*K+1]
+                    if l_w >= min_weight && r_w >= min_weight
+                        # Check monotonic constraints and compute gain
+                        gain_valid = true
+                        gain_l = gain_r = zero(T)
+                        
+                        for k in 1:K
+                            l_g, l_h = cum[k], cum[K+k]
+                            r_g, r_h = nodes_sum[k, node] - l_g, nodes_sum[K+k, node] - l_h
+                            
+                            # Monotonic constraint check (only on first gradient for simplicity)
+                            if k == 1 && constraint != 0
+                                pred_l = -l_g / (l_h + lambda * l_w / K + eps)
+                                pred_r = -r_g / (r_h + lambda * r_w / K + eps)
+                                if (constraint == -1 && pred_l <= pred_r) || 
+                                   (constraint == 1 && pred_l >= pred_r)
+                                    gain_valid = false
+                                    break
+                                end
+                            end
+                            
+                            gain_l += l_g^2 / (l_h + lambda * l_w / K + eps)
+                            gain_r += r_g^2 / (r_h + lambda * r_w / K + eps)
+                        end
+                        
+                        if gain_valid
+                            g = gain_l + gain_r - gain_p
+                            if g > g_best
+                                g_best, b_best, f_best = g, Int32(b), Int32(f)
+                            end
+                        end
                     end
                 end
-                
-                gain_l += l_g^2 / (l_h + lambda * l_w / K + eps)
-                gain_r += r_g^2 / (r_h + lambda * r_w / K + eps)
             end
             
-            if gain_valid
-                g = gain_l + gain_r - gain_p
-                if g > g_best
-                    g_best, b_best, f_best = g, Int32(b), Int32(f)
-                end
-            end
+            gains[n_idx], bins[n_idx], feats[n_idx] = g_best, b_best, f_best
         end
     end
-    
-    gains[n_idx], bins[n_idx], feats[n_idx] = g_best, b_best, f_best
 end
 
 # ============================
@@ -199,16 +198,16 @@ end
     @Const(active_nodes)
 )
     idx = @index(Global)
-    @inbounds idx > length(active_nodes) && return
-    
-    node = active_nodes[idx]
-    if node > 0
-        if idx % 2 == 1
-            pos = Atomix.@atomic build_count[1] += 1
-            build_nodes[pos] = node
-        else
-            pos = Atomix.@atomic subtract_count[1] += 1
-            subtract_nodes[pos] = node
+    @inbounds if idx <= length(active_nodes)
+        node = active_nodes[idx]
+        if node > 0
+            if idx % 2 == 1
+                pos = Atomix.@atomic build_count[1] += 1
+                build_nodes[pos] = node
+            else
+                pos = Atomix.@atomic subtract_count[1] += 1
+                subtract_nodes[pos] = node
+            end
         end
     end
 end
@@ -218,21 +217,21 @@ end
     n_elements = size(h∇, 1) * size(h∇, 2) * size(h∇, 3)
     
     node_idx = (gidx - 1) ÷ n_elements + 1
-    node_idx > length(subtract_nodes) && return
-    
-    @inbounds node = subtract_nodes[node_idx]
-    node > 0 || return
-    
-    parent = node >> 1
-    sibling = node ⊻ 1
-    
-    elem_idx = (gidx - 1) % n_elements
-    j = elem_idx ÷ (size(h∇, 1) * size(h∇, 2)) + 1
-    remainder = elem_idx % (size(h∇, 1) * size(h∇, 2))
-    b = remainder ÷ size(h∇, 1) + 1
-    k = remainder % size(h∇, 1) + 1
-    
-    @inbounds h∇[k, b, j, node] = h∇[k, b, j, parent] - h∇[k, b, j, sibling]
+    if node_idx <= length(subtract_nodes)
+        @inbounds node = subtract_nodes[node_idx]
+        if node > 0
+            parent = node >> 1
+            sibling = node ⊻ 1
+            
+            elem_idx = (gidx - 1) % n_elements
+            j = elem_idx ÷ (size(h∇, 1) * size(h∇, 2)) + 1
+            remainder = elem_idx % (size(h∇, 1) * size(h∇, 2))
+            b = remainder ÷ size(h∇, 1) + 1
+            k = remainder % size(h∇, 1) + 1
+            
+            @inbounds h∇[k, b, j, node] = h∇[k, b, j, parent] - h∇[k, b, j, sibling]
+        end
+    end
 end
 
 # ============================
