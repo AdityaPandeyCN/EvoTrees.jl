@@ -116,12 +116,14 @@ end
                 nodes_sum[k, node] = sum_val
             end
             
-            # Parent gain
+            # Parent gain - SUM OVER ALL K
             w_p = nodes_sum[2*K+1, node]
             gain_p = zero(T)
-            # For simplicity, compute gain for first gradient only
-            g, h = nodes_sum[1, node], nodes_sum[K+1, node]
-            gain_p = g^2 / (h + lambda * w_p / K + eps)
+            for k in 1:K  # FIX: Loop over all K
+                g = nodes_sum[k, node]
+                h = nodes_sum[K+k, node]
+                gain_p += g^2 / (h + lambda * w_p / K + eps)
+            end
             
             g_best, b_best, f_best = T(-Inf), Int32(0), Int32(0)
             
@@ -131,48 +133,60 @@ end
                 is_numeric = feattypes[f]
                 constraint = monotone_constraints[f]
                 
-                # Use static array approach for cumulative stats
-                cum_g = zero(T)
-                cum_h = zero(T)
-                cum_w = zero(T)
-                
                 for b in 1:(nbins - 1)
-                    # Update cumulative stats
+                    # Calculate weights
+                    cum_w = zero(T)
                     if is_numeric
-                        cum_g += h∇[1, b, j_idx, node]  # First gradient
-                        cum_h += h∇[K+1, b, j_idx, node]  # First hessian
-                        cum_w += h∇[2*K+1, b, j_idx, node]  # Weight
+                        for bb in 1:b
+                            cum_w += h∇[2*K+1, bb, j_idx, node]
+                        end
                     else
-                        # For categorical, each bin is independent
-                        cum_g = h∇[1, b, j_idx, node]  # First gradient
-                        cum_h = h∇[K+1, b, j_idx, node]  # First hessian
-                        cum_w = h∇[2*K+1, b, j_idx, node]  # Weight
+                        cum_w = h∇[2*K+1, b, j_idx, node]
                     end
                     
                     l_w, r_w = cum_w, w_p - cum_w
                     if l_w >= min_weight && r_w >= min_weight
-                        # Check monotonic constraints and compute gain
                         gain_valid = true
-                        gain_l = gain_r = zero(T)
+                        gain_l = zero(T)
+                        gain_r = zero(T)
                         
-                        # For simplicity, we'll compute gain for the first gradient only
-                        # This can be extended to handle multiple gradients if needed
-                        l_g, l_h = cum_g, cum_h
-                        r_g, r_h = nodes_sum[1, node] - l_g, nodes_sum[K+1, node] - l_h
-                        
-                        # Monotonic constraint check
-                        if constraint != 0
-                            pred_l = -l_g / (l_h + lambda * l_w / K + eps)
-                            pred_r = -r_g / (r_h + lambda * r_w / K + eps)
-                            if (constraint == -1 && pred_l <= pred_r) || 
-                               (constraint == 1 && pred_l >= pred_r)
-                                gain_valid = false
+                        # FIX: Compute gain for ALL K outputs
+                        for k in 1:K
+                            cum_g = zero(T)
+                            cum_h = zero(T)
+                            
+                            if is_numeric
+                                for bb in 1:b
+                                    cum_g += h∇[k, bb, j_idx, node]
+                                    cum_h += h∇[K+k, bb, j_idx, node]
+                                end
+                            else
+                                cum_g = h∇[k, b, j_idx, node]
+                                cum_h = h∇[K+k, b, j_idx, node]
+                            end
+                            
+                            l_g, l_h = cum_g, cum_h
+                            r_g = nodes_sum[k, node] - l_g
+                            r_h = nodes_sum[K+k, node] - l_h
+                            
+                            # Monotonic constraint check (only for first output)
+                            if k == 1 && constraint != 0
+                                pred_l = -l_g / (l_h + lambda * l_w / K + eps)
+                                pred_r = -r_g / (r_h + lambda * r_w / K + eps)
+                                if (constraint == -1 && pred_l <= pred_r) || 
+                                   (constraint == 1 && pred_l >= pred_r)
+                                    gain_valid = false
+                                    break  # Exit k loop
+                                end
+                            end
+                            
+                            if gain_valid
+                                gain_l += l_g^2 / (l_h + lambda * l_w / K + eps)
+                                gain_r += r_g^2 / (r_h + lambda * r_w / K + eps)
                             end
                         end
                         
                         if gain_valid
-                            gain_l = l_g^2 / (l_h + lambda * l_w / K + eps)
-                            gain_r = r_g^2 / (r_h + lambda * r_w / K + eps)
                             g = gain_l + gain_r - gain_p
                             if g > g_best
                                 g_best, b_best, f_best = g, Int32(b), Int32(f)
