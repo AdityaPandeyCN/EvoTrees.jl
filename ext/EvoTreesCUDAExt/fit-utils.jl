@@ -51,26 +51,28 @@ end
     @Const(is),
     K::Int
 ) where {T}
-    tix, tiy, k = @index(Local, NTuple{3})
-    bdx, bdy = @groupsize()
-    bix, biy = @index(Group, NTuple{2})
-    gdx = @gridsize(1)
+    gidx = @index(Global, Linear)
+    n_feats = length(js)
+    n_obs = length(is)
+    obs_per_thread = 8
     
-    j = tiy + bdy * (biy - 1)
-    @inbounds if j <= length(js)
-        jdx = js[j]
-        i_max = length(is)
-        niter = cld(i_max, bdx * gdx)
+    total_work = cld(n_obs, obs_per_thread) * n_feats
+    if gidx <= total_work
+        feat_idx = (gidx - 1) % n_feats + 1
+        obs_chunk = (gidx - 1) ÷ n_feats
+        feat = js[feat_idx]
         
-        for iter = 1:niter
-            i = tix + bdx * (bix - 1) + bdx * gdx * (iter - 1)
-            @inbounds if i <= i_max
-                idx = is[i]
-                node = nidx[idx]
-                @inbounds if node > 0 && node <= size(h∇, 4)
-                    bin = x_bin[idx, jdx]
-                    @inbounds if bin > 0 && bin <= size(h∇, 2)
-                        Atomix.@atomic h∇[k, bin, j, node] += ∇[k, idx]
+        start_idx = obs_chunk * obs_per_thread + 1
+        end_idx = min(start_idx + obs_per_thread - 1, n_obs)
+        
+        @inbounds for obs_idx in start_idx:end_idx
+            obs = is[obs_idx]
+            node = nidx[obs]
+            if node > 0 && node <= size(h∇, 4)
+                bin = x_bin[obs, feat]
+                if bin > 0 && bin <= size(h∇, 2)
+                    for k in 1:(2*K+1)
+                        Atomix.@atomic h∇[k, bin, feat_idx, node] += ∇[k, obs]
                     end
                 end
             end
@@ -259,20 +261,12 @@ function update_hist_gpu!(
     
     h∇ .= 0
     
-    # Build histogram with optimized configuration
-    k = size(h∇, 1)
-    max_threads = 1024
-    ty = max(1, min(length(js), fld(max_threads, k)))
-    tx = min(64, max(1, min(length(is), fld(max_threads, k * ty))))
-    threads = (k, ty, tx)
-    by = cld(length(js), ty)
-    bx = min(65535 ÷ by, cld(length(is), tx))
-    blocks = (1, by, bx)
-    
+    # Build histogram with optimized workgroup size
+    n_work = cld(length(is), 8) * length(js)
     hist_kernel!(backend)(
         h∇, ∇, x_bin, nidx, js, is, K;
-        ndrange = (length(is), length(js), k),
-        workgroupsize = threads
+        ndrange = n_work,
+        workgroupsize = min(512, n_work)
     )
     
     # Apply split-build optimization for deep trees
