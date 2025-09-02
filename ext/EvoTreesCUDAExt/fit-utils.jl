@@ -1,9 +1,8 @@
 using KernelAbstractions
 using Atomix
+using StaticArrays
 
-# ============================
-# Core Kernels - Consolidated
-# ============================
+const MAX_K = 8
 
 @kernel function update_nodes_idx_kernel!(
     nidx::AbstractVector{T},
@@ -38,10 +37,6 @@ end
     end
 end
 
-# ============================
-# Optimized Histogram Building
-# ============================
-
 @kernel function hist_kernel!(
     h∇::AbstractArray{T,4},
     @Const(∇),
@@ -54,7 +49,7 @@ end
     gidx = @index(Global, Linear)
     n_feats = length(js)
     n_obs = length(is)
-    obs_per_thread = 8  # Keep original - the issue is not this
+    obs_per_thread = 8
     
     total_work = cld(n_obs, obs_per_thread) * n_feats
     if gidx <= total_work
@@ -80,10 +75,6 @@ end
     end
 end
 
-# ============================
-# Smart Split Finding - Handles both numeric and categorical
-# ============================
-
 @kernel function find_best_split_from_hist_kernel!(
     gains::AbstractVector{T},
     bins::AbstractVector{Int32},
@@ -107,7 +98,6 @@ end
             nbins = size(h∇, 2)
             eps = T(1e-8)
             
-            # Compute node statistics
             for k in 1:(2*K+1)
                 sum_val = zero(T)
                 for j_idx in 1:length(js), b in 1:nbins
@@ -116,47 +106,99 @@ end
                 nodes_sum[k, node] = sum_val
             end
             
-            # Parent gain
             w_p = nodes_sum[2*K+1, node]
             gain_p = zero(T)
-            # For simplicity, compute gain for first gradient only
-            g, h = nodes_sum[1, node], nodes_sum[K+1, node]
-            gain_p = g^2 / (h + lambda * w_p / K + eps)
-            
+            for k in 1:K
+                g = nodes_sum[k, node]
+                h = nodes_sum[K+k, node]
+                gain_p += g^2 / (h + lambda * w_p / K + eps)
+            end
+
             g_best, b_best, f_best = T(-Inf), Int32(0), Int32(0)
             
-            # Find best split across features
+            cum_g = MVector{MAX_K, T}(undef)
+            cum_h = MVector{MAX_K, T}(undef)
+
             for j_idx in 1:length(js)
                 f = js[j_idx]
                 is_numeric = feattypes[f]
                 constraint = monotone_constraints[f]
-                
-                cum_g = cum_h = cum_w = zero(T)
-                
-                for b in 1:(nbins - 1)
-                    # Update cumulative stats
-                    if is_numeric
-                        cum_g += h∇[1, b, j_idx, node]
-                        cum_h += h∇[K+1, b, j_idx, node]
-                        cum_w += h∇[2*K+1, b, j_idx, node]
-                    else
-                        cum_g = h∇[1, b, j_idx, node]
-                        cum_h = h∇[K+1, b, j_idx, node]
-                        cum_w = h∇[2*K+1, b, j_idx, node]
+
+                if is_numeric
+                    cum_w = zero(T)
+                    for k in 1:K
+                        cum_g[k] = zero(T)
+                        cum_h[k] = zero(T)
                     end
-                    
-                    l_w, r_w = cum_w, w_p - cum_w
-                    if l_w >= min_weight && r_w >= min_weight
-                        l_g, l_h = cum_g, cum_h
-                        r_g, r_h = nodes_sum[1, node] - l_g, nodes_sum[K+1, node] - l_h
+
+                    for b in 1:(nbins - 1)
+                        for k in 1:K
+                            cum_g[k] += h∇[k, b, j_idx, node]
+                            cum_h[k] += h∇[K+k, b, j_idx, node]
+                        end
+                        cum_w += h∇[2*K+1, b, j_idx, node]
                         
-                        # Quick monotonic check
-                        if constraint == 0 || 
-                           (constraint == -1 && -l_g/(l_h + lambda * l_w / K + eps) > -r_g/(r_h + lambda * r_w / K + eps)) ||
-                           (constraint == 1 && -l_g/(l_h + lambda * l_w / K + eps) < -r_g/(r_h + lambda * r_w / K + eps))
-                            g = l_g^2 / (l_h + lambda * l_w / K + eps) + r_g^2 / (r_h + lambda * r_w / K + eps) - gain_p
-                            if g > g_best
-                                g_best, b_best, f_best = g, Int32(b), Int32(f)
+                        l_w, r_w = cum_w, w_p - cum_w
+                        if l_w >= min_weight && r_w >= min_weight
+                            gain_valid = true
+                            if constraint != 0
+                                predL = -cum_g[1] / (cum_h[1] + lambda * l_w / K + eps)
+                                r_g1 = nodes_sum[1, node] - cum_g[1]
+                                r_h1 = nodes_sum[K+1, node] - cum_h[1]
+                                predR = -r_g1 / (r_h1 + lambda * r_w / K + eps)
+                                if (constraint == -1 && predL < predR) || (constraint == 1 && predL > predR)
+                                    gain_valid = false
+                                end
+                            end
+                            
+                            if gain_valid
+                                gain_l, gain_r = zero(T), zero(T)
+                                for k in 1:K
+                                    l_g_k, l_h_k = cum_g[k], cum_h[k]
+                                    r_g_k = nodes_sum[k, node] - l_g_k
+                                    r_h_k = nodes_sum[K+k, node] - l_h_k
+                                    gain_l += l_g_k^2 / (l_h_k + lambda * l_w / K + eps)
+                                    gain_r += r_g_k^2 / (r_h_k + lambda * r_w / K + eps)
+                                end
+                                g = gain_l + gain_r - gain_p
+                                if g > g_best
+                                    g_best, b_best, f_best = g, Int32(b), Int32(f)
+                                end
+                            end
+                        end
+                    end
+                else
+                    for b in 1:(nbins - 1)
+                        l_w = h∇[2*K+1, b, j_idx, node]
+                        r_w = w_p - l_w
+                        if l_w >= min_weight && r_w >= min_weight
+                            gain_valid = true
+                            if constraint != 0
+                                l_g1 = h∇[1, b, j_idx, node]
+                                l_h1 = h∇[K+1, b, j_idx, node]
+                                r_g1 = nodes_sum[1, node] - l_g1
+                                r_h1 = nodes_sum[K+1, node] - l_h1
+                                predL = -l_g1 / (l_h1 + lambda * l_w / K + eps)
+                                predR = -r_g1 / (r_h1 + lambda * r_w / K + eps)
+                                if (constraint == -1 && predL < predR) || (constraint == 1 && predL > predR)
+                                    gain_valid = false
+                                end
+                            end
+
+                            if gain_valid
+                                gain_l, gain_r = zero(T), zero(T)
+                                for k in 1:K
+                                    l_g_k = h∇[k, b, j_idx, node]
+                                    l_h_k = h∇[K+k, b, j_idx, node]
+                                    r_g_k = nodes_sum[k, node] - l_g_k
+                                    r_h_k = nodes_sum[K+k, node] - l_h_k
+                                    gain_l += l_g_k^2 / (l_h_k + lambda * l_w / K + eps)
+                                    gain_r += r_g_k^2 / (r_h_k + lambda * r_w / K + eps)
+                                end
+                                g = gain_l + gain_r - gain_p
+                                if g > g_best
+                                    g_best, b_best, f_best = g, Int32(b), Int32(f)
+                                end
                             end
                         end
                     end
@@ -167,10 +209,6 @@ end
         end
     end
 end
-
-# ============================
-# Split-Build Pattern Helpers
-# ============================
 
 @kernel function separate_nodes_kernel!(
     build_nodes, build_count,
@@ -192,9 +230,9 @@ end
     end
 end
 
-@kernel function subtract_hist_kernel!(h∇L::AbstractArray{T,4}, @Const(subtract_nodes)) where {T}
+@kernel function subtract_hist_kernel!(h∇::AbstractArray{T,4}, @Const(subtract_nodes), n_k, n_b, n_j) where {T}
     gidx = @index(Global)
-    n_elements = size(h∇, 1) * size(h∇, 2) * size(h∇, 3)
+    n_elements = n_k * n_b * n_j
     
     node_idx = (gidx - 1) ÷ n_elements + 1
     if node_idx <= length(subtract_nodes)
@@ -204,19 +242,15 @@ end
             sibling = node ⊻ 1
             
             elem_idx = (gidx - 1) % n_elements
-            j = elem_idx ÷ (size(h∇, 1) * size(h∇, 2)) + 1
-            remainder = elem_idx % (size(h∇, 1) * size(h∇, 2))
-            b = remainder ÷ size(h∇, 1) + 1
-            k = remainder % size(h∇, 1) + 1
+            j = elem_idx ÷ (n_k * n_b) + 1
+            remainder = elem_idx % (n_k * n_b)
+            b = remainder ÷ n_k + 1
+            k = remainder % n_k + 1
             
-            @inbounds h∇L[k, b, j, node] = h∇[k, b, j, parent] - h∇[k, b, j, sibling]
+            @inbounds h∇[k, b, j, node] = h∇[k, b, j, parent] - h∇[k, b, j, sibling]
         end
     end
 end
-
-# ============================
-# Main Update Function - Streamlined
-# ============================
 
 function update_hist_gpu!(
     h∇, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes,
@@ -228,16 +262,14 @@ function update_hist_gpu!(
     
     h∇ .= 0
     
-    # Build histogram with optimized workgroup size
-    n_work = cld(length(is), 8) * length(js)  # Back to original
-    workgroup_size = min(256, n_work)  # Simple approach
+    n_work = cld(length(is), 8) * length(js)
+    workgroup_size = min(256, n_work)
     hist_kernel!(backend)(
         h∇, ∇, x_bin, nidx, js, is, K;
         ndrange = n_work,
         workgroupsize = workgroup_size
     )
     
-    # Apply split-build optimization for deep trees
     if n_active > 16 && depth > 2
         build_count = KernelAbstractions.zeros(backend, Int32, 1)
         subtract_count = KernelAbstractions.zeros(backend, Int32, 1)
@@ -247,20 +279,19 @@ function update_hist_gpu!(
             ndrange = n_active, workgroupsize = min(256, n_active)
         )
         
-        # Only sync when we need the counts
         KernelAbstractions.synchronize(backend)
         
         n_subtract = Array(subtract_count)[1]
         if n_subtract > 0
+            n_k, n_b, n_j = size(h∇, 1), size(h∇, 2), size(h∇, 3)
             subtract_hist_kernel!(backend)(
-                h∇, view(right_nodes_buf, 1:n_subtract);
-                ndrange = n_subtract * size(h∇, 1) * size(h∇, 2) * size(h∇, 3),
+                h∇, view(right_nodes_buf, 1:n_subtract), n_k, n_b, n_j;
+                ndrange = n_subtract * n_k * n_b * n_j,
                 workgroupsize = 256
             )
         end
     end
     
-    # Find best splits
     find_best_split_from_hist_kernel!(backend)(
         gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
         feattypes, monotone_constraints,
@@ -270,7 +301,6 @@ function update_hist_gpu!(
         workgroupsize = min(256, n_active)
     )
     
-    # Only sync at the end when results are needed
     KernelAbstractions.synchronize(backend)
 end
 
