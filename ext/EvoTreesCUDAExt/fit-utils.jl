@@ -51,28 +51,26 @@ end
     @Const(is),
     K::Int
 ) where {T}
-    gidx = @index(Global, Linear)
-    n_feats = length(js)
-    n_obs = length(is)
-    obs_per_thread = 8
+    tix, tiy, k = @index(Local, NTuple{3})
+    bdx, bdy = @groupsize()
+    bix, biy = @index(Group, NTuple{2})
+    gdx = @gridsize(1)
     
-    total_work = cld(n_obs, obs_per_thread) * n_feats
-    if gidx <= total_work
-        feat_idx = (gidx - 1) % n_feats + 1
-        obs_chunk = (gidx - 1) ÷ n_feats
-        feat = js[feat_idx]
+    j = tiy + bdy * (biy - 1)
+    @inbounds if j <= length(js)
+        jdx = js[j]
+        i_max = length(is)
+        niter = cld(i_max, bdx * gdx)
         
-        start_idx = obs_chunk * obs_per_thread + 1
-        end_idx = min(start_idx + obs_per_thread - 1, n_obs)
-        
-        @inbounds for obs_idx in start_idx:end_idx
-            obs = is[obs_idx]
-            node = nidx[obs]
-            if node > 0 && node <= size(h∇, 4)
-                bin = x_bin[obs, feat]
-                if bin > 0 && bin <= size(h∇, 2)
-                    for k in 1:(2*K+1)
-                        Atomix.@atomic h∇[k, bin, feat_idx, node] += ∇[k, obs]
+        for iter = 1:niter
+            i = tix + bdx * (bix - 1) + bdx * gdx * (iter - 1)
+            @inbounds if i <= i_max
+                idx = is[i]
+                node = nidx[idx]
+                @inbounds if node > 0 && node <= size(h∇, 4)
+                    bin = x_bin[idx, jdx]
+                    @inbounds if bin > 0 && bin <= size(h∇, 2)
+                        Atomix.@atomic h∇[k, bin, j, node] += ∇[k, idx]
                     end
                 end
             end
@@ -261,12 +259,20 @@ function update_hist_gpu!(
     
     h∇ .= 0
     
-    # Build histogram
-    n_work = cld(length(is), 8) * length(js)
+    # Build histogram with optimized configuration
+    k = size(h∇, 1)
+    max_threads = 1024
+    ty = max(1, min(length(js), fld(max_threads, k)))
+    tx = min(64, max(1, min(length(is), fld(max_threads, k * ty))))
+    threads = (k, ty, tx)
+    by = cld(length(js), ty)
+    bx = min(65535 ÷ by, cld(length(is), tx))
+    blocks = (1, by, bx)
+    
     hist_kernel!(backend)(
         h∇, ∇, x_bin, nidx, js, is, K;
-        ndrange = n_work,
-        workgroupsize = min(256, n_work)
+        ndrange = (length(is), length(js), k),
+        workgroupsize = threads
     )
     
     # Apply split-build optimization for deep trees
@@ -292,14 +298,14 @@ function update_hist_gpu!(
     
     KernelAbstractions.synchronize(backend)
     
-    # Find best splits
+    # Find best splits with optimized workgroup size
     find_best_split_from_hist_kernel!(backend)(
         gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
         feattypes, monotone_constraints,
         eltype(gains)(params.lambda),
         eltype(gains)(params.min_weight), K;
         ndrange = n_active,
-        workgroupsize = min(256, n_active)
+        workgroupsize = min(512, n_active)
     )
     
     KernelAbstractions.synchronize(backend)
