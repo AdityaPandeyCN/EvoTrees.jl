@@ -192,7 +192,7 @@ end
     end
 end
 
-@kernel function subtract_hist_kernel!(h∇L::AbstractArray{T,4}, @Const(h∇), @Const(subtract_nodes)) where {T}
+@kernel function subtract_hist_kernel!(h∇L::AbstractArray{T,4}, @Const(subtract_nodes)) where {T}
     gidx = @index(Global)
     n_elements = size(h∇, 1) * size(h∇, 2) * size(h∇, 3)
     
@@ -253,7 +253,7 @@ function update_hist_gpu!(
         n_subtract = Array(subtract_count)[1]
         if n_subtract > 0
             subtract_hist_kernel!(backend)(
-                h∇, h∇, view(right_nodes_buf, 1:n_subtract);
+                h∇, view(right_nodes_buf, 1:n_subtract);
                 ndrange = n_subtract * size(h∇, 1) * size(h∇, 2) * size(h∇, 3),
                 workgroupsize = 256
             )
