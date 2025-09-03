@@ -49,7 +49,7 @@ end
     gidx = @index(Global, Linear)
     n_feats = length(js)
     n_obs = length(is)
-    obs_per_thread = 8
+    obs_per_thread = 32
     
     total_work = cld(n_obs, obs_per_thread) * n_feats
     if gidx <= total_work
@@ -270,6 +270,7 @@ function update_hist_gpu!(
         workgroupsize = workgroup_size
     )
     
+    # remove host reads for small levels; use split kernel to skip zeros
     if n_active > 16 && depth > 2
         build_count = KernelAbstractions.zeros(backend, Int32, 1)
         subtract_count = KernelAbstractions.zeros(backend, Int32, 1)
