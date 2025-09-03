@@ -107,9 +107,12 @@ function grow_tree!(
             build_count_val = Array(cache.build_count)[1]
             
             if subtract_count_val > 0
+                n_k = size(cache.h∇, 1)
+                n_b = size(cache.h∇, 2)
+                n_j = size(cache.h∇, 3)
                 subtract_hist_kernel!(backend)(
-                    cache.h∇, cache.subtract_nodes_gpu;
-                    ndrange = subtract_count_val * size(cache.h∇, 1) * size(cache.h∇, 2) * size(cache.h∇, 3), workgroupsize=256
+                    cache.h∇, cache.subtract_nodes_gpu, n_k, n_b, n_j;
+                    ndrange = subtract_count_val * n_k * n_b * n_j, workgroupsize=256
                 )
                 KernelAbstractions.synchronize(backend)
             end
