@@ -1,4 +1,5 @@
 using KernelAbstractions
+using Random
 
 @kernel function subsample_step_1_kernel!(is_in, mask, cond::UInt8, counts, chunk_size::Int)
     bid = @index(Global)
