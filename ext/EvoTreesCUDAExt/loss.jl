@@ -7,7 +7,6 @@
         @inbounds ∇[1, i] = 2 * (p[1, i] - y[i]) * ∇[3, i]
         @inbounds ∇[2, i] = 2 * ∇[3, i]
     end
-    return
 end
 function EvoTrees.update_grads!(
     ∇::CuMatrix,
@@ -35,7 +34,6 @@ end
         @inbounds ∇[1, i] = (pred - y[i]) * ∇[3, i]
         @inbounds ∇[2, i] = pred * (1 - pred) * ∇[3, i]
     end
-    return
 end
 function EvoTrees.update_grads!(
     ∇::CuMatrix,
@@ -63,7 +61,6 @@ end
         @inbounds ∇[1, i] = (pred - y[i]) * ∇[3, i]
         @inbounds ∇[2, i] = pred * ∇[3, i]
     end
-    return
 end
 function EvoTrees.update_grads!(
     ∇::CuMatrix,
@@ -91,7 +88,6 @@ end
         @inbounds ∇[1, i] = 2 * (1 - y[i] / pred) * ∇[3, i]
         @inbounds ∇[2, i] = 2 * y[i] / pred * ∇[3, i]
     end
-    return
 end
 function EvoTrees.update_grads!(
     ∇::CuMatrix,
@@ -121,7 +117,6 @@ end
         @inbounds ∇[2, i] =
             2 * ((2 - rho) * pred^(2 - rho) - (1 - rho) * y[i] * pred^(1 - rho)) * ∇[3, i]
     end
-    return
 end
 function EvoTrees.update_grads!(
     ∇::CuMatrix,
@@ -160,9 +155,7 @@ end
             ∇[k+K, i] = 1 / isum * (1 - iexp / isum) * ∇[end, i]
         end
     end
-    return
 end
-
 function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
@@ -194,9 +187,7 @@ end
         ∇[3, i] = ∇[5, i] / exp(2 * p[2, i])
         ∇[4, i] = 2 * ∇[5, i] / exp(2 * p[2, i]) * (p[1, i] - y[i])^2
     end
-    return
 end
-
 function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
@@ -221,7 +212,6 @@ end
     if i <= length(y)
         @inbounds ∇[1, i] = (y[i] - p[1, i]) * ∇[3, i]
     end
-    return
 end
 function EvoTrees.update_grads!(
     ∇::CuMatrix,
@@ -248,7 +238,6 @@ end
         @inbounds ∇[1, i] = (y[i] - p[1, i]) * ∇[3, i]
         @inbounds ∇[2, i] = (y[i] - p[1, i])^2 * ∇[3, i]
     end
-    return
 end
 function EvoTrees.update_grads!(
     ∇::CuMatrix,
@@ -276,7 +265,6 @@ end
         @inbounds ∇[1, i] = diff > 0 ? alpha * ∇[3, i] : (alpha - 1) * ∇[3, i]
         @inbounds ∇[2, i] = diff
     end
-    return
 end
 function EvoTrees.update_grads!(
     ∇::CuMatrix{T},
