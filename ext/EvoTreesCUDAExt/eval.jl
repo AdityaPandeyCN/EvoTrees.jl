@@ -8,7 +8,6 @@ using KernelAbstractions
     if i <= length(y)
         @inbounds eval[i] = w[i] * (p[1, i] - y[i])^2
     end
-    return nothing
 end
 function EvoTrees.mse(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
@@ -33,7 +32,6 @@ EvoTrees.rmse(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T};
     if i <= length(y)
         @inbounds eval[i] = w[i] * abs(p[1, i] - y[i])
     end
-    return nothing
 end
 function EvoTrees.mae(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
@@ -53,7 +51,6 @@ end
         @inbounds pred = EvoTrees.sigmoid(p[1, i])
         @inbounds eval[i] = w[i] * (-y[i] * log(pred) + (y[i] - 1) * log(1 - pred))
     end
-    return nothing
 end
 function EvoTrees.logloss(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
@@ -72,7 +69,6 @@ end
     if i <= length(y)
         @inbounds eval[i] = -w[i] * (p[2, i] + (y[i] - p[1, i])^2 / (2 * exp(2 * p[2, i])))
     end
-    return nothing
 end
 function EvoTrees.gaussian_mle(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
@@ -93,7 +89,6 @@ end
         @inbounds pred = exp(p[1, i])
         @inbounds eval[i] = w[i] * 2 * (y[i] * log(y[i] / pred + ϵ) + pred - y[i])
     end
-    return nothing
 end
 function EvoTrees.poisson(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
@@ -113,7 +108,6 @@ end
         @inbounds pred = exp(p[1, i])
         @inbounds eval[i] = w[i] * 2 * (log(pred / y[i]) + y[i] / pred - 1)
     end
-    return nothing
 end
 function EvoTrees.gamma(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
@@ -134,7 +128,6 @@ end
         pred = exp(p[1, i])
         @inbounds eval[i] = w[i] * 2 * (y[i]^(2 - rho) / (1 - rho) / (2 - rho) - y[i] * pred^(1 - rho) / (1 - rho) + pred^(2 - rho) / (2 - rho))
     end
-    return nothing
 end
 function EvoTrees.tweedie(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
@@ -158,7 +151,6 @@ end
         end
         @inbounds eval[i] = w[i] * (log(isum) - p[y[i], i])
     end
-    return nothing
 end
 function EvoTrees.mlogloss(p::CuMatrix{T}, y::CuVector, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)

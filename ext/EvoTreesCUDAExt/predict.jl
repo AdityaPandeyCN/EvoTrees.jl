@@ -21,7 +21,6 @@
             pred[k, i] += leaf_pred[k, nid]
         end
     end
-    return nothing
 end
 
 # GradientRegression - K=1 fast path
@@ -45,7 +44,6 @@ end
         end
         pred[1, i] += leaf_pred[1, nid]
     end
-    return nothing
 end
 
 # Logistic - clamp linear predictor per update
@@ -70,7 +68,6 @@ end
         val = pred[1, i] + leaf_pred[1, nid]
         pred[1, i] = min(eltype(pred)(15), max(eltype(pred)(-15), val))
     end
-    return nothing
 end
 
 # MLE2P - clamp second parameter per update
@@ -96,7 +93,6 @@ end
         val2 = pred[2, i] + leaf_pred[2, nid]
         pred[2, i] = max(eltype(pred)(-15), val2)
     end
-    return nothing
 end
 
 # prediction from single tree - assign each observation to its final leaf
@@ -202,7 +198,6 @@ end
             p[k, i] /= isum
         end
     end
-    return nothing
 end
 
 function EvoTrees.softmax!(p::CuMatrix{T}; MAX_THREADS=1024) where {T}
