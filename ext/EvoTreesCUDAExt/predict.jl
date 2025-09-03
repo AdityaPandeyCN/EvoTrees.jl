@@ -156,13 +156,14 @@ function EvoTrees._predict(
     K = m.K
     xb = EvoTrees.binarize(data; feature_names=m.info[:feature_names], edges=m.info[:edges])
     backend = KernelAbstractions.get_backend(CuArray(xb))
-    x_bin = KernelAbstractions.zeros(backend, size(xb,1), size(xb,2))
-    copyto!(x_bin, CuArray(xb))
+    x_bin = KernelAbstractions.zeros(backend, eltype(xb), size(xb,1), size(xb,2))
+    copyto!(x_bin, xb)
     ft = m.info[:feattypes]
     feattypes = KernelAbstractions.zeros(backend, Bool, length(ft))
     copyto!(feattypes, ft)
 
-    pred = KernelAbstractions.zeros(backend, K, size(data, 1))
+    Tpred = eltype(m.trees[1].pred)
+    pred = KernelAbstractions.zeros(backend, Tpred, K, size(data, 1))
     ntrees = length(m.trees)
     ntree_limit > ntrees && error("ntree_limit is larger than number of trees $ntrees.")
 
