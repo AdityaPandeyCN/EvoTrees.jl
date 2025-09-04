@@ -161,3 +161,24 @@ function EvoTrees.mlogloss(p::CuMatrix{T}, y::CuVector, w::CuVector{T}, eval::Cu
     return sum(eval) / sum(w)
 end
 
+########################
+# WMAE (Weighted Mean Absolute Error)
+########################
+@kernel function eval_wmae_kernel!(eval, p, y, w, alpha)
+    i = @index(Global)
+    if i <= length(y)
+        @inbounds eval[i] = w[i] * (
+            alpha * max(y[i] - p[1, i], zero(eltype(p))) +
+            (1 - alpha) * max(p[1, i] - y[i], zero(eltype(p)))
+        )
+    end
+end
+function EvoTrees.wmae(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; alpha=0.5, MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
+    backend = KernelAbstractions.get_backend(p)
+    n = length(y)
+    workgroupsize = min(256, n)
+    eval_wmae_kernel!(backend)(eval, p, y, w, T(alpha); ndrange=n, workgroupsize=workgroupsize)
+    KernelAbstractions.synchronize(backend)
+    return sum(eval) / sum(w)
+end
+
