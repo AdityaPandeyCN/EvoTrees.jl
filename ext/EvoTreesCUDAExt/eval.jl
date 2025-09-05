@@ -179,23 +179,14 @@ end
 #################################################################
 @kernel function eval_quantile_kernel!(eval, p, y, w, alpha)
     i = @index(Global)
-    if i <= length(y)
-        @inbounds diff = y[i] - p[1, i]
-        # Pinball loss formula
-        @inbounds eval[i] = w[i] * (diff >= 0 ? alpha * diff : (1 - alpha) * -diff)
+    @inbounds if i <= length(y)
+        diff = y[i] - p[1, i]
+        eval[i] = w[i] * (diff >= 0 ? alpha * diff : (1 - alpha) * -diff)
     end
 end
 
-function EvoTrees.quantile(
-    p::CuMatrix{T}, 
-    y::CuVector{T}, 
-    w::CuVector{T}, 
-    eval::CuVector{T};
-    alpha=0.5, 
-    MAX_THREADS=1024, 
-    kwargs...
-) where {T<:AbstractFloat}
-    backend = KernelAbstractions.get_backend(p)
+function EvoTrees.quantile(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; alpha=0.5, kwargs...) where {T}
+    backend = get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
     eval_quantile_kernel!(backend)(eval, p, y, w, T(alpha); ndrange=n, workgroupsize=workgroupsize)
@@ -206,9 +197,8 @@ end
 #################################################################
 # Fix: Added missing GPU implementations for Credibility Losses
 #################################################################
-function credibility_metric_gpu(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; kwargs...) where {T<:AbstractFloat}
-    # The evaluation metric for credibility losses is the same as Gaussian Negative Log-Likelihood
-    backend = KernelAbstractions.get_backend(p)
+function credibility_metric_gpu(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; kwargs...) where {T}
+    backend = get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
     eval_gaussian_kernel!(backend)(eval, p, y, w; ndrange=n, workgroupsize=workgroupsize)
@@ -216,8 +206,7 @@ function credibility_metric_gpu(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, 
     return sum(eval) / sum(w)
 end
 
-# Alias wmae to quantile loss metric
-EvoTrees.wmae(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; kwargs...) where {T<:AbstractFloat} = 
+EvoTrees.wmae(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; kwargs...) where {T} = 
     EvoTrees.quantile(p, y, w, eval; kwargs...)
 
 #################################################################
