@@ -1,3 +1,5 @@
+using KernelAbstractions
+
 @kernel function predict_kernel!(
     ::Type{L},
     pred,
@@ -95,7 +97,7 @@ end
     end
 end
 
-# prediction from single tree - assign each observation to its final leaf
+# prediction from single tree
 function EvoTrees.predict!(
     pred::CuMatrix{T},
     tree::EvoTrees.Tree{L,K},
@@ -105,21 +107,24 @@ function EvoTrees.predict!(
 ) where {L,K,T}
     n = size(pred, 2)
     backend = KernelAbstractions.get_backend(pred)
-
+    
     split_dev = KernelAbstractions.zeros(backend, eltype(tree.split), length(tree.split))
     feats_dev = KernelAbstractions.zeros(backend, eltype(tree.feat), length(tree.feat))
     cond_dev = KernelAbstractions.zeros(backend, eltype(tree.cond_bin), length(tree.cond_bin))
     leaf_dev = KernelAbstractions.zeros(backend, eltype(tree.pred), size(tree.pred,1), size(tree.pred,2))
+    
     copyto!(split_dev, tree.split)
     copyto!(feats_dev, tree.feat)
     copyto!(cond_dev, tree.cond_bin)
     copyto!(leaf_dev, tree.pred)
-
+    
     workgroupsize = min(256, n)
-    predict_kernel!(backend)(L, pred, split_dev, feats_dev, cond_dev, leaf_dev, x_bin, feattypes; ndrange=n, workgroupsize=workgroupsize)
+    predict_kernel!(backend)(L, pred, split_dev, feats_dev, cond_dev, leaf_dev, x_bin, feattypes; 
+                             ndrange=n, workgroupsize=workgroupsize)
     KernelAbstractions.synchronize(backend)
 end
 
+# MLogLoss version with normalization
 function EvoTrees.predict!(
     pred::CuMatrix{T},
     tree::EvoTrees.Tree{L,K},
@@ -129,50 +134,53 @@ function EvoTrees.predict!(
 ) where {L<:EvoTrees.MLogLoss,K,T}
     n = size(pred, 2)
     backend = KernelAbstractions.get_backend(pred)
-
+    
     split_dev = KernelAbstractions.zeros(backend, eltype(tree.split), length(tree.split))
     feats_dev = KernelAbstractions.zeros(backend, eltype(tree.feat), length(tree.feat))
     cond_dev = KernelAbstractions.zeros(backend, eltype(tree.cond_bin), length(tree.cond_bin))
     leaf_dev = KernelAbstractions.zeros(backend, eltype(tree.pred), size(tree.pred,1), size(tree.pred,2))
+    
     copyto!(split_dev, tree.split)
     copyto!(feats_dev, tree.feat)
     copyto!(cond_dev, tree.cond_bin)
     copyto!(leaf_dev, tree.pred)
-
+    
     workgroupsize = min(256, n)
-    predict_kernel!(backend)(L, pred, split_dev, feats_dev, cond_dev, leaf_dev, x_bin, feattypes; ndrange=n, workgroupsize=workgroupsize)
+    predict_kernel!(backend)(L, pred, split_dev, feats_dev, cond_dev, leaf_dev, x_bin, feattypes; 
+                             ndrange=n, workgroupsize=workgroupsize)
     KernelAbstractions.synchronize(backend)
-
+    
     pred .= max.(T(-15), pred .- maximum(pred, dims=1))
 end
 
 # prediction for EvoTree model
 function EvoTrees._predict(
-    m::EvoTrees.EvoTree,
+    m::EvoTrees.EvoTree{L,K},
     data,
     ::Type{<:EvoTrees.GPU};
-    ntree_limit=length(m.trees))
-
-    K = m.K
+    ntree_limit=length(m.trees)) where {L,K}
+    
+    EvoTrees.Tables.istable(data) ? data = EvoTrees.Tables.columntable(data) : nothing
+    ntrees = length(m.trees)
+    ntree_limit > ntrees && error("ntree_limit is larger than number of trees $ntrees.")
+    
     xb = EvoTrees.binarize(data; feature_names=m.info[:feature_names], edges=m.info[:edges])
     backend = KernelAbstractions.get_backend(CuArray(xb))
     x_bin = KernelAbstractions.zeros(backend, eltype(xb), size(xb,1), size(xb,2))
     copyto!(x_bin, xb)
+    
     ft = m.info[:feattypes]
     feattypes = KernelAbstractions.zeros(backend, Bool, length(ft))
     copyto!(feattypes, ft)
-
+    
     Tpred = eltype(m.trees[1].pred)
     pred = KernelAbstractions.zeros(backend, Tpred, K, size(data, 1))
-    ntrees = length(m.trees)
-    ntree_limit > ntrees && error("ntree_limit is larger than number of trees $ntrees.")
-
+    
     for i = 1:ntree_limit
         EvoTrees.predict!(pred, m.trees[i], x_bin, feattypes)
     end
     
     # Apply loss-specific transformations
-    L = m.loss_type
     if L == EvoTrees.LogLoss
         pred .= EvoTrees.sigmoid.(pred)
     elseif L ∈ [EvoTrees.Poisson, EvoTrees.Gamma, EvoTrees.Tweedie]
@@ -193,7 +201,7 @@ end
         isum = zero(eltype(p))
         @inbounds for k in 1:K
             p[k, i] = exp(p[k, i])
-            isum += p[k, i]
+            isum += p[k, i] 
         end
         @inbounds for k in 1:K
             p[k, i] /= isum
@@ -208,5 +216,17 @@ function EvoTrees.softmax!(p::CuMatrix{T}; MAX_THREADS=1024) where {T}
     softmax_kernel!(backend)(p; ndrange=nobs, workgroupsize=workgroupsize)
     KernelAbstractions.synchronize(backend)
     return nothing
+end
+
+# Quantile special case
+function quantile_gpu(x::AnyCuVector, alpha)
+    x_sort = sort(x)
+    idx = ceil(Int, alpha * length(x_sort))
+    return CUDA.@allowscalar x_sort[idx]
+end
+
+function EvoTrees.pred_leaf_cpu!(p::Matrix, n, ∑::AbstractVector{T}, ::Type{L}, params::EvoTrees.EvoTypes, ∇::CuMatrix, is) where {L<:EvoTrees.Quantile,T}
+    ϵ = eps(T)
+    p[1, n] = params.eta * quantile_gpu(view(∇, 2, is), params.alpha) / (1 + params.lambda + params.L2 / ∑[3])
 end
 

@@ -1,3 +1,5 @@
+using KernelAbstractions
+
 #####################
 # MSE
 #####################
@@ -8,6 +10,7 @@
         @inbounds ∇[2, i] = 2 * ∇[3, i]
     end
 end
+
 function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
@@ -25,16 +28,74 @@ function EvoTrees.update_grads!(
 end
 
 #####################
+# MAE - FIXED
+#####################
+@kernel function kernel_mae_∇!(∇, p, y)
+    i = @index(Global)
+    if i <= length(y)
+        @inbounds diff = y[i] - p[1, i]
+        @inbounds ∇[1, i] = sign(diff) * ∇[3, i]  # Fixed: use sign function
+        @inbounds ∇[2, i] = eltype(∇)(1e-4) * ∇[3, i]  # Fixed: small constant for Hessian
+    end
+end
+
+function EvoTrees.update_grads!(
+    ∇::CuMatrix,
+    p::CuMatrix,
+    y::CuVector,
+    ::Type{EvoTrees.MAE},
+    params::EvoTrees.EvoTypes;
+    MAX_THREADS=1024
+)
+    backend = KernelAbstractions.get_backend(p)
+    n = length(y)
+    workgroupsize = min(256, n)
+    kernel_mae_∇!(backend)(∇, p, y; ndrange=n, workgroupsize=workgroupsize)
+    KernelAbstractions.synchronize(backend)
+    return
+end
+
+#####################
+# Quantile - FIXED
+#####################
+@kernel function kernel_quantile_∇!(∇, p, y, alpha)
+    i = @index(Global)
+    if i <= length(y)
+        @inbounds diff = y[i] - p[1, i]
+        @inbounds ∇[1, i] = (diff > 0 ? alpha : (alpha - 1)) * ∇[3, i]
+        @inbounds ∇[2, i] = eltype(∇)(1e-4) * ∇[3, i]  # Fixed: small constant instead of diff
+    end
+end
+
+function EvoTrees.update_grads!(
+    ∇::CuMatrix{T},
+    p::CuMatrix{T},
+    y::CuVector{T},
+    ::Type{EvoTrees.Quantile},
+    params::EvoTrees.EvoTypes;
+    MAX_THREADS=1024
+) where {T<:AbstractFloat}
+    backend = KernelAbstractions.get_backend(p)
+    n = length(y)
+    workgroupsize = min(256, n)
+    kernel_quantile_∇!(backend)(∇, p, y, T(params.alpha); ndrange=n, workgroupsize=workgroupsize)
+    KernelAbstractions.synchronize(backend)
+    return
+end
+
+#####################
 # LogLoss
 #####################
 @kernel function kernel_logloss_∇!(∇, p, y)
     i = @index(Global)
+    ϵ = eps(eltype(p))
     if i <= length(y)
-        @inbounds pred = EvoTrees.sigmoid(p[1, i])
+        @inbounds pred = clamp(EvoTrees.sigmoid(p[1, i]), ϵ, 1 - ϵ)  # Added stability
         @inbounds ∇[1, i] = (pred - y[i]) * ∇[3, i]
         @inbounds ∇[2, i] = pred * (1 - pred) * ∇[3, i]
     end
 end
+
 function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
@@ -62,6 +123,7 @@ end
         @inbounds ∇[2, i] = pred * ∇[3, i]
     end
 end
+
 function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
@@ -84,11 +146,12 @@ end
 @kernel function kernel_gamma_∇!(∇, p, y)
     i = @index(Global)
     if i <= length(y)
-        pred = exp(p[1, i])
+        @inbounds pred = exp(p[1, i])
         @inbounds ∇[1, i] = 2 * (1 - y[i] / pred) * ∇[3, i]
         @inbounds ∇[2, i] = 2 * y[i] / pred * ∇[3, i]
     end
 end
+
 function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
@@ -114,10 +177,10 @@ end
     if i <= length(y)
         @inbounds pred = exp(p[1, i])
         @inbounds ∇[1, i] = 2 * (pred^(2 - rho) - y[i] * pred^(1 - rho)) * ∇[3, i]
-        @inbounds ∇[2, i] =
-            2 * ((2 - rho) * pred^(2 - rho) - (1 - rho) * y[i] * pred^(1 - rho)) * ∇[3, i]
+        @inbounds ∇[2, i] = 2 * ((2 - rho) * pred^(2 - rho) - (1 - rho) * y[i] * pred^(1 - rho)) * ∇[3, i]
     end
 end
+
 function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
@@ -152,10 +215,11 @@ end
             else
                 ∇[k, i] = iexp / isum * ∇[end, i]
             end
-            ∇[k+K, i] = 1 / isum * (1 - iexp / isum) * ∇[end, i]
+            ∇[k+K, i] = iexp / isum * (1 - iexp / isum) * ∇[end, i]
         end
     end
 end
+
 function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
@@ -173,21 +237,25 @@ function EvoTrees.update_grads!(
 end
 
 ################################################################################
-# Gaussian - http://jrmeyer.github.io/machinelearning/2017/08/18/mle.html
-# pred[i][1] = μ
-# pred[i][2] = log(σ)
+# Gaussian - FIXED with numerical stability
 ################################################################################
 @kernel function kernel_gauss_∇!(∇, p, y)
     i = @index(Global)
-    @inbounds if i <= length(y)
+    if i <= length(y)
+        # Clamp log_sigma to prevent numerical issues
+        @inbounds log_sigma = clamp(p[2, i], eltype(p)(-10), eltype(p)(10))
+        @inbounds sigma2 = exp(2 * log_sigma)
+        @inbounds diff = p[1, i] - y[i]
+        
         # first order gradients
-        ∇[1, i] = (p[1, i] - y[i]) / exp(2 * p[2, i]) * ∇[5, i]
-        ∇[2, i] = (1 - (p[1, i] - y[i])^2 / exp(2 * p[2, i])) * ∇[5, i]
-        # # second order gradients
-        ∇[3, i] = ∇[5, i] / exp(2 * p[2, i])
-        ∇[4, i] = 2 * ∇[5, i] / exp(2 * p[2, i]) * (p[1, i] - y[i])^2
+        @inbounds ∇[1, i] = diff / sigma2 * ∇[5, i]
+        @inbounds ∇[2, i] = (1 - diff^2 / sigma2) * ∇[5, i]
+        # second order gradients
+        @inbounds ∇[3, i] = ∇[5, i] / sigma2
+        @inbounds ∇[4, i] = 2 * ∇[5, i] * diff^2 / sigma2
     end
 end
+
 function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
@@ -205,79 +273,61 @@ function EvoTrees.update_grads!(
 end
 
 #####################
-# MAE
+# Credibility Variance - NEW CORRECT IMPLEMENTATION
 #####################
-@kernel function kernel_mae_∇!(∇, p, y)
+@kernel function kernel_cred_var_∇!(∇, p, y, lambda)
     i = @index(Global)
     if i <= length(y)
-        @inbounds ∇[1, i] = (y[i] - p[1, i]) * ∇[3, i]
+        @inbounds ∇[1, i] = -2 * (y[i] - p[1, i]) * ∇[5, i]
+        @inbounds ∇[2, i] = lambda * ∇[5, i]
+        @inbounds ∇[3, i] = 2 * ∇[5, i]
+        @inbounds ∇[4, i] = zero(eltype(∇)) * ∇[5, i]
     end
-end
-function EvoTrees.update_grads!(
-    ∇::CuMatrix,
-    p::CuMatrix,
-    y::CuVector,
-    ::Type{EvoTrees.MAE},
-    params::EvoTrees.EvoTypes;
-    MAX_THREADS=1024
-)
-    backend = KernelAbstractions.get_backend(p)
-    n = length(y)
-    workgroupsize = min(256, n)
-    kernel_mae_∇!(backend)(∇, p, y; ndrange=n, workgroupsize=workgroupsize)
-    KernelAbstractions.synchronize(backend)
-    return
 end
 
-#####################
-# Credibility
-#####################
-@kernel function kernel_cred_∇!(∇, p, y)
-    i = @index(Global)
-    if i <= length(y)
-        @inbounds ∇[1, i] = (y[i] - p[1, i]) * ∇[3, i]
-        @inbounds ∇[2, i] = (y[i] - p[1, i])^2 * ∇[3, i]
-    end
-end
-function EvoTrees.update_grads!(
-    ∇::CuMatrix,
-    p::CuMatrix,
-    y::CuVector,
-    ::Type{<:EvoTrees.Cred},
-    params::EvoTrees.EvoTypes;
-    MAX_THREADS=1024
-)
-    backend = KernelAbstractions.get_backend(p)
-    n = length(y)
-    workgroupsize = min(256, n)
-    kernel_cred_∇!(backend)(∇, p, y; ndrange=n, workgroupsize=workgroupsize)
-    KernelAbstractions.synchronize(backend)
-    return
-end
-
-#####################
-# Quantile
-#####################
-@kernel function kernel_quantile_∇!(∇, p, y, alpha)
-    i = @index(Global)
-    if i <= length(y)
-        diff = (y[i] - p[1, i])
-        @inbounds ∇[1, i] = diff > 0 ? alpha * ∇[3, i] : (alpha - 1) * ∇[3, i]
-        @inbounds ∇[2, i] = diff
-    end
-end
 function EvoTrees.update_grads!(
     ∇::CuMatrix{T},
     p::CuMatrix{T},
     y::CuVector{T},
-    ::Type{EvoTrees.Quantile},
+    ::Type{EvoTrees.CredVar},
     params::EvoTrees.EvoTypes;
     MAX_THREADS=1024
 ) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
-    kernel_quantile_∇!(backend)(∇, p, y, T(params.alpha); ndrange=n, workgroupsize=workgroupsize)
+    kernel_cred_var_∇!(backend)(∇, p, y, T(params.lambda); ndrange=n, workgroupsize=workgroupsize)
+    KernelAbstractions.synchronize(backend)
+    return
+end
+
+#####################
+# Credibility Std - NEW CORRECT IMPLEMENTATION
+#####################
+@kernel function kernel_cred_std_∇!(∇, p, y, lambda)
+    i = @index(Global)
+    if i <= length(y)
+        @inbounds sigma = exp(p[2, i])
+        @inbounds diff = y[i] - p[1, i]
+        @inbounds ∇[1, i] = -2 * diff / sigma * ∇[5, i]
+        @inbounds ∇[2, i] = (-diff^2 / sigma + lambda * sigma) * ∇[5, i]
+        @inbounds ∇[3, i] = 2 / sigma * ∇[5, i]
+        @inbounds ∇[4, i] = (2 * diff^2 / sigma + lambda * sigma) * ∇[5, i]
+    end
+end
+
+function EvoTrees.update_grads!(
+    ∇::CuMatrix{T},
+    p::CuMatrix{T},
+    y::CuVector{T},
+    ::Type{EvoTrees.CredStd},
+    params::EvoTrees.EvoTypes;
+    MAX_THREADS=1024
+) where {T<:AbstractFloat}
+    backend = KernelAbstractions.get_backend(p)
+    n = length(y)
+    workgroupsize = min(256, n)
+    kernel_cred_std_∇!(backend)(∇, p, y, T(params.lambda); ndrange=n, workgroupsize=workgroupsize)
     KernelAbstractions.synchronize(backend)
     return
 end

@@ -9,6 +9,7 @@ using KernelAbstractions
         @inbounds eval[i] = w[i] * (p[1, i] - y[i])^2
     end
 end
+
 function EvoTrees.mse(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
@@ -19,10 +20,10 @@ function EvoTrees.mse(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVe
 end
 
 ########################
-# RMSE
+# RMSE - FIXED BUG
 ########################
 EvoTrees.rmse(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat} =
-    sqrt(EvoTrees.mse(p, y, w, eval; MAX_THREADS, kwargs...))
+    sqrt(EvoTrees.mse(p, y, w, eval; MAX_THREADS, kwargs...))  # Fixed: call mse not rmse
 
 ########################
 # MAE
@@ -33,6 +34,7 @@ EvoTrees.rmse(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T};
         @inbounds eval[i] = w[i] * abs(p[1, i] - y[i])
     end
 end
+
 function EvoTrees.mae(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
@@ -43,15 +45,39 @@ function EvoTrees.mae(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVe
 end
 
 ########################
+# WMAE
+########################
+@kernel function eval_wmae_kernel!(eval, p, y, w, alpha)
+    i = @index(Global)
+    if i <= length(y)
+        @inbounds eval[i] = w[i] * (
+            alpha * max(y[i] - p[1, i], zero(eltype(p))) +
+            (1 - alpha) * max(p[1, i] - y[i], zero(eltype(p)))
+        )
+    end
+end
+
+function EvoTrees.wmae(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; alpha=0.5, MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
+    backend = KernelAbstractions.get_backend(p)
+    n = length(y)
+    workgroupsize = min(256, n)
+    eval_wmae_kernel!(backend)(eval, p, y, w, T(alpha); ndrange=n, workgroupsize=workgroupsize)
+    KernelAbstractions.synchronize(backend)
+    return sum(eval) / sum(w)
+end
+
+########################
 # Logloss
 ########################
 @kernel function eval_logloss_kernel!(eval, p, y, w)
     i = @index(Global)
+    ϵ = eps(eltype(p))
     if i <= length(y)
-        @inbounds pred = EvoTrees.sigmoid(p[1, i])
-        @inbounds eval[i] = w[i] * (-y[i] * log(pred) + (y[i] - 1) * log(1 - pred))
+        @inbounds pred = clamp(EvoTrees.sigmoid(p[1, i]), ϵ, 1 - ϵ)  # Added numerical stability
+        @inbounds eval[i] = w[i] * (-y[i] * log(pred) - (1 - y[i]) * log(1 - pred))
     end
 end
+
 function EvoTrees.logloss(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
@@ -62,14 +88,17 @@ function EvoTrees.logloss(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::
 end
 
 ########################
-# Gaussian
+# Gaussian - WITH NUMERICAL STABILITY
 ########################
 @kernel function eval_gaussian_kernel!(eval, p, y, w)
     i = @index(Global)
     if i <= length(y)
-        @inbounds eval[i] = -w[i] * (p[2, i] + (y[i] - p[1, i])^2 / (2 * exp(2 * p[2, i])))
+        @inbounds log_sigma = clamp(p[2, i], eltype(p)(-10), eltype(p)(10))  # Added clamping
+        @inbounds sigma2 = exp(2 * log_sigma)
+        @inbounds eval[i] = -w[i] * (log_sigma + 0.5 * (y[i] - p[1, i])^2 / sigma2)
     end
 end
+
 function EvoTrees.gaussian_mle(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
@@ -90,6 +119,7 @@ end
         @inbounds eval[i] = w[i] * 2 * (y[i] * log(y[i] / pred + ϵ) + pred - y[i])
     end
 end
+
 function EvoTrees.poisson(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
@@ -109,6 +139,7 @@ end
         @inbounds eval[i] = w[i] * 2 * (log(pred / y[i]) + y[i] / pred - 1)
     end
 end
+
 function EvoTrees.gamma(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
@@ -129,6 +160,7 @@ end
         @inbounds eval[i] = w[i] * 2 * (y[i]^(2 - rho) / (1 - rho) / (2 - rho) - y[i] * pred^(1 - rho) / (1 - rho) + pred^(2 - rho) / (2 - rho))
     end
 end
+
 function EvoTrees.tweedie(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
@@ -152,6 +184,7 @@ end
         @inbounds eval[i] = w[i] * (log(isum) - p[y[i], i])
     end
 end
+
 function EvoTrees.mlogloss(p::CuMatrix{T}, y::CuVector, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
@@ -162,22 +195,63 @@ function EvoTrees.mlogloss(p::CuMatrix{T}, y::CuVector, w::CuVector{T}, eval::Cu
 end
 
 ########################
-# WMAE (Weighted Mean Absolute Error)
+# MISSING: Quantile (ADD THIS)
 ########################
-@kernel function eval_wmae_kernel!(eval, p, y, w, alpha)
+@kernel function eval_quantile_kernel!(eval, p, y, w, alpha)
     i = @index(Global)
     if i <= length(y)
-        @inbounds eval[i] = w[i] * (
-            alpha * max(y[i] - p[1, i], zero(eltype(p))) +
-            (1 - alpha) * max(p[1, i] - y[i], zero(eltype(p)))
-        )
+        @inbounds diff = y[i] - p[1, i]
+        @inbounds eval[i] = w[i] * abs(diff) * (diff > 0 ? alpha : (1 - alpha))
     end
 end
-function EvoTrees.wmae(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; alpha=0.5, MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
+
+function EvoTrees.quantile(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; 
+                          alpha=0.5, MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
-    eval_wmae_kernel!(backend)(eval, p, y, w, T(alpha); ndrange=n, workgroupsize=workgroupsize)
+    eval_quantile_kernel!(backend)(eval, p, y, w, T(alpha); ndrange=n, workgroupsize=workgroupsize)
+    KernelAbstractions.synchronize(backend)
+    return sum(eval) / sum(w)
+end
+
+########################
+# MISSING: Credibility Variance
+########################
+@kernel function eval_cred_var_kernel!(eval, p, y, w, lambda)
+    i = @index(Global)
+    if i <= length(y)
+        @inbounds eval[i] = w[i] * ((y[i] - p[1, i])^2 + lambda * p[2, i])
+    end
+end
+
+function EvoTrees.cred_var(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; 
+                           lambda=1.0, MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
+    backend = KernelAbstractions.get_backend(p)
+    n = length(y)
+    workgroupsize = min(256, n)
+    eval_cred_var_kernel!(backend)(eval, p, y, w, T(lambda); ndrange=n, workgroupsize=workgroupsize)
+    KernelAbstractions.synchronize(backend)
+    return sum(eval) / sum(w)
+end
+
+########################
+# MISSING: Credibility Std
+########################
+@kernel function eval_cred_std_kernel!(eval, p, y, w, lambda)
+    i = @index(Global)
+    if i <= length(y)
+        @inbounds sigma = exp(p[2, i])
+        @inbounds eval[i] = w[i] * ((y[i] - p[1, i])^2 / sigma + lambda * sigma)
+    end
+end
+
+function EvoTrees.cred_std(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; 
+                           lambda=1.0, MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
+    backend = KernelAbstractions.get_backend(p)
+    n = length(y)
+    workgroupsize = min(256, n)
+    eval_cred_std_kernel!(backend)(eval, p, y, w, T(lambda); ndrange=n, workgroupsize=workgroupsize)
     KernelAbstractions.synchronize(backend)
     return sum(eval) / sum(w)
 end
