@@ -14,16 +14,16 @@ struct CacheGPU
     js::CuVector{UInt32}
     ∇::CuMatrix
     h∇::CuArray
-    h∇L::CuArray
-    h∇R::CuArray
+    h∇L::Union{Nothing, CuArray}  
+    h∇R::Union{Nothing, CuArray}  
     fnames::Vector{Symbol}  
     edges::Vector
     featbins::Vector
     feattypes_gpu::CuVector{Bool}
-    cond_feats::Vector{Int}
-    cond_feats_gpu::CuVector
-    cond_bins::Vector{UInt8}
-    cond_bins_gpu::CuVector
+    cond_feats::Union{Nothing, Vector{Int}}  
+    cond_feats_gpu::Union{Nothing, CuVector}  
+    cond_bins::Union{Nothing, Vector{UInt8}}  
+    cond_bins_gpu::Union{Nothing, CuVector}  
     monotone_constraints_gpu::CuVector{Int32}
     left_nodes_buf::CuVector{Int32}
     right_nodes_buf::CuVector{Int32}
@@ -34,7 +34,7 @@ struct CacheGPU
     tree_feat_gpu::CuVector{Int32}
     tree_gain_gpu::CuVector{Float64}
     tree_pred_gpu::CuMatrix{Float32}
-    nodes_sum_gpu::CuArray{Float32,2}
+    nodes_sum_gpu::CuArray{Float32,3}  
     nodes_gain_gpu::CuVector{Float32}
     anodes_gpu::CuVector{Int32}
     n_next_gpu::CuVector{Int32}
