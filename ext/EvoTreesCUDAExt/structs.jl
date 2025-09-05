@@ -4,7 +4,7 @@ struct CacheGPU
     y::CuArray
     w::Union{Nothing, CuVector}
     K::Int
-    nodes::Vector
+    nodes::Union{Vector, Nothing}
     pred::CuMatrix
     nidx::CuVector{UInt32}
     is_in::CuVector{UInt32}
