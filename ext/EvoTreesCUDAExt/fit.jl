@@ -171,8 +171,8 @@ end
     h∇,
     active_nodes,
     depth, max_depth, lambda, gamma,
-    K, L::Type, params::EvoTypes
-)
+    K, L::Type, params::EvoTrees.EvoTypes
+    )
     n_idx = @index(Global)
     node = active_nodes[n_idx]
     epsv = eltype(tree_pred)(1e-8)
