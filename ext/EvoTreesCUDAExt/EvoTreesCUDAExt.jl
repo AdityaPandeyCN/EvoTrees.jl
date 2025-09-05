@@ -17,7 +17,7 @@ function EvoTrees.post_fit_gc(::Type{<:EvoTrees.GPU})
     CUDA.reclaim()
 end
 
-include("struct.jl")
+include("structs.jl")
 include("loss.jl")
 include("eval.jl")
 include("predict.jl")
