@@ -4,8 +4,8 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache::CacheGPU, params::
     for _ in 1:params.bagging_size
         is = EvoTrees.subsample(cache.is_in, cache.is_out, cache.mask, params.rowsample, params.rng)
         
-        js_cpu = Vector{eltype(cache.js)}(undef, length(cache.js))
-        EvoTrees.sample!(params.rng, cache.js_, js_cpu, replace=false, ordered=true)
+        js_cpu = Vector{eltype(cache.js)}(undef, length(cache.js_))
+        sample!(params.rng, cache.js_, js_cpu, replace=false, ordered=true)
         copyto!(cache.js, js_cpu)
         
         tree = EvoTrees.Tree{L,K}(params.max_depth)
@@ -24,12 +24,7 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache::CacheGPU, params::
     return nothing
 end
 
-function grow_otree!(
-    tree::EvoTrees.Tree{L,K},
-    params::EvoTrees.EvoTypes,
-    cache::CacheGPU,
-    is::CuVector
-) where {L,K}
+function grow_otree!(tree::EvoTrees.Tree{L,K}, params::EvoTrees.EvoTypes, cache::CacheGPU, is::CuVector) where {L,K}
     @warn "Oblivious tree GPU implementation not yet available, using standard tree" maxlog=1
     grow_tree!(tree, params, cache, is)
 end
@@ -41,22 +36,22 @@ function grow_tree!(
     is::CuVector
 ) where {L,K}
 
-    backend = KernelAbstractions.get_backend(cache.x_bin)
+    backend = get_backend(cache.x_bin)
 
+    # Reset GPU buffers
     cache.tree_split_gpu .= false
     cache.tree_cond_bin_gpu .= 0
     cache.tree_feat_gpu .= 0
-    cache.tree_gain_gpu .= 0
-    cache.tree_pred_gpu .= 0
-    cache.nodes_sum_gpu .= 0
-    cache.nodes_gain_gpu .= 0
+    cache.tree_gain_gpu .= 0.0
+    cache.tree_pred_gpu .= 0.0
+    cache.nodes_sum_gpu .= 0.0
+    cache.nodes_gain_gpu .= 0.0
     cache.anodes_gpu .= 0
     cache.n_next_gpu .= 0
     cache.n_next_active_gpu .= 0
-    cache.best_gain_gpu .= 0
+    cache.best_gain_gpu .= -Inf
     cache.best_bin_gpu .= 0
     cache.best_feat_gpu .= 0
-    
     cache.nidx .= 1
     
     view(cache.anodes_gpu, 1:1) .= 1
@@ -64,7 +59,6 @@ function grow_tree!(
         cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
         cache.∇, cache.x_bin, cache.nidx, cache.js, is,
         1, view(cache.anodes_gpu, 1:1), cache.nodes_sum_gpu, params,
-        cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf,
         cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
     )
     get_gain_gpu!(backend)(cache.nodes_gain_gpu, cache.nodes_sum_gpu, view(cache.anodes_gpu, 1:1), Float32(params.lambda), cache.K; ndrange=1, workgroupsize=1)
@@ -76,71 +70,29 @@ function grow_tree!(
         !iszero(n_active) || break
         
         n_nodes_level = 2^(depth - 1)
-        active_nodes_full = view(cache.anodes_gpu, 1:n_nodes_level)
         
-        if n_active < n_nodes_level
-            view(cache.anodes_gpu, n_active+1:n_nodes_level) .= 0
-        end
-
-        view_gain = view(cache.best_gain_gpu, 1:n_nodes_level)
-        view_bin  = view(cache.best_bin_gpu, 1:n_nodes_level)
-        view_feat = view(cache.best_feat_gpu, 1:n_nodes_level)
-        
-        if depth > 1
-            active_nodes_act = view(active_nodes_full, 1:n_active)
-
-            cache.build_nodes_gpu .= 0
-            cache.subtract_nodes_gpu .= 0
-            cache.build_count .= 0
-            cache.subtract_count .= 0
-
-            separate_kernel! = separate_nodes_kernel!(backend)
-            separate_kernel!(
-                cache.build_nodes_gpu, cache.build_count,
-                cache.subtract_nodes_gpu, cache.subtract_count,
-                active_nodes_act;
-                ndrange=n_active, workgroupsize=256
-            )
-            KernelAbstractions.synchronize(backend)
-            
-            subtract_count_val = Array(cache.subtract_count)[1]
-            build_count_val = Array(cache.build_count)[1]
-            
-            if subtract_count_val > 0
-                n_k = size(cache.h∇, 1)
-                n_b = size(cache.h∇, 2)
-                n_j = size(cache.h∇, 3)
-                subtract_hist_kernel!(backend)(
-                    cache.h∇, cache.subtract_nodes_gpu, n_k, n_b, n_j;
-                    ndrange = subtract_count_val * n_k * n_b * n_j, workgroupsize=256
-                )
-                KernelAbstractions.synchronize(backend)
-            end
-            
-            if build_count_val > 0
-                update_hist_gpu!(
-                    cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
-                    cache.∇, cache.x_bin, cache.nidx, cache.js, is,
-                    depth, view(cache.build_nodes_gpu, 1:build_count_val), cache.nodes_sum_gpu, params,
-                    cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf,
-                    cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
-                )
-            end
-        end
+        # FIX: Prepare simplified arguments for the kernel on the host
+        is_quantile = L <: EvoTrees.Quantile || L <: EvoTrees.MAE
+        alpha = L <: EvoTrees.MAE ? 0.5f0 : Float32(params.alpha)
 
         apply_splits_kernel!(backend)(
             cache.tree_split_gpu, cache.tree_cond_bin_gpu, cache.tree_feat_gpu, cache.tree_gain_gpu, cache.tree_pred_gpu,
             cache.nodes_sum_gpu, cache.nodes_gain_gpu,
             cache.n_next_gpu, cache.n_next_active_gpu,
-            view_gain, view_bin, view_feat,
+            view(cache.best_gain_gpu, 1:n_nodes_level), 
+            view(cache.best_bin_gpu, 1:n_nodes_level), 
+            view(cache.best_feat_gpu, 1:n_nodes_level),
             cache.h∇,
-            active_nodes_full,
-            depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), cache.K;
-            ndrange = n_active, workgroupsize=256
+            view(cache.anodes_gpu, 1:n_nodes_level),
+            depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), 
+            K, is_quantile, alpha; # FIX: Pass simplified arguments
+            ndrange = n_active, workgroupsize=min(256, n_active)
         )
         KernelAbstractions.synchronize(backend)
         
-        n_active = min(2 * n_active, 2^depth)
+        n_active_h = Array(cache.n_next_active_gpu)
+        n_active = n_active_h[1]
+        
         if n_active > 0
             copyto!(view(cache.anodes_gpu, 1:n_active), view(cache.n_next_gpu, 1:n_active))
         end
@@ -151,6 +103,13 @@ function grow_tree!(
                 ndrange = length(is), workgroupsize=256
             )
             KernelAbstractions.synchronize(backend)
+            
+            update_hist_gpu!(
+                cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
+                cache.∇, cache.x_bin, cache.nidx, cache.js, is,
+                depth + 1, view(cache.anodes_gpu, 1:n_active), cache.nodes_sum_gpu, params,
+                cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
+            )
         end
     end
 
@@ -171,44 +130,44 @@ end
     h∇,
     active_nodes,
     depth, max_depth, lambda, gamma,
-    K, L::Type, params::EvoTrees.EvoTypes
-    )
+    K, is_quantile::Bool, alpha::Float32 # FIX: Use simplified arguments
+)
     n_idx = @index(Global)
     node = active_nodes[n_idx]
     epsv = eltype(tree_pred)(1e-8)
 
-    @inbounds if depth < max_depth && best_gain[n_idx] > gamma
-        # Logic for splitting a node remains the same
-        # ...
+    @inbounds if node > 0 && depth < max_depth && best_gain[n_idx] > gamma
+        tree_split[node] = true
+        tree_cond_bin[node] = best_bin[n_idx]
+        tree_feat[node] = best_feat[n_idx]
+        tree_gain[node] = best_gain[n_idx]
+
+        child_l, child_r = node << 1, (node << 1) + 1
+        
+        idx_base = Atomix.@atomic n_next_active[1] += 2
+        n_next[idx_base - 1] = child_l
+        n_next[idx_base] = child_r
     else # This node is a terminal leaf, calculate its prediction
-        if L <: EvoTrees.Quantile || L <: EvoTrees.MAE
+        if is_quantile
             # FIX: For Quantile/MAE, find the alpha-quantile from the histogram of residuals
-            alpha = L <: EvoTrees.MAE ? 0.5f0 : Float32(params.alpha)
             
-            # The residuals were stored in the hessian slot (k=2 for K=1)
-            # The weights were stored in the final slot (k=3 for K=1)
-            
-            # Get total weight and target quantile weight in the node
-            node_w = nodes_sum[3, 1, node] # Total weight for this node
+            # Weighted residuals are in the hessian slot (k=2 for K=1)
+            # Weights are in the final slot (k=3 for K=1)
+            node_w = nodes_sum[3, 1, node]
             target_w = alpha * node_w
             
             cum_w = 0.0f0
             leaf_pred = 0.0f0
             
-            # Find the bin where the cumulative weight exceeds the target
+            # To find the quantile, we use the histogram of residuals.
+            # We assume feature 1's histogram is representative to find the bin.
             nbins = size(h∇, 2)
             for b in 1:nbins
-                # Note: This assumes a single feature histogram. A more robust implementation
-                # would need to decide which feature's histogram to use or average them.
-                # For quantile prediction, typically the histogram of residuals is built directly.
-                # Let's assume h∇[2, b, 1, node] is the sum of residuals in that bin
-                # and h∇[3, b, 1, node] is the sum of weights.
                 bin_w = h∇[3, b, 1, node] 
-                
                 cum_w += bin_w
                 if cum_w >= target_w
                     # Placeholder: Use bin index as prediction.
-                    # A better way is to use bin edges to find the value.
+                    # Ideally, you would use pre-computed bin_edges to get the true value.
                     leaf_pred = Float32(b) 
                     break
                 end
@@ -218,7 +177,7 @@ end
         else
             # For all other losses, use the standard -G/H formula
             w = nodes_sum[2*K+1, 1, node]
-            if w > 0
+            if w > epsv
                 @inbounds for kk in 1:K
                     gk = nodes_sum[kk, 1, node]
                     hk = nodes_sum[K+kk, 1, node]
@@ -229,16 +188,20 @@ end
     end
 end
 
-@kernel function get_gain_gpu!(nodes_gain::AbstractVector{T}, nodes_sum::AbstractArray{T,2}, nodes, lambda::T, K::Int) where {T}
+@kernel function get_gain_gpu!(nodes_gain::AbstractVector{T}, nodes_sum::AbstractArray{T,3}, nodes, lambda::T, K::Int) where {T}
     n_idx = @index(Global)
     node = nodes[n_idx]
-    @inbounds w = nodes_sum[2*K+1, node]
-    gain = zero(T)
-    @inbounds for kk in 1:K
-        p1 = nodes_sum[kk, node]
-        p2 = nodes_sum[K+kk, node]
-        gain += p1^2 / (p2 + lambda * (w / K) + T(1e-8))
+    @inbounds if node > 0
+        w = nodes_sum[2*K+1, 1, node]
+        gain = zero(T)
+        if w > 1.0f-8
+            @inbounds for kk in 1:K
+                p1 = nodes_sum[kk, 1, node]
+                p2 = nodes_sum[K+kk, 1, node]
+                gain += p1^2 / (p2 + lambda * w)
+            end
+        end
+        nodes_gain[node] = gain
     end
-    @inbounds nodes_gain[node] = gain
 end
 
