@@ -1,3 +1,5 @@
+# loss.jl
+
 using KernelAbstractions
 
 #####################
@@ -28,14 +30,14 @@ function EvoTrees.update_grads!(
 end
 
 #####################
-# MAE - FIXED
+# MAE
 #####################
 @kernel function kernel_mae_∇!(∇, p, y)
     i = @index(Global)
     if i <= length(y)
-        @inbounds diff = y[i] - p[1, i]
-        @inbounds ∇[1, i] = sign(diff) * ∇[3, i]  # Fixed: use sign function
-        @inbounds ∇[2, i] = eltype(∇)(1e-4) * ∇[3, i]  # Fixed: small constant for Hessian
+        @inbounds diff = p[1, i] - y[i]
+        @inbounds ∇[1, i] = -sign(diff) * ∇[3, i]
+        @inbounds ∇[2, i] = eltype(∇)(1e-4) * ∇[3, i]  # Hessian approximation
     end
 end
 
@@ -56,14 +58,14 @@ function EvoTrees.update_grads!(
 end
 
 #####################
-# Quantile - FIXED
+# Quantile
 #####################
 @kernel function kernel_quantile_∇!(∇, p, y, alpha)
     i = @index(Global)
     if i <= length(y)
-        @inbounds diff = y[i] - p[1, i]
-        @inbounds ∇[1, i] = (diff > 0 ? alpha : (alpha - 1)) * ∇[3, i]
-        @inbounds ∇[2, i] = eltype(∇)(1e-4) * ∇[3, i]  # Fixed: small constant instead of diff
+        @inbounds diff = p[1, i] - y[i]
+        @inbounds ∇[1, i] = (diff > 0 ? (alpha - 1) : alpha) * ∇[3, i]
+        @inbounds ∇[2, i] = eltype(∇)(1e-4) * ∇[3, i]  # Hessian approximation
     end
 end
 
@@ -90,7 +92,7 @@ end
     i = @index(Global)
     ϵ = eps(eltype(p))
     if i <= length(y)
-        @inbounds pred = clamp(EvoTrees.sigmoid(p[1, i]), ϵ, 1 - ϵ)  # Added stability
+        @inbounds pred = clamp(EvoTrees.sigmoid(p[1, i]), ϵ, 1 - ϵ)
         @inbounds ∇[1, i] = (pred - y[i]) * ∇[3, i]
         @inbounds ∇[2, i] = pred * (1 - pred) * ∇[3, i]
     end
@@ -237,20 +239,17 @@ function EvoTrees.update_grads!(
 end
 
 ################################################################################
-# Gaussian - FIXED with numerical stability
+# Gaussian
 ################################################################################
 @kernel function kernel_gauss_∇!(∇, p, y)
     i = @index(Global)
     if i <= length(y)
-        # Clamp log_sigma to prevent numerical issues
         @inbounds log_sigma = clamp(p[2, i], eltype(p)(-10), eltype(p)(10))
         @inbounds sigma2 = exp(2 * log_sigma)
         @inbounds diff = p[1, i] - y[i]
         
-        # first order gradients
         @inbounds ∇[1, i] = diff / sigma2 * ∇[5, i]
         @inbounds ∇[2, i] = (1 - diff^2 / sigma2) * ∇[5, i]
-        # second order gradients
         @inbounds ∇[3, i] = ∇[5, i] / sigma2
         @inbounds ∇[4, i] = 2 * ∇[5, i] * diff^2 / sigma2
     end
@@ -273,7 +272,7 @@ function EvoTrees.update_grads!(
 end
 
 #####################
-# Credibility Variance - NEW CORRECT IMPLEMENTATION
+# Credibility Variance
 #####################
 @kernel function kernel_cred_var_∇!(∇, p, y, lambda)
     i = @index(Global)
@@ -302,7 +301,7 @@ function EvoTrees.update_grads!(
 end
 
 #####################
-# Credibility Std - NEW CORRECT IMPLEMENTATION
+# Credibility Std
 #####################
 @kernel function kernel_cred_std_∇!(∇, p, y, lambda)
     i = @index(Global)

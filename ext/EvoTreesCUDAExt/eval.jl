@@ -1,3 +1,5 @@
+# eval.jl
+
 using KernelAbstractions
 
 ########################
@@ -20,10 +22,10 @@ function EvoTrees.mse(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVe
 end
 
 ########################
-# RMSE - FIXED BUG
+# RMSE
 ########################
 EvoTrees.rmse(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat} =
-    sqrt(EvoTrees.mse(p, y, w, eval; MAX_THREADS, kwargs...))  # Fixed: call mse not rmse
+    sqrt(EvoTrees.mse(p, y, w, eval; MAX_THREADS, kwargs...))
 
 ########################
 # MAE
@@ -45,35 +47,13 @@ function EvoTrees.mae(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVe
 end
 
 ########################
-# WMAE
-########################
-@kernel function eval_wmae_kernel!(eval, p, y, w, alpha)
-    i = @index(Global)
-    if i <= length(y)
-        @inbounds eval[i] = w[i] * (
-            alpha * max(y[i] - p[1, i], zero(eltype(p))) +
-            (1 - alpha) * max(p[1, i] - y[i], zero(eltype(p)))
-        )
-    end
-end
-
-function EvoTrees.wmae(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; alpha=0.5, MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
-    backend = KernelAbstractions.get_backend(p)
-    n = length(y)
-    workgroupsize = min(256, n)
-    eval_wmae_kernel!(backend)(eval, p, y, w, T(alpha); ndrange=n, workgroupsize=workgroupsize)
-    KernelAbstractions.synchronize(backend)
-    return sum(eval) / sum(w)
-end
-
-########################
 # Logloss
 ########################
 @kernel function eval_logloss_kernel!(eval, p, y, w)
     i = @index(Global)
     ϵ = eps(eltype(p))
     if i <= length(y)
-        @inbounds pred = clamp(EvoTrees.sigmoid(p[1, i]), ϵ, 1 - ϵ)  # Added numerical stability
+        @inbounds pred = clamp(EvoTrees.sigmoid(p[1, i]), ϵ, 1 - ϵ)
         @inbounds eval[i] = w[i] * (-y[i] * log(pred) - (1 - y[i]) * log(1 - pred))
     end
 end
@@ -88,12 +68,12 @@ function EvoTrees.logloss(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::
 end
 
 ########################
-# Gaussian - WITH NUMERICAL STABILITY
+# Gaussian
 ########################
 @kernel function eval_gaussian_kernel!(eval, p, y, w)
     i = @index(Global)
     if i <= length(y)
-        @inbounds log_sigma = clamp(p[2, i], eltype(p)(-10), eltype(p)(10))  # Added clamping
+        @inbounds log_sigma = clamp(p[2, i], eltype(p)(-10), eltype(p)(10))
         @inbounds sigma2 = exp(2 * log_sigma)
         @inbounds eval[i] = -w[i] * (log_sigma + 0.5 * (y[i] - p[1, i])^2 / sigma2)
     end
@@ -194,19 +174,27 @@ function EvoTrees.mlogloss(p::CuMatrix{T}, y::CuVector, w::CuVector{T}, eval::Cu
     return sum(eval) / sum(w)
 end
 
-########################
-# MISSING: Quantile (ADD THIS)
-########################
+#################################################################
+# Fix: Added missing GPU implementation for Quantile Loss
+#################################################################
 @kernel function eval_quantile_kernel!(eval, p, y, w, alpha)
     i = @index(Global)
     if i <= length(y)
         @inbounds diff = y[i] - p[1, i]
-        @inbounds eval[i] = w[i] * abs(diff) * (diff > 0 ? alpha : (1 - alpha))
+        # Pinball loss formula
+        @inbounds eval[i] = w[i] * (diff >= 0 ? alpha * diff : (1 - alpha) * -diff)
     end
 end
 
-function EvoTrees.quantile(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; 
-                          alpha=0.5, MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
+function EvoTrees.quantile(
+    p::CuMatrix{T}, 
+    y::CuVector{T}, 
+    w::CuVector{T}, 
+    eval::CuVector{T};
+    alpha=0.5, 
+    MAX_THREADS=1024, 
+    kwargs...
+) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
@@ -215,44 +203,27 @@ function EvoTrees.quantile(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval:
     return sum(eval) / sum(w)
 end
 
-########################
-# MISSING: Credibility Variance
-########################
-@kernel function eval_cred_var_kernel!(eval, p, y, w, lambda)
-    i = @index(Global)
-    if i <= length(y)
-        @inbounds eval[i] = w[i] * ((y[i] - p[1, i])^2 + lambda * p[2, i])
-    end
-end
-
-function EvoTrees.cred_var(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; 
-                           lambda=1.0, MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
+#################################################################
+# Fix: Added missing GPU implementations for Credibility Losses
+#################################################################
+function credibility_metric_gpu(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; kwargs...) where {T<:AbstractFloat}
+    # The evaluation metric for credibility losses is the same as Gaussian Negative Log-Likelihood
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
-    eval_cred_var_kernel!(backend)(eval, p, y, w, T(lambda); ndrange=n, workgroupsize=workgroupsize)
+    eval_gaussian_kernel!(backend)(eval, p, y, w; ndrange=n, workgroupsize=workgroupsize)
     KernelAbstractions.synchronize(backend)
     return sum(eval) / sum(w)
 end
 
-########################
-# MISSING: Credibility Std
-########################
-@kernel function eval_cred_std_kernel!(eval, p, y, w, lambda)
-    i = @index(Global)
-    if i <= length(y)
-        @inbounds sigma = exp(p[2, i])
-        @inbounds eval[i] = w[i] * ((y[i] - p[1, i])^2 / sigma + lambda * sigma)
-    end
-end
+# Alias wmae to quantile loss metric
+EvoTrees.wmae(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; kwargs...) where {T<:AbstractFloat} = 
+    EvoTrees.quantile(p, y, w, eval; kwargs...)
 
-function EvoTrees.cred_std(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; 
-                           lambda=1.0, MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
-    backend = KernelAbstractions.get_backend(p)
-    n = length(y)
-    workgroupsize = min(256, n)
-    eval_cred_std_kernel!(backend)(eval, p, y, w, T(lambda); ndrange=n, workgroupsize=workgroupsize)
-    KernelAbstractions.synchronize(backend)
-    return sum(eval) / sum(w)
-end
+#################################################################
+# Fix: Add metrics to dictionary to solve UndefVarError
+#################################################################
+push!(EvoTrees.metric_dict, :cred_var => credibility_metric_gpu)
+push!(EvoTrees.metric_dict, :cred_std => credibility_metric_gpu)
+push!(EvoTrees.metric_dict, :quantile => EvoTrees.quantile)
 
