@@ -92,7 +92,7 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, ::Type{<:EvoTrees.GPU}, d
         :feattypes => feattypes,
     )
 
-    m = EvoTree{L,K}(params.loss, K, [EvoTrees.Tree{L,K}(μ)], info)
+    m = EvoTree{L,K}(L, K, [EvoTrees.Tree{L,K}(μ)], info)
 
     feattypes_gpu = CuArray(feattypes)
     monotone_constraints_gpu = CuArray(monotone_constraints)
