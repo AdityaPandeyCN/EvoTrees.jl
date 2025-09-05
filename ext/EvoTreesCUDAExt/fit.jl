@@ -55,12 +55,16 @@ function grow_tree!(
     cache.nidx .= 1
     
     view(cache.anodes_gpu, 1:1) .= 1
+
+    # FIX: Add missing cache arguments to the function call
     update_hist_gpu!(
         cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
         cache.∇, cache.x_bin, cache.nidx, cache.js, is,
         1, view(cache.anodes_gpu, 1:1), cache.nodes_sum_gpu, params,
+        cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf, # <- ADDED
         cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
     )
+    
     get_gain_gpu!(backend)(cache.nodes_gain_gpu, cache.nodes_sum_gpu, view(cache.anodes_gpu, 1:1), Float32(params.lambda), cache.K; ndrange=1, workgroupsize=1)
     KernelAbstractions.synchronize(backend)
 
@@ -71,7 +75,46 @@ function grow_tree!(
         
         n_nodes_level = 2^(depth - 1)
         
-        # FIX: Prepare simplified arguments for the kernel on the host
+        if depth > 1
+            active_nodes_act = view(cache.anodes_gpu, 1:n_active)
+
+            cache.build_nodes_gpu .= 0
+            cache.subtract_nodes_gpu .= 0
+            cache.build_count .= 0
+            cache.subtract_count .= 0
+
+            separate_kernel!(backend)(
+                cache.build_nodes_gpu, cache.build_count,
+                cache.subtract_nodes_gpu, cache.subtract_count,
+                active_nodes_act;
+                ndrange=n_active, workgroupsize=min(256, n_active)
+            )
+            KernelAbstractions.synchronize(backend)
+            
+            subtract_count_val = Array(cache.subtract_count)[1]
+            build_count_val = Array(cache.build_count)[1]
+            
+            if subtract_count_val > 0
+                n_k, n_b, n_j = size(cache.h∇, 1), size(cache.h∇, 2), size(cache.h∇, 3)
+                subtract_hist_kernel!(backend)(
+                    cache.h∇, view(cache.subtract_nodes_gpu, 1:subtract_count_val), n_k, n_b, n_j;
+                    ndrange = subtract_count_val * n_k * n_b * n_j, workgroupsize=256
+                )
+                KernelAbstractions.synchronize(backend)
+            end
+            
+            if build_count_val > 0
+                # FIX: Add missing cache arguments to the second function call as well
+                update_hist_gpu!(
+                    cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
+                    cache.∇, cache.x_bin, cache.nidx, cache.js, is,
+                    depth, view(cache.build_nodes_gpu, 1:build_count_val), cache.nodes_sum_gpu, params,
+                    cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf, # <- ADDED
+                    cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
+                )
+            end
+        end
+        
         is_quantile = L <: EvoTrees.Quantile || L <: EvoTrees.MAE
         alpha = L <: EvoTrees.MAE ? 0.5f0 : Float32(params.alpha)
 
@@ -85,7 +128,7 @@ function grow_tree!(
             cache.h∇,
             view(cache.anodes_gpu, 1:n_nodes_level),
             depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), 
-            K, is_quantile, alpha; # FIX: Pass simplified arguments
+            K, is_quantile, alpha;
             ndrange = n_active, workgroupsize=min(256, n_active)
         )
         KernelAbstractions.synchronize(backend)
@@ -103,13 +146,6 @@ function grow_tree!(
                 ndrange = length(is), workgroupsize=256
             )
             KernelAbstractions.synchronize(backend)
-            
-            update_hist_gpu!(
-                cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
-                cache.∇, cache.x_bin, cache.nidx, cache.js, is,
-                depth + 1, view(cache.anodes_gpu, 1:n_active), cache.nodes_sum_gpu, params,
-                cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
-            )
         end
     end
 
@@ -130,7 +166,7 @@ end
     h∇,
     active_nodes,
     depth, max_depth, lambda, gamma,
-    K, is_quantile::Bool, alpha::Float32 # FIX: Use simplified arguments
+    K, is_quantile::Bool, alpha::Float32
 )
     n_idx = @index(Global)
     node = active_nodes[n_idx]
@@ -147,35 +183,25 @@ end
         idx_base = Atomix.@atomic n_next_active[1] += 2
         n_next[idx_base - 1] = child_l
         n_next[idx_base] = child_r
-    else # This node is a terminal leaf, calculate its prediction
+    else 
         if is_quantile
-            # FIX: For Quantile/MAE, find the alpha-quantile from the histogram of residuals
-            
-            # Weighted residuals are in the hessian slot (k=2 for K=1)
-            # Weights are in the final slot (k=3 for K=1)
             node_w = nodes_sum[3, 1, node]
             target_w = alpha * node_w
             
             cum_w = 0.0f0
             leaf_pred = 0.0f0
             
-            # To find the quantile, we use the histogram of residuals.
-            # We assume feature 1's histogram is representative to find the bin.
             nbins = size(h∇, 2)
             for b in 1:nbins
                 bin_w = h∇[3, b, 1, node] 
                 cum_w += bin_w
                 if cum_w >= target_w
-                    # Placeholder: Use bin index as prediction.
-                    # Ideally, you would use pre-computed bin_edges to get the true value.
                     leaf_pred = Float32(b) 
                     break
                 end
             end
             tree_pred[1, node] = leaf_pred
-
         else
-            # For all other losses, use the standard -G/H formula
             w = nodes_sum[2*K+1, 1, node]
             if w > epsv
                 @inbounds for kk in 1:K
