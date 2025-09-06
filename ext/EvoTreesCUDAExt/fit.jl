@@ -38,7 +38,6 @@ function grow_tree!(
 
     backend = get_backend(cache.x_bin)
 
-    # Reset GPU buffers
     cache.tree_split_gpu .= false
     cache.tree_cond_bin_gpu .= 0
     cache.tree_feat_gpu .= 0
@@ -56,12 +55,11 @@ function grow_tree!(
     
     view(cache.anodes_gpu, 1:1) .= 1
 
-    # FIX: Add missing cache arguments to the function call
     update_hist_gpu!(
         cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
         cache.∇, cache.x_bin, cache.nidx, cache.js, is,
         1, view(cache.anodes_gpu, 1:1), cache.nodes_sum_gpu, params,
-        cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf, # <- ADDED
+        cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf, 
         cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
     )
     
@@ -104,12 +102,12 @@ function grow_tree!(
             end
             
             if build_count_val > 0
-                # FIX: Add missing cache arguments to the second function call as well
+                
                 update_hist_gpu!(
                     cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
                     cache.∇, cache.x_bin, cache.nidx, cache.js, is,
                     depth, view(cache.build_nodes_gpu, 1:build_count_val), cache.nodes_sum_gpu, params,
-                    cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf, # <- ADDED
+                    cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf, 
                     cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
                 )
             end

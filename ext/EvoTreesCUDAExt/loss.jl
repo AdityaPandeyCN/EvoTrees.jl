@@ -1,5 +1,3 @@
-# loss.jl
-
 using KernelAbstractions
 
 #####################
@@ -13,7 +11,7 @@ using KernelAbstractions
     end
 end
 
-function EvoTrees.update_grads!(∇::CuMatrix, p::CuMatrix, y::CuVector, ::Type{EvoTrees.MSE}, params::EvoTrees.EvoTypes; kwargs...)
+function EvoTrees.update_grads!(∇::AbstractMatrix, p::AbstractMatrix, y::AbstractVector, ::Type{EvoTrees.MSE}, params::EvoTrees.EvoTypes; kwargs...)
     backend = get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
@@ -34,7 +32,7 @@ end
     end
 end
 
-function EvoTrees.update_grads!(∇::CuMatrix, p::CuMatrix, y::CuVector, ::Type{EvoTrees.MAE}, params::EvoTrees.EvoTypes; kwargs...)
+function EvoTrees.update_grads!(∇::AbstractMatrix, p::AbstractMatrix, y::AbstractVector, ::Type{EvoTrees.MAE}, params::EvoTrees.EvoTypes; kwargs...)
     backend = get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
@@ -55,7 +53,7 @@ end
     end
 end
 
-function EvoTrees.update_grads!(∇::CuMatrix{T}, p::CuMatrix{T}, y::CuVector{T}, ::Type{EvoTrees.Quantile}, params::EvoTrees.EvoTypes; kwargs...) where {T}
+function EvoTrees.update_grads!(∇::AbstractMatrix{T}, p::AbstractMatrix{T}, y::AbstractVector{T}, ::Type{EvoTrees.Quantile}, params::EvoTrees.EvoTypes; kwargs...) where {T}
     backend = get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
@@ -76,7 +74,7 @@ end
     end
 end
 
-function EvoTrees.update_grads!(∇::CuMatrix, p::CuMatrix, y::CuVector, ::Type{EvoTrees.LogLoss}, params::EvoTrees.EvoTypes; kwargs...)
+function EvoTrees.update_grads!(∇::AbstractMatrix, p::AbstractMatrix, y::AbstractVector, ::Type{EvoTrees.LogLoss}, params::EvoTrees.EvoTypes; kwargs...)
     backend = get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
@@ -96,7 +94,7 @@ end
     end
 end
 
-function EvoTrees.update_grads!(∇::CuMatrix, p::CuMatrix, y::CuVector, ::Type{EvoTrees.Poisson}, params::EvoTrees.EvoTypes; kwargs...)
+function EvoTrees.update_grads!(∇::AbstractMatrix, p::AbstractMatrix, y::AbstractVector, ::Type{EvoTrees.Poisson}, params::EvoTrees.EvoTypes; kwargs...)
     backend = get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
@@ -117,12 +115,12 @@ end
 end
 
 function EvoTrees.update_grads!(
-    ∇::CuMatrix,
-    p::CuMatrix,
-    y::CuVector,
+    ∇::AbstractMatrix,
+    p::AbstractMatrix,
+    y::AbstractVector,
     ::Type{EvoTrees.Gamma},
     params::EvoTrees.EvoTypes;
-    MAX_THREADS=1024
+    kwargs...
 )
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
@@ -146,12 +144,12 @@ end
 end
 
 function EvoTrees.update_grads!(
-    ∇::CuMatrix,
-    p::CuMatrix,
-    y::CuVector,
+    ∇::AbstractMatrix,
+    p::AbstractMatrix,
+    y::AbstractVector,
     ::Type{EvoTrees.Tweedie},
     params::EvoTrees.EvoTypes;
-    MAX_THREADS=1024
+    kwargs...
 )
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
@@ -185,12 +183,12 @@ end
 end
 
 function EvoTrees.update_grads!(
-    ∇::CuMatrix,
-    p::CuMatrix,
-    y::CuVector,
+    ∇::AbstractMatrix,
+    p::AbstractMatrix,
+    y::AbstractVector,
     ::Type{EvoTrees.MLogLoss},
     params::EvoTrees.EvoTypes;
-    MAX_THREADS=1024
+    kwargs...
 )
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
@@ -217,7 +215,7 @@ end
     end
 end
 
-function EvoTrees.update_grads!(∇::CuMatrix, p::CuMatrix, y::CuVector, ::Type{EvoTrees.GaussianMLE}, params::EvoTrees.EvoTypes; kwargs...)
+function EvoTrees.update_grads!(∇::AbstractMatrix, p::AbstractMatrix, y::AbstractVector, ::Type{EvoTrees.GaussianMLE}, params::EvoTrees.EvoTypes; kwargs...)
     backend = get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
@@ -239,12 +237,12 @@ end
 end
 
 function EvoTrees.update_grads!(
-    ∇::CuMatrix{T},
-    p::CuMatrix{T},
-    y::CuVector{T},
+    ∇::AbstractMatrix{T},
+    p::AbstractMatrix{T},
+    y::AbstractVector{T},
     ::Type{EvoTrees.CredVar},
     params::EvoTrees.EvoTypes;
-    MAX_THREADS=1024
+    kwargs...
 ) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
@@ -270,12 +268,12 @@ end
 end
 
 function EvoTrees.update_grads!(
-    ∇::CuMatrix{T},
-    p::CuMatrix{T},
-    y::CuVector{T},
+    ∇::AbstractMatrix{T},
+    p::AbstractMatrix{T},
+    y::AbstractVector{T},
     ::Type{EvoTrees.CredStd},
     params::EvoTrees.EvoTypes;
-    MAX_THREADS=1024
+    kwargs...
 ) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)

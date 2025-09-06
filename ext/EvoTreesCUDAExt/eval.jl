@@ -1,5 +1,3 @@
-# eval.jl
-
 using KernelAbstractions
 
 ########################
@@ -12,7 +10,7 @@ using KernelAbstractions
     end
 end
 
-function EvoTrees.mse(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
+function EvoTrees.mse(p::AbstractMatrix{T}, y::AbstractVector{T}, w::AbstractVector{T}, eval::AbstractVector{T}; kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
@@ -24,8 +22,8 @@ end
 ########################
 # RMSE
 ########################
-EvoTrees.rmse(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat} =
-    sqrt(EvoTrees.mse(p, y, w, eval; MAX_THREADS, kwargs...))
+EvoTrees.rmse(p::AbstractMatrix{T}, y::AbstractVector{T}, w::AbstractVector{T}, eval::AbstractVector{T}; kwargs...) where {T<:AbstractFloat} =
+    sqrt(EvoTrees.mse(p, y, w, eval; kwargs...))
 
 ########################
 # MAE
@@ -37,7 +35,7 @@ EvoTrees.rmse(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T};
     end
 end
 
-function EvoTrees.mae(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
+function EvoTrees.mae(p::AbstractMatrix{T}, y::AbstractVector{T}, w::AbstractVector{T}, eval::AbstractVector{T}; kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
@@ -58,7 +56,7 @@ end
     end
 end
 
-function EvoTrees.logloss(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
+function EvoTrees.logloss(p::AbstractMatrix{T}, y::AbstractVector{T}, w::AbstractVector{T}, eval::AbstractVector{T}; kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
@@ -79,7 +77,7 @@ end
     end
 end
 
-function EvoTrees.gaussian_mle(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
+function EvoTrees.gaussian_mle(p::AbstractMatrix{T}, y::AbstractVector{T}, w::AbstractVector{T}, eval::AbstractVector{T}; kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
@@ -100,7 +98,7 @@ end
     end
 end
 
-function EvoTrees.poisson(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
+function EvoTrees.poisson(p::AbstractMatrix{T}, y::AbstractVector{T}, w::AbstractVector{T}, eval::AbstractVector{T}; kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
@@ -120,7 +118,7 @@ end
     end
 end
 
-function EvoTrees.gamma(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
+function EvoTrees.gamma(p::AbstractMatrix{T}, y::AbstractVector{T}, w::AbstractVector{T}, eval::AbstractVector{T}; kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
@@ -141,7 +139,7 @@ end
     end
 end
 
-function EvoTrees.tweedie(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
+function EvoTrees.tweedie(p::AbstractMatrix{T}, y::AbstractVector{T}, w::AbstractVector{T}, eval::AbstractVector{T}; kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
@@ -165,7 +163,7 @@ end
     end
 end
 
-function EvoTrees.mlogloss(p::CuMatrix{T}, y::CuVector, w::CuVector{T}, eval::CuVector{T}; MAX_THREADS=1024, kwargs...) where {T<:AbstractFloat}
+function EvoTrees.mlogloss(p::AbstractMatrix{T}, y::AbstractVector, w::AbstractVector{T}, eval::AbstractVector{T}; kwargs...) where {T<:AbstractFloat}
     backend = KernelAbstractions.get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
@@ -174,9 +172,9 @@ function EvoTrees.mlogloss(p::CuMatrix{T}, y::CuVector, w::CuVector{T}, eval::Cu
     return sum(eval) / sum(w)
 end
 
-#################################################################
-# Fix: Added missing GPU implementation for Quantile Loss
-#################################################################
+###############
+# Quantile Loss
+###############
 @kernel function eval_quantile_kernel!(eval, p, y, w, alpha)
     i = @index(Global)
     @inbounds if i <= length(y)
@@ -185,8 +183,8 @@ end
     end
 end
 
-function EvoTrees.quantile(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; alpha=0.5, kwargs...) where {T}
-    backend = get_backend(p)
+function EvoTrees.quantile(p::AbstractMatrix{T}, y::AbstractVector{T}, w::AbstractVector{T}, eval::AbstractVector{T}; alpha=0.5, kwargs...) where {T}
+    backend = KernelAbstractions.get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
     eval_quantile_kernel!(backend)(eval, p, y, w, T(alpha); ndrange=n, workgroupsize=workgroupsize)
@@ -194,11 +192,11 @@ function EvoTrees.quantile(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval:
     return sum(eval) / sum(w)
 end
 
-#################################################################
-# Fix: Added missing GPU implementations for Credibility Losses
-#################################################################
-function credibility_metric_gpu(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; kwargs...) where {T}
-    backend = get_backend(p)
+####################
+# Credibility Losses
+####################
+function credibility_metric_gpu(p::AbstractMatrix{T}, y::AbstractVector{T}, w::AbstractVector{T}, eval::AbstractVector{T}; kwargs...) where {T}
+    backend = KernelAbstractions.get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
     eval_gaussian_kernel!(backend)(eval, p, y, w; ndrange=n, workgroupsize=workgroupsize)
@@ -206,11 +204,11 @@ function credibility_metric_gpu(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, 
     return sum(eval) / sum(w)
 end
 
-EvoTrees.wmae(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; kwargs...) where {T} = 
+EvoTrees.wmae(p::AbstractMatrix{T}, y::AbstractVector{T}, w::AbstractVector{T}, eval::AbstractVector{T}; kwargs...) where {T} = 
     EvoTrees.quantile(p, y, w, eval; kwargs...)
 
 #################################################################
-# Fix: Add metrics to dictionary to solve UndefVarError
+# Add metrics to dictionary to solve UndefVarError
 #################################################################
 push!(EvoTrees.metric_dict, :cred_var => credibility_metric_gpu)
 push!(EvoTrees.metric_dict, :cred_std => credibility_metric_gpu)

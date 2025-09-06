@@ -98,7 +98,6 @@ end
             nbins = size(h∇, 2)
             eps = T(1e-8)
             
-            # Fix 1: Correctly calculate total sums for the node using the histogram of a single feature
             @inbounds let f = js[1]
                 for k in 1:(2*K+1)
                     sum_val = zero(T)
@@ -114,7 +113,7 @@ end
             for k in 1:K
                 g = nodes_sum[k, node]
                 h = nodes_sum[K+k, node]
-                # Fix 2: Removed incorrect division by K from regularization term
+                
                 gain_p += g^2 / (h + lambda * w_p + eps)
             end
 
@@ -145,7 +144,7 @@ end
                                 end
                                 r_g = nodes_sum[kk, node] - l_g
                                 r_h = nodes_sum[K+kk, node] - l_h
-                                # Fix 2: Removed incorrect division by K from regularization term
+                                
                                 denomL = l_h + lambda * s_w + eps
                                 denomR = r_h + lambda * (w_p - s_w) + eps
                                 gain_l += l_g^2 / denomL
@@ -168,7 +167,7 @@ end
                             end
                         end
                     end
-                else  # Categorical feature
+                else  
                     for b in 1:(nbins - 1)
                         l_w = h∇[2*K+1, b, f, node]
                         r_w = w_p - l_w
@@ -182,7 +181,7 @@ end
                                 l_h = h∇[K+kk, b, f, node]
                                 r_g = nodes_sum[kk, node] - l_g
                                 r_h = nodes_sum[K+kk, node] - l_h
-                                # Fix 2: Removed incorrect division by K from regularization term
+                                
                                 denomL = l_h + lambda * l_w + eps
                                 denomR = r_h + lambda * r_w + eps
                                 gain_l += l_g^2 / denomL
@@ -273,7 +272,6 @@ function update_hist_gpu!(
         workgroupsize = workgroup_size
     )
     
-    # remove host reads for small levels; use split kernel to skip zeros
     if n_active > 16 && depth > 2
         build_count = KernelAbstractions.zeros(backend, Int32, 1)
         subtract_count = KernelAbstractions.zeros(backend, Int32, 1)

@@ -1,50 +1,55 @@
-struct CacheGPU
+struct CacheGPU{
+    V<:AbstractVector,
+    M<:AbstractMatrix,
+    A3<:AbstractArray{<:Any,3},
+    A4<:AbstractArray{<:Any,4},
+}
     info::Dict
-    x_bin::CuMatrix
-    y::CuArray
-    w::Union{Nothing, CuVector}
+    x_bin::M
+    y::V
+    w::Union{Nothing,V}
     K::Int
-    nodes::Union{Vector, Nothing}
-    pred::CuMatrix
-    nidx::CuVector{UInt32}
-    is_in::CuVector{UInt32}
-    is_out::CuVector{UInt32}
-    mask::CuVector{UInt8}
+    nodes::Union{Vector,Nothing}
+    pred::M
+    nidx::V
+    is_in::V
+    is_out::V
+    mask::V
     js_::Vector{UInt32}
-    js::CuVector{UInt32}
-    ∇::CuMatrix
-    h∇::CuArray
-    h∇L::Union{Nothing, CuArray}  
-    h∇R::Union{Nothing, CuArray}  
-    fnames::Vector{Symbol}  
+    js::V
+    ∇::M
+    h∇::A4
+    h∇L::Union{Nothing,A4}
+    h∇R::Union{Nothing,A4}
+    fnames::Vector{Symbol}
     edges::Vector
     featbins::Vector
-    feattypes_gpu::CuVector{Bool}
-    cond_feats::Union{Nothing, Vector{Int}}  
-    cond_feats_gpu::Union{Nothing, CuVector}  
-    cond_bins::Union{Nothing, Vector{UInt8}}  
-    cond_bins_gpu::Union{Nothing, CuVector}  
-    monotone_constraints_gpu::CuVector{Int32}
-    left_nodes_buf::CuVector{Int32}
-    right_nodes_buf::CuVector{Int32}
-    target_mask_buf::CuVector{UInt8}
-    
-    tree_split_gpu::CuVector{Bool}
-    tree_cond_bin_gpu::CuVector{UInt8}
-    tree_feat_gpu::CuVector{Int32}
-    tree_gain_gpu::CuVector{Float64}
-    tree_pred_gpu::CuMatrix{Float32}
-    nodes_sum_gpu::CuArray{Float32,3}  
-    nodes_gain_gpu::CuVector{Float32}
-    anodes_gpu::CuVector{Int32}
-    n_next_gpu::CuVector{Int32}
-    n_next_active_gpu::CuVector{Int32}
-    best_gain_gpu::CuVector{Float32}
-    best_bin_gpu::CuVector{Int32}
-    best_feat_gpu::CuVector{Int32}
-    build_nodes_gpu::CuVector{Int32}
-    subtract_nodes_gpu::CuVector{Int32}
-    build_count::CuVector{Int32}
-    subtract_count::CuVector{Int32}
+    feattypes_gpu::V
+    cond_feats::Union{Nothing,Vector{Int}}
+    cond_feats_gpu::Union{Nothing,V}
+    cond_bins::Union{Nothing,Vector{UInt8}}
+    cond_bins_gpu::Union{Nothing,V}
+    monotone_constraints_gpu::V
+    left_nodes_buf::V
+    right_nodes_buf::V
+    target_mask_buf::V
+
+    tree_split_gpu::V
+    tree_cond_bin_gpu::V
+    tree_feat_gpu::V
+    tree_gain_gpu::V
+    tree_pred_gpu::M
+    nodes_sum_gpu::A3
+    nodes_gain_gpu::V
+    anodes_gpu::V
+    n_next_gpu::V
+    n_next_active_gpu::V
+    best_gain_gpu::V
+    best_bin_gpu::V
+    best_feat_gpu::V
+    build_nodes_gpu::V
+    subtract_nodes_gpu::V
+    build_count::V
+    subtract_count::V
 end
 

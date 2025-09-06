@@ -1,20 +1,31 @@
-module EvoTreesCUDAExt
+module EvoTreesGPU
 
 using EvoTrees
-using CUDA
 using KernelAbstractions
-using Atomix
 using Adapt
 using Tables
 using Random
-using KernelAbstractions: get_backend
-using StatsBase #<-- FIX: ADD THIS LINE
+using StatsBase 
 
-EvoTrees.device_ones(::Type{<:EvoTrees.GPU}, ::Type{T}, n::Int) where {T} = CUDA.ones(T, n)
-EvoTrees.device_array_type(::Type{<:EvoTrees.GPU}) = CuArray
+# Use KernelAbstractions to create arrays on the default GPU backend
+function EvoTrees.device_ones(::Type{<:EvoTrees.GPU}, ::Type{T}, n::Int) where {T}
+    backend = KernelAbstractions.GPU()
+    return KernelAbstractions.ones(backend, T, n)
+end
+
+# Get the array type (e.g., CuArray, ROCArray) from the default GPU backend
+function EvoTrees.device_array_type(::Type{<:EvoTrees.GPU})
+    backend = KernelAbstractions.GPU()
+    return KernelAbstractions.get_array_type(backend)
+end
+
+# Perform a generic post-fit cleanup
 function EvoTrees.post_fit_gc(::Type{<:EvoTrees.GPU})
     GC.gc(true)
-    CUDA.reclaim()
+    # Synchronize the default GPU to ensure all work is complete.
+    # Backend-specific reclaim (like CUDA.reclaim()) isn't portable.
+    backend = KernelAbstractions.GPU()
+    KernelAbstractions.synchronize(backend)
 end
 
 include("structs.jl")

@@ -97,21 +97,22 @@ end
     end
 end
 
-# prediction from single tree
+# prediction from single tree - now generic over AbstractArray
 function EvoTrees.predict!(
-    pred::CuMatrix{T},
+    pred::AbstractMatrix{T},
     tree::EvoTrees.Tree{L,K},
-    x_bin::CuMatrix,
-    feattypes::CuVector{Bool};
+    x_bin::AbstractMatrix,
+    feattypes::AbstractVector{Bool};
     MAX_THREADS=1024
 ) where {L,K,T}
     n = size(pred, 2)
     backend = KernelAbstractions.get_backend(pred)
     
+    # Tree data is on host, create device arrays and copy
     split_dev = KernelAbstractions.zeros(backend, eltype(tree.split), length(tree.split))
     feats_dev = KernelAbstractions.zeros(backend, eltype(tree.feat), length(tree.feat))
     cond_dev = KernelAbstractions.zeros(backend, eltype(tree.cond_bin), length(tree.cond_bin))
-    leaf_dev = KernelAbstractions.zeros(backend, eltype(tree.pred), size(tree.pred,1), size(tree.pred,2))
+    leaf_dev = KernelAbstractions.zeros(backend, eltype(tree.pred), size(tree.pred)...)
     
     copyto!(split_dev, tree.split)
     copyto!(feats_dev, tree.feat)
@@ -126,19 +127,21 @@ end
 
 # MLogLoss version with normalization
 function EvoTrees.predict!(
-    pred::CuMatrix{T},
+    pred::AbstractMatrix{T},
     tree::EvoTrees.Tree{L,K},
-    x_bin::CuMatrix,
-    feattypes::CuVector{Bool};
+    x_bin::AbstractMatrix,
+    feattypes::AbstractVector{Bool};
     MAX_THREADS=1024
 ) where {L<:EvoTrees.MLogLoss,K,T}
+    # This function is identical to the one above, but with the added normalization step.
+    # The logic for making it generic is the same.
     n = size(pred, 2)
     backend = KernelAbstractions.get_backend(pred)
     
     split_dev = KernelAbstractions.zeros(backend, eltype(tree.split), length(tree.split))
     feats_dev = KernelAbstractions.zeros(backend, eltype(tree.feat), length(tree.feat))
     cond_dev = KernelAbstractions.zeros(backend, eltype(tree.cond_bin), length(tree.cond_bin))
-    leaf_dev = KernelAbstractions.zeros(backend, eltype(tree.pred), size(tree.pred,1), size(tree.pred,2))
+    leaf_dev = KernelAbstractions.zeros(backend, eltype(tree.pred), size(tree.pred)...)
     
     copyto!(split_dev, tree.split)
     copyto!(feats_dev, tree.feat)
@@ -164,9 +167,11 @@ function EvoTrees._predict(
     ntrees = length(m.trees)
     ntree_limit > ntrees && error("ntree_limit is larger than number of trees $ntrees.")
     
+    # Use KernelAbstractions to select the backend and allocate memory
+    backend = KernelAbstractions.GPU()
+    
     xb = EvoTrees.binarize(data; feature_names=m.info[:feature_names], edges=m.info[:edges])
-    backend = KernelAbstractions.get_backend(CuArray(xb))
-    x_bin = KernelAbstractions.zeros(backend, eltype(xb), size(xb,1), size(xb,2))
+    x_bin = KernelAbstractions.zeros(backend, eltype(xb), size(xb)...)
     copyto!(x_bin, xb)
     
     ft = m.info[:feattypes]
@@ -174,13 +179,13 @@ function EvoTrees._predict(
     copyto!(feattypes, ft)
     
     Tpred = eltype(m.trees[1].pred)
-    pred = KernelAbstractions.zeros(backend, Tpred, K, size(data, 1))
+    pred = KernelAbstractions.zeros(backend, Tpred, K, size(x_bin, 1))
     
     for i = 1:ntree_limit
         EvoTrees.predict!(pred, m.trees[i], x_bin, feattypes)
     end
     
-    # Apply loss-specific transformations
+    # Apply loss-specific transformations (these are generic broadcast operations)
     if L == EvoTrees.LogLoss
         pred .= EvoTrees.sigmoid.(pred)
     elseif L ∈ [EvoTrees.Poisson, EvoTrees.Gamma, EvoTrees.Tweedie]
@@ -190,8 +195,10 @@ function EvoTrees._predict(
     elseif L == EvoTrees.MLogLoss
         EvoTrees.softmax!(pred)
     end
-    pred = K == 1 ? vec(Array(pred')) : Array(pred')
-    return pred
+    
+    # Copy final predictions to a host Array for the user
+    pred_host = K == 1 ? vec(Array(pred')) : Array(pred')
+    return pred_host
 end
 
 @kernel function softmax_kernel!(p)
@@ -209,7 +216,8 @@ end
     end
 end
 
-function EvoTrees.softmax!(p::CuMatrix{T}; MAX_THREADS=1024) where {T}
+# Generic softmax over AbstractMatrix
+function EvoTrees.softmax!(p::AbstractMatrix{T}; MAX_THREADS=1024) where {T}
     K, nobs = size(p)
     backend = KernelAbstractions.get_backend(p)
     workgroupsize = min(256, nobs)

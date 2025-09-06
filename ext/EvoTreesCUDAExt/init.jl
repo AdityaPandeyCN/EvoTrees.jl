@@ -1,8 +1,15 @@
 function EvoTrees.init_core(params::EvoTrees.EvoTypes, ::Type{<:EvoTrees.GPU}, data, fnames, y_train, w, offset)
 
+    # Use KernelAbstractions to get the default GPU backend
+    backend = KernelAbstractions.GPU()
+
     edges, featbins, feattypes = EvoTrees.get_edges(data; feature_names=fnames, nbins=params.nbins, rng=params.rng)
+    
+    # Move binarized features to the GPU using KA
     xb = EvoTrees.binarize(data; feature_names=fnames, edges)
-    x_bin = CuArray(xb)
+    x_bin = KernelAbstractions.zeros(backend, eltype(xb), size(xb)...)
+    copyto!(x_bin, xb)
+
     nobs, nfeats = size(x_bin)
     T = Float32
     L = EvoTrees._loss2type_dict[params.loss]
@@ -48,18 +55,24 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, ::Type{<:EvoTrees.GPU}, d
         y = T.(y_train)
         μ = [EvoTrees.mean(y)]
     end
-    y = CuArray(y)
+    
+    # Move target and weights to GPU using KA
+    y_gpu = KernelAbstractions.zeros(backend, eltype(y), size(y)...)
+    copyto!(y_gpu, y)
+    
+    w_gpu = KernelAbstractions.zeros(backend, eltype(w), size(w)...)
+    copyto!(w_gpu, w)
+
     μ = T.(μ)
     !isnothing(offset) && (μ .= 0)
 
-    backend = KernelAbstractions.get_backend(x_bin)
     pred = KernelAbstractions.zeros(backend, T, K, nobs)
     mu_dev = KernelAbstractions.zeros(backend, T, K, 1)
     copyto!(mu_dev, reshape(T.(μ), K, 1))
     pred .= mu_dev
     if !isnothing(offset)
         offT = T.(offset')
-        off_dev = KernelAbstractions.zeros(backend, T, size(offT, 1), size(offT, 2))
+        off_dev = KernelAbstractions.zeros(backend, T, size(offT)...)
         copyto!(off_dev, offT)
         pred .+= off_dev
     end
@@ -67,8 +80,7 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, ::Type{<:EvoTrees.GPU}, d
     ∇ = KernelAbstractions.zeros(backend, T, 2 * K + 1, nobs)
     h∇ = KernelAbstractions.zeros(backend, Float32, 2 * K + 1, params.nbins, nfeats, 2^params.max_depth - 1)
     
-    @assert (length(y) == length(w) && minimum(w) > 0)
-    ∇[end, :] .= w
+    ∇[end, :] .= w_gpu
 
     nidx = KernelAbstractions.ones(backend, UInt32, nobs)
     is_in = KernelAbstractions.zeros(backend, UInt32, nobs)
@@ -93,9 +105,11 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, ::Type{<:EvoTrees.GPU}, d
     )
 
     m = EvoTree{L,K}(L, K, [EvoTrees.Tree{L,K}(μ)], info)
-
-    feattypes_gpu = CuArray(feattypes)
-    monotone_constraints_gpu = CuArray(monotone_constraints)
+    
+    feattypes_gpu = KernelAbstractions.zeros(backend, Bool, size(feattypes)...)
+    copyto!(feattypes_gpu, feattypes)
+    monotone_constraints_gpu = KernelAbstractions.zeros(backend, Int32, size(monotone_constraints)...)
+    copyto!(monotone_constraints_gpu, monotone_constraints)
 
     max_nodes_level = 2^params.max_depth
     left_nodes_buf = KernelAbstractions.zeros(backend, Int32, max_nodes_level)
@@ -110,7 +124,6 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, ::Type{<:EvoTrees.GPU}, d
     tree_pred_gpu = KernelAbstractions.zeros(backend, Float32, K, max_tree_nodes)
     
     max_nodes_total = 2^(params.max_depth + 1)
-    # FIX: Create nodes_sum_gpu as a 3D array to match the kernel signatures in fit.jl
     nodes_sum_gpu = KernelAbstractions.zeros(backend, Float32, 2*K+1, 1, max_nodes_total)
     
     nodes_gain_gpu = KernelAbstractions.zeros(backend, Float32, max_nodes_total)
@@ -126,7 +139,7 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, ::Type{<:EvoTrees.GPU}, d
     subtract_count = KernelAbstractions.zeros(backend, Int32, 1)
 
     cache = CacheGPU(
-        info, x_bin, y, CuArray(w), K, nothing, pred, nidx, is_in, is_out, mask,
+        info, x_bin, y_gpu, w_gpu, K, nothing, pred, nidx, is_in, is_out, mask,
         js_, js, ∇, h∇, nothing, nothing, fnames, edges, featbins, feattypes_gpu,
         nothing, nothing, nothing, nothing, monotone_constraints_gpu,
         left_nodes_buf, right_nodes_buf, target_mask_buf, tree_split_gpu,
