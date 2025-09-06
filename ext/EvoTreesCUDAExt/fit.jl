@@ -4,7 +4,7 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache::CacheGPU, params::
     for _ in 1:params.bagging_size
         is = EvoTrees.subsample(cache.is_in, cache.is_out, cache.mask, params.rowsample, params.rng)
         
-        js_cpu = Vector{eltype(cache.js)}(undef, length(cache.js_))
+        js_cpu = Vector{eltype(cache.js)}(undef, length(cache.js))
         sample!(params.rng, cache.js_, js_cpu, replace=false, ordered=true)
         copyto!(cache.js, js_cpu)
         
