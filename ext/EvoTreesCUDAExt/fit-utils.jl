@@ -98,15 +98,15 @@ end
             nbins = size(h∇, 2)
             eps = T(1e-8)
             
-            for k in 1:(2*K+1)
-                sum_val = zero(T)
-                for j_idx in 1:length(js)
-                    f = js[j_idx]
+            # Fix 1: Correctly calculate total sums for the node using the histogram of a single feature
+            @inbounds let f = js[1]
+                for k in 1:(2*K+1)
+                    sum_val = zero(T)
                     for b in 1:nbins
                         sum_val += h∇[k, b, f, node]
                     end
+                    nodes_sum[k, node] = sum_val
                 end
-                nodes_sum[k, node] = sum_val
             end
             
             w_p = nodes_sum[2*K+1, node]
@@ -114,7 +114,8 @@ end
             for k in 1:K
                 g = nodes_sum[k, node]
                 h = nodes_sum[K+k, node]
-                gain_p += g^2 / (h + lambda * w_p / K + eps)
+                # Fix 2: Removed incorrect division by K from regularization term
+                gain_p += g^2 / (h + lambda * w_p + eps)
             end
 
             g_best, b_best, f_best = T(-Inf), Int32(0), Int32(0)
@@ -144,8 +145,9 @@ end
                                 end
                                 r_g = nodes_sum[kk, node] - l_g
                                 r_h = nodes_sum[K+kk, node] - l_h
-                                denomL = l_h + lambda * (s_w / K) + eps
-                                denomR = r_h + lambda * ((w_p - s_w) / K) + eps
+                                # Fix 2: Removed incorrect division by K from regularization term
+                                denomL = l_h + lambda * s_w + eps
+                                denomR = r_h + lambda * (w_p - s_w) + eps
                                 gain_l += l_g^2 / denomL
                                 gain_r += r_g^2 / denomR
                                 if constraint != 0
@@ -166,7 +168,7 @@ end
                             end
                         end
                     end
-                else  
+                else  # Categorical feature
                     for b in 1:(nbins - 1)
                         l_w = h∇[2*K+1, b, f, node]
                         r_w = w_p - l_w
@@ -180,8 +182,9 @@ end
                                 l_h = h∇[K+kk, b, f, node]
                                 r_g = nodes_sum[kk, node] - l_g
                                 r_h = nodes_sum[K+kk, node] - l_h
-                                denomL = l_h + lambda * (l_w / K) + eps
-                                denomR = r_h + lambda * (r_w / K) + eps
+                                # Fix 2: Removed incorrect division by K from regularization term
+                                denomL = l_h + lambda * l_w + eps
+                                denomR = r_h + lambda * r_w + eps
                                 gain_l += l_g^2 / denomL
                                 gain_r += r_g^2 / denomR
                                 if constraint != 0
