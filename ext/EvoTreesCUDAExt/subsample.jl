@@ -1,7 +1,7 @@
 using KernelAbstractions
 using Random
 
-@kernel function subsample_step_1_kernel!(is_in, mask, cond::Float32, counts, chunk_size::Int)
+@kernel function subsample_step_1_kernel!(is_in, mask, cond::UInt8, counts, chunk_size::Int)
     bid = @index(Global)
     gdim = length(counts)
 
@@ -27,79 +27,36 @@ end
     end
 end
 
-# Override the main subsample function for GPU arrays - THIS IS THE KEY FIX
-function EvoTrees.subsample(left::CuVector{UInt32}, is::CuVector{UInt32}, 
-                           mask_cond::CuVector{UInt8}, rowsample::AbstractFloat, rng)
-    backend = KernelAbstractions.get_backend(is)
+function EvoTrees.subsample(is_in::CuVector, is_out::CuVector, mask::CuVector, rowsample::AbstractFloat, rng)
+    backend = KernelAbstractions.get_backend(mask)
 
-    # Generate random mask directly on GPU
-    Random.rand!(rng, mask_cond)
+    # Fill mask on host for portability, then copy to device
+    mask_host = Vector{UInt8}(undef, length(mask))
+    Random.rand!(rng, mask_host)
     cond = round(UInt8, 255 * rowsample)
+    copyto!(mask, mask_host)
 
-    chunk_size = cld(length(is), min(cld(length(is), 128), 2048))
-    nblocks = cld(length(is), chunk_size)
+    chunk_size = cld(length(is_in), min(cld(length(is_in), 128), 2048))
+    nblocks = cld(length(is_in), chunk_size)
     counts = KernelAbstractions.zeros(backend, Int, nblocks)
 
     step1! = subsample_step_1_kernel!(backend)
-    step1!(is, mask_cond, Float32(cond), counts, chunk_size; ndrange=nblocks, workgroupsize=min(256, nblocks))
+    step1!(is_in, mask, cond, counts, chunk_size; ndrange=nblocks, workgroupsize=min(256, nblocks))
     KernelAbstractions.synchronize(backend)
 
-    # Compute cumulative counts on host for compatibility
     counts_host = Array(counts)
     counts_cum_host = cumsum(counts_host) .- counts_host
-    counts_cum = similar(counts)
+    counts_cum = KernelAbstractions.zeros(backend, Int, nblocks)
     copyto!(counts_cum, counts_cum_host)
 
     step2! = subsample_step_2_kernel!(backend)
-    step2!(is, left, counts, counts_cum, chunk_size; ndrange=nblocks, workgroupsize=min(256, nblocks))
+    step2!(is_in, is_out, counts, counts_cum, chunk_size; ndrange=nblocks, workgroupsize=min(256, nblocks))
     KernelAbstractions.synchronize(backend)
 
-    # Get total count
     counts_sum = sum(counts_host)
-
     if counts_sum == 0
         @error "no subsample observation - choose larger rowsample"
-        return view(left, 1:1)  # Return at least one element to avoid errors
     else
-        return view(left, 1:counts_sum)
+        return view(is_out, 1:counts_sum)
     end
 end
-
-# Also handle the case with Float32 mask if needed
-function EvoTrees.subsample(left::CuVector{UInt32}, is::CuVector{UInt32}, 
-                           mask::CuVector{Float32}, rowsample::AbstractFloat, rng)
-    backend = KernelAbstractions.get_backend(is)
-
-    # Generate random mask directly on GPU
-    Random.rand!(rng, mask)
-    cond = Float32(rowsample)
-
-    chunk_size = cld(length(is), min(cld(length(is), 128), 2048))
-    nblocks = cld(length(is), chunk_size)
-    counts = KernelAbstractions.zeros(backend, Int, nblocks)
-
-    step1! = subsample_step_1_kernel!(backend)
-    step1!(is, mask, cond, counts, chunk_size; ndrange=nblocks, workgroupsize=min(256, nblocks))
-    KernelAbstractions.synchronize(backend)
-
-    # Compute cumulative counts on host for compatibility
-    counts_host = Array(counts)
-    counts_cum_host = cumsum(counts_host) .- counts_host
-    counts_cum = similar(counts)
-    copyto!(counts_cum, counts_cum_host)
-
-    step2! = subsample_step_2_kernel!(backend)
-    step2!(is, left, counts, counts_cum, chunk_size; ndrange=nblocks, workgroupsize=min(256, nblocks))
-    KernelAbstractions.synchronize(backend)
-
-    # Get total count
-    counts_sum = sum(counts_host)
-
-    if counts_sum == 0
-        @error "no subsample observation - choose larger rowsample"
-        return view(left, 1:1)  # Return at least one element to avoid errors
-    else
-        return view(left, 1:counts_sum)
-    end
-end
-
