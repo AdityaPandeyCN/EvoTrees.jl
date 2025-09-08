@@ -206,8 +206,7 @@ end
 @kernel function kernel_gauss_∇!(∇, p, y)
     i = @index(Global)
     @inbounds if i <= length(y)
-        log_sigma = clamp(p[2, i], eltype(p)(-10), eltype(p)(10))
-        sigma2 = exp(2 * log_sigma)
+        sigma2 = exp(2 * p[2, i])
         diff = p[1, i] - y[i]
         
         ∇[1, i] = diff / sigma2 * ∇[5, i]
