@@ -110,8 +110,8 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, ::Type{<:EvoTrees.GPU}, d
     tree_pred_gpu = KernelAbstractions.zeros(backend, Float32, K, max_tree_nodes)
     
     max_nodes_total = 2^(params.max_depth + 1)
-    # FIX: Create nodes_sum_gpu as a 3D array to match the kernel signatures in fit.jl
-    nodes_sum_gpu = KernelAbstractions.zeros(backend, Float32, 2*K+1, 1, max_nodes_total)
+    # Allocate nodes_sum as 2D to match kernels indexing nodes_sum[k, node]
+    nodes_sum_gpu = KernelAbstractions.zeros(backend, Float32, 2*K+1, max_nodes_total)
     
     nodes_gain_gpu = KernelAbstractions.zeros(backend, Float32, max_nodes_total)
     anodes_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level)

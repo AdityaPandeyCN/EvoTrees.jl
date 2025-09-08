@@ -87,6 +87,7 @@ end
     @Const(monotone_constraints),
     lambda::T,
     min_weight::T,
+    L2::T,
     K::Int
 ) where {T}
     n_idx = @index(Global)
@@ -98,7 +99,7 @@ end
             nbins = size(h∇, 2)
             eps = T(1e-8)
             
-            # Fix 1: Correctly calculate total sums for the node using the histogram of a single feature
+            # compute total sums for the node using the histogram of a single feature
             @inbounds let f = js[1]
                 for k in 1:(2*K+1)
                     sum_val = zero(T)
@@ -114,8 +115,7 @@ end
             for k in 1:K
                 g = nodes_sum[k, node]
                 h = nodes_sum[K+k, node]
-                # Fix 2: Removed incorrect division by K from regularization term
-                gain_p += g^2 / (h + lambda * w_p + eps)
+                gain_p += g^2 / (h + lambda * w_p + L2 + eps)
             end
 
             g_best, b_best, f_best = T(-Inf), Int32(0), Int32(0)
@@ -145,9 +145,8 @@ end
                                 end
                                 r_g = nodes_sum[kk, node] - l_g
                                 r_h = nodes_sum[K+kk, node] - l_h
-                                # Fix 2: Removed incorrect division by K from regularization term
-                                denomL = l_h + lambda * s_w + eps
-                                denomR = r_h + lambda * (w_p - s_w) + eps
+                                denomL = l_h + lambda * s_w + L2 + eps
+                                denomR = r_h + lambda * (w_p - s_w) + L2 + eps
                                 gain_l += l_g^2 / denomL
                                 gain_r += r_g^2 / denomR
                                 if constraint != 0
@@ -182,9 +181,8 @@ end
                                 l_h = h∇[K+kk, b, f, node]
                                 r_g = nodes_sum[kk, node] - l_g
                                 r_h = nodes_sum[K+kk, node] - l_h
-                                # Fix 2: Removed incorrect division by K from regularization term
-                                denomL = l_h + lambda * l_w + eps
-                                denomR = r_h + lambda * r_w + eps
+                                denomL = l_h + lambda * l_w + L2 + eps
+                                denomR = r_h + lambda * r_w + L2 + eps
                                 gain_l += l_g^2 / denomL
                                 gain_r += r_g^2 / denomR
                                 if constraint != 0
@@ -300,7 +298,9 @@ function update_hist_gpu!(
         gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
         feattypes, monotone_constraints,
         eltype(gains)(params.lambda),
-        eltype(gains)(params.min_weight), K;
+        eltype(gains)(params.min_weight),
+        eltype(gains)(params.L2),
+        K;
         ndrange = n_active,
         workgroupsize = min(256, n_active)
     )

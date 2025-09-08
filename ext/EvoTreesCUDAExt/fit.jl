@@ -65,7 +65,7 @@ function grow_tree!(
         cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
     )
     
-    get_gain_gpu!(backend)(cache.nodes_gain_gpu, cache.nodes_sum_gpu, view(cache.anodes_gpu, 1:1), Float32(params.lambda), cache.K; ndrange=1, workgroupsize=1)
+    get_gain_gpu!(backend)(cache.nodes_gain_gpu, cache.nodes_sum_gpu, view(cache.anodes_gpu, 1:1), Float32(params.lambda), Float32(params.L2), cache.K; ndrange=1, workgroupsize=1)
     KernelAbstractions.synchronize(backend)
 
     n_active = 1
@@ -127,7 +127,7 @@ function grow_tree!(
             view(cache.best_feat_gpu, 1:n_nodes_level),
             cache.h∇,
             view(cache.anodes_gpu, 1:n_nodes_level),
-            depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), 
+            depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), Float32(params.L2),
             K, is_quantile, alpha;
             ndrange = n_active, workgroupsize=min(256, n_active)
         )
@@ -165,7 +165,7 @@ end
     best_gain, best_bin, best_feat,
     h∇,
     active_nodes,
-    depth, max_depth, lambda, gamma,
+    depth, max_depth, lambda, gamma, L2,
     K, is_quantile::Bool, alpha::Float32
 )
     n_idx = @index(Global)
@@ -185,7 +185,7 @@ end
         n_next[idx_base] = child_r
     else 
         if is_quantile
-            node_w = nodes_sum[3, 1, node]
+            node_w = nodes_sum[3, node]
             target_w = alpha * node_w
             
             cum_w = 0.0f0
@@ -202,29 +202,29 @@ end
             end
             tree_pred[1, node] = leaf_pred
         else
-            w = nodes_sum[2*K+1, 1, node]
+            w = nodes_sum[2*K+1, node]
             if w > epsv
                 @inbounds for kk in 1:K
-                    gk = nodes_sum[kk, 1, node]
-                    hk = nodes_sum[K+kk, 1, node]
-                    tree_pred[kk, node] = -gk / (hk + lambda * w + epsv)
+                    gk = nodes_sum[kk, node]
+                    hk = nodes_sum[K+kk, node]
+                    tree_pred[kk, node] = -gk / (hk + lambda * w + L2 + epsv)
                 end
             end
         end
     end
 end
 
-@kernel function get_gain_gpu!(nodes_gain::AbstractVector{T}, nodes_sum::AbstractArray{T,3}, nodes, lambda::T, K::Int) where {T}
+@kernel function get_gain_gpu!(nodes_gain::AbstractVector{T}, nodes_sum::AbstractArray{T,2}, nodes, lambda::T, L2::T, K::Int) where {T}
     n_idx = @index(Global)
     node = nodes[n_idx]
     @inbounds if node > 0
-        w = nodes_sum[2*K+1, 1, node]
+        w = nodes_sum[2*K+1, node]
         gain = zero(T)
         if w > 1.0f-8
             @inbounds for kk in 1:K
-                p1 = nodes_sum[kk, 1, node]
-                p2 = nodes_sum[K+kk, 1, node]
-                gain += p1^2 / (p2 + lambda * w)
+                p1 = nodes_sum[kk, node]
+                p2 = nodes_sum[K+kk, node]
+                gain += p1^2 / (p2 + lambda * w + L2)
             end
         end
         nodes_gain[node] = gain
