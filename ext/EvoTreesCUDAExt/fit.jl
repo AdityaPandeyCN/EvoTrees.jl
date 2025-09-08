@@ -115,8 +115,9 @@ function grow_tree!(
             end
         end
         
-        is_quantile = L <: EvoTrees.Quantile || L <: EvoTrees.MAE
-        alpha = L <: EvoTrees.MAE ? 0.5f0 : Float32(params.alpha)
+        is_mae = L <: EvoTrees.MAE
+        is_quantile = L <: EvoTrees.Quantile
+        alpha = is_mae ? 0.5f0 : Float32(params.alpha)
 
         apply_splits_kernel!(backend)(
             cache.tree_split_gpu, cache.tree_cond_bin_gpu, cache.tree_feat_gpu, cache.tree_gain_gpu, cache.tree_pred_gpu,
@@ -128,7 +129,7 @@ function grow_tree!(
             cache.h∇,
             view(cache.anodes_gpu, 1:n_nodes_level),
             depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), Float32(params.L2),
-            K, is_quantile, alpha;
+            K, is_quantile, is_mae, alpha;
             ndrange = n_active, workgroupsize=min(256, n_active)
         )
         KernelAbstractions.synchronize(backend)
@@ -166,7 +167,7 @@ end
     h∇,
     active_nodes,
     depth, max_depth, lambda, gamma, L2,
-    K, is_quantile::Bool, alpha::Float32
+    K, is_quantile::Bool, is_mae::Bool, alpha::Float32
 )
     n_idx = @index(Global)
     node = active_nodes[n_idx]
@@ -184,23 +185,17 @@ end
         n_next[idx_base - 1] = child_l
         n_next[idx_base] = child_r
     else 
-        if is_quantile
-            node_w = nodes_sum[3, node]
-            target_w = alpha * node_w
-            
-            cum_w = 0.0f0
-            leaf_pred = 0.0f0
-            
-            nbins = size(h∇, 2)
-            for b in 1:nbins
-                bin_w = h∇[3, b, 1, node] 
-                cum_w += bin_w
-                if cum_w >= target_w
-                    leaf_pred = Float32(b) 
-                    break
-                end
-            end
-            tree_pred[1, node] = leaf_pred
+        if is_mae
+            w = nodes_sum[3, node]
+            g = nodes_sum[1, node]
+            denom = lambda * w + L2 + w + epsv
+            tree_pred[1, node] = g / denom
+        elseif is_quantile
+            w = nodes_sum[3, node]
+            resid_sum = nodes_sum[2, node]
+            denom = (1 + lambda + (w > epsv ? L2 / w : L2))
+            mean_resid = (w > epsv ? resid_sum / w : 0)
+            tree_pred[1, node] = mean_resid / denom
         else
             w = nodes_sum[2*K+1, node]
             if w > epsv
