@@ -49,7 +49,7 @@ end
     gidx = @index(Global, Linear)
     n_feats = length(js)
     n_obs = length(is)
-    obs_per_thread = 32
+    obs_per_thread = 64
     
     total_work = cld(n_obs, obs_per_thread) * n_feats
     if gidx <= total_work

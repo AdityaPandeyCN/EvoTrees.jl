@@ -165,7 +165,7 @@ function grow_tree!(
             K, is_quantile, is_mae, alpha;
             ndrange = n_active, workgroupsize=min(256, n_active)
         )
-        KernelAbstractions.synchronize(backend)
+        # defer sync to counters read
         
         n_active_h = Array(cache.n_next_active_gpu)
         n_active = n_active_h[1]
