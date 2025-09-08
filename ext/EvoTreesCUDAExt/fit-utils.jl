@@ -126,10 +126,15 @@ end
                 constraint = monotone_constraints[f]
                 
                 if is_numeric  
+                    # Running prefix sums over bins to avoid O(nbins^2)
+                    s_w = zero(T)
+                    cum_g = MVector{MAX_K,T}(ntuple(_->zero(T), MAX_K))
+                    cum_h = MVector{MAX_K,T}(ntuple(_->zero(T), MAX_K))
                     for b in 1:(nbins - 1)
-                        s_w = zero(T)
-                        @inbounds for bb in 1:b
-                            s_w += h∇[2*K+1, bb, f, node]
+                        s_w += h∇[2*K+1, b, f, node]
+                        @inbounds for kk in 1:K
+                            cum_g[kk] += h∇[kk, b, f, node]
+                            cum_h[kk] += h∇[K+kk, b, f, node]
                         end
                         if s_w >= min_weight && (w_p - s_w) >= min_weight
                             gain_l = zero(T)
@@ -137,12 +142,8 @@ end
                             predL = zero(T)
                             predR = zero(T)
                             @inbounds for kk in 1:K
-                                l_g = zero(T)
-                                l_h = zero(T)
-                                @inbounds for bb in 1:b
-                                    l_g += h∇[kk, bb, f, node]
-                                    l_h += h∇[K+kk, bb, f, node]
-                                end
+                                l_g = cum_g[kk]
+                                l_h = cum_h[kk]
                                 r_g = nodes_sum[kk, node] - l_g
                                 r_h = nodes_sum[K+kk, node] - l_h
                                 denomL = l_h + lambda * s_w + L2 + eps
@@ -263,7 +264,7 @@ function update_hist_gpu!(
     
     h∇ .= 0
     
-    n_work = cld(length(is), 8) * length(js)
+    n_work = cld(length(is), 64) * length(js)
     workgroup_size = min(256, n_work)
     hist_kernel!(backend)(
         h∇, ∇, x_bin, nidx, js, is, K;

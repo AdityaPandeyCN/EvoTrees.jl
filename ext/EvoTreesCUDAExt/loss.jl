@@ -28,7 +28,7 @@ end
     i = @index(Global)
     @inbounds if i <= length(y)
         diff = y[i] - p[1, i]
-        ∇[1, i] = sign(diff) * ∇[3, i]
+        ∇[1, i] = (y[i] - p[1, i]) * ∇[3, i]
         # Trick: Store the raw residual in the hessian slot, weighted
         ∇[2, i] = diff * ∇[3, i]
     end
@@ -179,7 +179,7 @@ end
             else
                 ∇[k, i] = iexp / isum * ∇[end, i]
             end
-            ∇[k+K, i] = iexp / isum * (1 - iexp / isum) * ∇[end, i]
+            ∇[k+K, i] = 1 / isum * (1 - iexp / isum) * ∇[end, i]
         end
     end
 end

@@ -200,8 +200,9 @@ end
     if i <= nobs
         isum = zero(eltype(p))
         @inbounds for k in 1:K
-            p[k, i] = exp(p[k, i])
-            isum += p[k, i] 
+            val = exp(p[k, i])
+            p[k, i] = val
+            isum += val 
         end
         @inbounds for k in 1:K
             p[k, i] /= isum
