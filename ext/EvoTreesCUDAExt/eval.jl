@@ -18,7 +18,7 @@ function EvoTrees.mse(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVe
     workgroupsize = min(256, n)
     eval_mse_kernel!(backend)(eval, p, y, w; ndrange=n, workgroupsize=workgroupsize)
     KernelAbstractions.synchronize(backend)
-    return sum(Float64, eval) / sum(Float64, w)
+    return sum(eval) / sum(w)
 end
 
 ########################
@@ -43,7 +43,7 @@ function EvoTrees.mae(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVe
     workgroupsize = min(256, n)
     eval_mae_kernel!(backend)(eval, p, y, w; ndrange=n, workgroupsize=workgroupsize)
     KernelAbstractions.synchronize(backend)
-    return sum(Float64, eval) / sum(Float64, w)
+    return sum(eval) / sum(w)
 end
 
 ########################
@@ -53,7 +53,7 @@ end
     i = @index(Global)
     ϵ = eps(eltype(p))
     if i <= length(y)
-        @inbounds pred = clamp(EvoTrees.sigmoid(p[1, i]), ϵ, 1 - ϵ)
+        @inbounds pred = EvoTrees.sigmoid(p[1, i])
         @inbounds eval[i] = w[i] * (-y[i] * log(pred) - (1 - y[i]) * log(1 - pred))
     end
 end
@@ -64,7 +64,7 @@ function EvoTrees.logloss(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::
     workgroupsize = min(256, n)
     eval_logloss_kernel!(backend)(eval, p, y, w; ndrange=n, workgroupsize=workgroupsize)
     KernelAbstractions.synchronize(backend)
-    return sum(Float64, eval) / sum(Float64, w)
+    return sum(eval) / sum(w)
 end
 
 ########################
@@ -84,7 +84,7 @@ function EvoTrees.gaussian_mle(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, e
     workgroupsize = min(256, n)
     eval_gaussian_kernel!(backend)(eval, p, y, w; ndrange=n, workgroupsize=workgroupsize)
     KernelAbstractions.synchronize(backend)
-    return sum(Float64, eval) / sum(Float64, w)
+    return sum(eval) / sum(w)
 end
 
 ########################
@@ -105,7 +105,7 @@ function EvoTrees.poisson(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::
     workgroupsize = min(256, n)
     eval_poisson_kernel!(backend)(eval, p, y, w; ndrange=n, workgroupsize=workgroupsize)
     KernelAbstractions.synchronize(backend)
-    return sum(Float64, eval) / sum(Float64, w)
+    return sum(eval) / sum(w)
 end
 
 ########################
@@ -125,7 +125,7 @@ function EvoTrees.gamma(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::Cu
     workgroupsize = min(256, n)
     eval_gamma_kernel!(backend)(eval, p, y, w; ndrange=n, workgroupsize=workgroupsize)
     KernelAbstractions.synchronize(backend)
-    return sum(Float64, eval) / sum(Float64, w)
+    return sum(eval) / sum(w)
 end
 
 ########################
@@ -146,7 +146,7 @@ function EvoTrees.tweedie(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::
     workgroupsize = min(256, n)
     eval_tweedie_kernel!(backend)(eval, p, y, w; ndrange=n, workgroupsize=workgroupsize)
     KernelAbstractions.synchronize(backend)
-    return sum(Float64, eval) / sum(Float64, w)
+    return sum(eval) / sum(w)
 end
 
 ########################
@@ -170,7 +170,7 @@ function EvoTrees.mlogloss(p::CuMatrix{T}, y::CuVector, w::CuVector{T}, eval::Cu
     workgroupsize = min(256, n)
     eval_mlogloss_kernel!(backend)(eval, p, y, w; ndrange=n, workgroupsize=workgroupsize)
     KernelAbstractions.synchronize(backend)
-    return sum(Float64, eval) / sum(Float64, w)
+    return sum(eval) / sum(w)
 end
 
 #################################################################
