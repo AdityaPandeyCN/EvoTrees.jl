@@ -50,8 +50,8 @@ end
     @inbounds if i <= length(y)
         diff = y[i] - p[1, i]
         ∇[1, i] = (diff > 0 ? alpha : (alpha - 1)) * ∇[3, i]
-        # Trick: Store the raw residual in the hessian slot, weighted
-        ∇[2, i] = diff * ∇[3, i]
+        # Store raw residual (unweighted) for quantile leaf computation
+        ∇[2, i] = diff
     end
 end
 

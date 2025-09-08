@@ -119,6 +119,39 @@ function grow_tree!(
         is_quantile = L <: EvoTrees.Quantile
         alpha = is_mae ? 0.5f0 : Float32(params.alpha)
 
+        # Host-side exact leaf computation for MAE/Quantile
+        if is_mae || is_quantile
+            # pull current node assignments and residuals
+            nidx_host = Array(cache.nidx)
+            res_host = Array(view(cache.∇, 2, :)) # unweighted residuals (y - p)
+            w_host = Array(view(cache.∇, size(cache.∇, 1), :)) # weights
+            max_node = maximum(nidx_host)
+            pre_leaf = zeros(Float32, max_node)
+            for node in 1:max_node
+                idxs = findall(==(node), nidx_host)
+                if !isempty(idxs)
+                    if is_mae
+                        # CPU MAE: sum((y-p)*w) / (w + lambda*w + L2)
+                        g = sum(res_host[idxs] .* w_host[idxs])
+                        wsum = sum(w_host[idxs])
+                        denom = wsum + Float32(params.lambda) * wsum + Float32(params.L2)
+                        pre = denom > 0 ? g / denom : 0f0
+                        pre_leaf[node] = pre / Float32(params.bagging_size)
+                    else
+                        # CPU Quantile: quantile(unweighted residuals) / (1 + lambda + L2 / w)
+                        vals = res_host[idxs]
+                        wsum = sum(w_host[idxs])
+                        denom = 1f0 + Float32(params.lambda) + (wsum > 0 ? Float32(params.L2) / wsum : Float32(params.L2))
+                        q = quantile(vals, alpha)
+                        pre_leaf[node] = (Float32(q) / denom) / Float32(params.bagging_size)
+                    end
+                end
+            end
+            copyto!(cache.pre_leaf_gpu, pre_leaf)
+            # write into nodes_sum row 1 for kernel consumption
+            cache.nodes_sum_gpu[1, 1:length(pre_leaf)] .= cache.pre_leaf_gpu[1:length(pre_leaf)]
+        end
+
         apply_splits_kernel!(backend)(
             cache.tree_split_gpu, cache.tree_cond_bin_gpu, cache.tree_feat_gpu, cache.tree_gain_gpu, cache.tree_pred_gpu,
             cache.nodes_sum_gpu, cache.nodes_gain_gpu,
@@ -185,17 +218,9 @@ end
         n_next[idx_base - 1] = child_l
         n_next[idx_base] = child_r
     else 
-        if is_mae
-            w = nodes_sum[3, node]
-            g = nodes_sum[1, node]
-            denom = lambda * w + L2 + w + epsv
-            tree_pred[1, node] = g / denom
-        elseif is_quantile
-            w = nodes_sum[3, node]
-            resid_sum = nodes_sum[2, node]
-            denom = (1 + lambda + (w > epsv ? L2 / w : L2))
-            mean_resid = (w > epsv ? resid_sum / w : 0)
-            tree_pred[1, node] = mean_resid / denom
+        if is_mae || is_quantile
+            # leaf set from precomputed host-side values; stored in nodes_sum row 1 for transport
+            tree_pred[1, node] = nodes_sum[1, node]
         else
             w = nodes_sum[2*K+1, node]
             if w > epsv

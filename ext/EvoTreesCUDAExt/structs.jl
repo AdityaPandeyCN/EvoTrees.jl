@@ -46,5 +46,6 @@ struct CacheGPU
     subtract_nodes_gpu::CuVector{Int32}
     build_count::CuVector{Int32}
     subtract_count::CuVector{Int32}
+    pre_leaf_gpu::CuVector{Float32}
 end
 
