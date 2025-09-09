@@ -90,7 +90,8 @@ end
     L2::T,
     K::Int,
     is_mae::Bool,
-    is_quantile::Bool
+    is_quantile::Bool,
+    is_mle2p::Bool
 ) where {T}
     n_idx = @index(Global)
     @inbounds if n_idx <= length(active_nodes)
@@ -194,6 +195,8 @@ end
                                 gain_r = zero(T)
                                 predL = zero(T)
                                 predR = zero(T)
+                                predL_mu = zero(T)
+                                predR_mu = zero(T)
                                 @inbounds for kk in 1:K
                                     l_g = cum_g[kk]
                                     l_h = cum_h[kk]
@@ -206,11 +209,21 @@ end
                                     if constraint != 0
                                         predL += -l_g / denomL
                                         predR += -r_g / denomR
+                                        if is_mle2p && kk == 1
+                                            predL_mu += -l_g / denomL
+                                            predR_mu += -r_g / denomR
+                                        end
                                     end
                                 end
                                 if constraint != 0
-                                    if !((constraint == 0) || (constraint == -1 && predL > predR) || (constraint == 1 && predL < predR))
-                                        continue
+                                    if is_mle2p
+                                        if !((constraint == 0) || (constraint == -1 && predL_mu > predR_mu) || (constraint == 1 && predL_mu < predR_mu))
+                                            continue
+                                        end
+                                    else
+                                        if !((constraint == 0) || (constraint == -1 && predL > predR) || (constraint == 1 && predL < predR))
+                                            continue
+                                        end
                                     end
                                 end
                                 g = (gain_l + gain_r - gain_p) * T(0.5)
@@ -230,6 +243,8 @@ end
                                 gain_r = zero(T)
                                 predL = zero(T)
                                 predR = zero(T)
+                                predL_mu = zero(T)
+                                predR_mu = zero(T)
                                 @inbounds for kk in 1:K
                                     l_g = h∇[kk, b, f, node]
                                     l_h = h∇[K+kk, b, f, node]
@@ -242,11 +257,21 @@ end
                                     if constraint != 0
                                         predL += -l_g / denomL
                                         predR += -r_g / denomR
+                                        if is_mle2p && kk == 1
+                                            predL_mu += -l_g / denomL
+                                            predR_mu += -r_g / denomR
+                                        end
                                     end
                                 end
                                 if constraint != 0
-                                    if !((constraint == 0) || (constraint == -1 && predL > predR) || (constraint == 1 && predL < predR))
-                                        continue
+                                    if is_mle2p
+                                        if !((constraint == 0) || (constraint == -1 && predL_mu > predR_mu) || (constraint == 1 && predL_mu < predR_mu))
+                                            continue
+                                        end
+                                    else
+                                        if !((constraint == 0) || (constraint == -1 && predL > predR) || (constraint == 1 && predL < predR))
+                                            continue
+                                        end
                                     end
                                 end
                                 g = (gain_l + gain_r - gain_p) * T(0.5)
@@ -312,7 +337,7 @@ function update_hist_gpu!(
     h∇, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes,
     nodes_sum_gpu, params, left_nodes_buf, right_nodes_buf, target_mask_buf,
     feattypes, monotone_constraints, K;
-    is_mae::Bool=false, is_quantile::Bool=false, is_cred::Bool=false
+    is_mae::Bool=false, is_quantile::Bool=false, is_cred::Bool=false, is_mle2p::Bool=false
 )
     backend = KernelAbstractions.get_backend(h∇)
     n_active = length(active_nodes)
@@ -357,7 +382,8 @@ function update_hist_gpu!(
         eltype(gains)(params.L2),
         K,
         is_mae,
-        is_quantile;
+        is_quantile,
+        is_mle2p;
         ndrange = n_active,
         workgroupsize = min(256, n_active)
     )

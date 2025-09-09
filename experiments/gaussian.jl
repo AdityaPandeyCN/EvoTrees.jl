@@ -54,7 +54,6 @@ plot!(X_train[:,1][x_perm], pred_q10[x_perm, 1], color = "darkred", linewidth = 
 plot!(X_train[:,1][x_perm], pred_q90[x_perm, 1], color = "green", linewidth = 1.5, label = "q90")
 savefig("figures/regression_gaussian_v1.png")
 
-
 # compare with zygote
 using Zygote
 
@@ -67,13 +66,11 @@ target = 0.1
 δ²1 = 1 / max(1e-8, exp(2*pred[2]))
 δ²2 = 2 / max(1e-8, exp(2*pred[2])) * (pred[1] - target)^2
 
-
 lpdf(x,μ,σ) = -log(σ) - log(2π)/2 - 1/2*((x-μ)/σ)^2
 lpdf(0, pred[1], pred[2])
 
 lpdf2(x,μ,lσ) = -log(exp(lσ)) - log(2π)/2 - 1/2*((x-μ)/exp(lσ))^2
 lpdf2(0, pred[1], pred[2])
-
 
 n1 = Normal(0, 1)
 Distributions.logpdf(n1, 0)
@@ -86,3 +83,4 @@ gradient_lpdf(x,pred) = gradient(lpdf2, x, pred[1], pred[2])[3]
 hessian_lpdf(x,pred) = gradient(gradient_lpdf, x, pred)[1]
 gradient_lpdf(target, pred)
 hessian_lpdf(target, pred)
+

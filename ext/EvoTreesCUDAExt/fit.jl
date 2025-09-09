@@ -61,7 +61,7 @@ function grow_tree!(
         1, view(cache.anodes_gpu, 1:1), cache.nodes_sum_gpu, params,
         cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf, 
         cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K;
-        is_mae=(L <: EvoTrees.MAE), is_quantile=(L <: EvoTrees.Quantile), is_cred=(L <: EvoTrees.Cred)
+        is_mae=(L <: EvoTrees.MAE), is_quantile=(L <: EvoTrees.Quantile), is_cred=(L <: EvoTrees.Cred), is_mle2p=(L <: EvoTrees.MLE2P)
     )
     
     get_gain_gpu!(backend)(cache.nodes_gain_gpu, cache.nodes_sum_gpu, view(cache.anodes_gpu, 1:1), Float32(params.lambda), Float32(params.L2), cache.K; ndrange=1, workgroupsize=1)
@@ -110,7 +110,7 @@ function grow_tree!(
                     depth, view(cache.build_nodes_gpu, 1:build_count_val), cache.nodes_sum_gpu, params,
                     cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf, 
                     cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K;
-                    is_mae=(L <: EvoTrees.MAE), is_quantile=(L <: EvoTrees.Quantile), is_cred=(L <: EvoTrees.Cred)
+                    is_mae=(L <: EvoTrees.MAE), is_quantile=(L <: EvoTrees.Quantile), is_cred=(L <: EvoTrees.Cred), is_mle2p=(L <: EvoTrees.MLE2P)
                 )
             end
         end
