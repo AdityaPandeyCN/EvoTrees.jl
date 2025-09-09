@@ -197,6 +197,8 @@ EvoTrees.wmae(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T};
 ########################
 # Registration
 ########################
-# Remove credibility GPU metrics - let them fall back to CPU defaults
+# Add MSE as the evaluation metric for credibility losses
+push!(EvoTrees.metric_dict, :cred_var => EvoTrees.mse)
+push!(EvoTrees.metric_dict, :cred_std => EvoTrees.mse)
 push!(EvoTrees.metric_dict, :quantile => EvoTrees.quantile)
 
