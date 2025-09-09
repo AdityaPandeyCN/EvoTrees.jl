@@ -312,7 +312,7 @@ function update_hist_gpu!(
     h∇, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes,
     nodes_sum_gpu, params, left_nodes_buf, right_nodes_buf, target_mask_buf,
     feattypes, monotone_constraints, K;
-    is_mae::Bool=false, is_quantile::Bool=false
+    is_mae::Bool=false, is_quantile::Bool=false, is_cred::Bool=false
 )
     backend = KernelAbstractions.get_backend(h∇)
     n_active = length(active_nodes)
