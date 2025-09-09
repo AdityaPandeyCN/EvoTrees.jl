@@ -83,7 +83,6 @@ end
 @kernel function kernel_quantile_∇!(∇, p, y, alpha)
     i = @index(Global)
     if i <= length(y)
-        @inbounds ∇[1, i] = (y[i] - p[1, i]) * ∇[3, i]
         diff = (y[i] - p[1, i])
         @inbounds ∇[1, i] = diff > 0 ? alpha * ∇[3, i] : (alpha - 1) * ∇[3, i]
         @inbounds ∇[2, i] = diff
