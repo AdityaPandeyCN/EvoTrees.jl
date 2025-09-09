@@ -118,6 +118,7 @@ function grow_tree!(
         is_mae = L <: EvoTrees.MAE
         is_quantile = L <: EvoTrees.Quantile
         is_cred = L <: EvoTrees.Cred
+        is_mle2p = L <: EvoTrees.MLE2P
         alpha = is_mae ? 0.5f0 : Float32(params.alpha)
 
         if is_mae || is_quantile
@@ -162,7 +163,7 @@ function grow_tree!(
             cache.h∇,
             view(cache.anodes_gpu, 1:n_nodes_level),
             depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), Float32(params.L2),
-            K, is_quantile, is_mae, is_cred, alpha, Float32(params.bagging_size);
+            K, is_quantile, is_mae, is_cred, is_mle2p, alpha, Float32(params.bagging_size);
             ndrange = n_active, workgroupsize=min(256, n_active)
         )
         
@@ -199,7 +200,7 @@ end
     h∇,
     active_nodes,
     depth, max_depth, lambda, gamma, L2,
-    K, is_quantile::Bool, is_mae::Bool, is_cred::Bool, alpha::Float32, bagging_size::Float32
+    K, is_quantile::Bool, is_mae::Bool, is_cred::Bool, is_mle2p::Bool, alpha::Float32, bagging_size::Float32
 )
     n_idx = @index(Global)
     node = active_nodes[n_idx]
@@ -218,13 +219,22 @@ end
         n_next[idx_base] = child_r
     else 
         if is_mae || is_quantile
-            
             tree_pred[1, node] = nodes_sum[1, node]
         elseif is_cred
             w = nodes_sum[2*K+1, node]
             g = nodes_sum[1, node]
             if w > epsv
                 tree_pred[1, node] = (g / (w + L2 + epsv)) / bagging_size
+            end
+        elseif is_mle2p
+            w = nodes_sum[2*K+1, node]
+            if w > epsv
+                g1 = nodes_sum[1, node]
+                h1 = nodes_sum[K+1, node]
+                g2 = nodes_sum[2, node]
+                h2 = nodes_sum[K+2, node]
+                tree_pred[1, node] = (-g1 / (h1 + lambda * w + L2 + epsv)) / bagging_size
+                tree_pred[2, node] = (-g2 / (h2 + lambda * w + L2 + epsv)) / bagging_size
             end
         else
             w = nodes_sum[2*K+1, node]
