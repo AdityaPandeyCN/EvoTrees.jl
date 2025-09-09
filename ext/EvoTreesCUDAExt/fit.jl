@@ -60,7 +60,8 @@ function grow_tree!(
         cache.∇, cache.x_bin, cache.nidx, cache.js, is,
         1, view(cache.anodes_gpu, 1:1), cache.nodes_sum_gpu, params,
         cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf, 
-        cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
+        cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K;
+        is_mae=(L <: EvoTrees.MAE), is_quantile=(L <: EvoTrees.Quantile), is_cred=(L <: EvoTrees.Cred)
     )
     
     get_gain_gpu!(backend)(cache.nodes_gain_gpu, cache.nodes_sum_gpu, view(cache.anodes_gpu, 1:1), Float32(params.lambda), Float32(params.L2), cache.K; ndrange=1, workgroupsize=1)
@@ -108,13 +109,15 @@ function grow_tree!(
                     cache.∇, cache.x_bin, cache.nidx, cache.js, is,
                     depth, view(cache.build_nodes_gpu, 1:build_count_val), cache.nodes_sum_gpu, params,
                     cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf, 
-                    cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
+                    cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K;
+                    is_mae=(L <: EvoTrees.MAE), is_quantile=(L <: EvoTrees.Quantile), is_cred=(L <: EvoTrees.Cred)
                 )
             end
         end
         
         is_mae = L <: EvoTrees.MAE
         is_quantile = L <: EvoTrees.Quantile
+        is_cred = L <: EvoTrees.Cred
         alpha = is_mae ? 0.5f0 : Float32(params.alpha)
 
         if is_mae || is_quantile
@@ -159,7 +162,7 @@ function grow_tree!(
             cache.h∇,
             view(cache.anodes_gpu, 1:n_nodes_level),
             depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), Float32(params.L2),
-            K, is_quantile, is_mae, alpha, Float32(params.bagging_size);
+            K, is_quantile, is_mae, is_cred, alpha, Float32(params.bagging_size);
             ndrange = n_active, workgroupsize=min(256, n_active)
         )
         
@@ -196,7 +199,7 @@ end
     h∇,
     active_nodes,
     depth, max_depth, lambda, gamma, L2,
-    K, is_quantile::Bool, is_mae::Bool, alpha::Float32, bagging_size::Float32
+    K, is_quantile::Bool, is_mae::Bool, is_cred::Bool, alpha::Float32, bagging_size::Float32
 )
     n_idx = @index(Global)
     node = active_nodes[n_idx]
@@ -217,6 +220,12 @@ end
         if is_mae || is_quantile
             
             tree_pred[1, node] = nodes_sum[1, node]
+        elseif is_cred
+            w = nodes_sum[2*K+1, node]
+            g = nodes_sum[1, node]
+            if w > epsv
+                tree_pred[1, node] = (g / (w + L2 + epsv)) / bagging_size
+            end
         else
             w = nodes_sum[2*K+1, node]
             if w > epsv

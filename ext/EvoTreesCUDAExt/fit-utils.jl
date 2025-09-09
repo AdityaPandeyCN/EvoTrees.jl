@@ -115,13 +115,12 @@ end
             g_best, b_best, f_best = T(-Inf), Int32(0), Int32(0)
             
             if is_mae || is_quantile
-                # MAE/Quantile gains (match CPU get_gain)
                 parent_g = nodes_sum[1, node]
                 parent_avg = w_p > eps ? parent_g / w_p : zero(T)
                 for j_idx in 1:length(js)
                     f = js[j_idx]
                     is_numeric = feattypes[f]
-                    if is_numeric
+                    if is_numeric  
                         s_w = zero(T)
                         cum_g = zero(T)
                         for b in 1:(nbins - 1)
@@ -170,7 +169,6 @@ end
                     end
                 end
             else
-                # GradientRegression / others (original g^2/h formulation)
                 gain_p = zero(T)
                 for kk in 1:K
                     g = nodes_sum[kk, node]

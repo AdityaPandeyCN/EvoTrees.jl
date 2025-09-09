@@ -48,3 +48,4 @@ struct CacheGPU
     subtract_count::CuVector{Int32}
     pre_leaf_gpu::CuVector{Float32}
 end
+
