@@ -88,7 +88,9 @@ end
     lambda::T,
     min_weight::T,
     L2::T,
-    K::Int
+    K::Int,
+    is_mae::Bool,
+    is_quantile::Bool
 ) where {T}
     n_idx = @index(Global)
     @inbounds if n_idx <= length(active_nodes)
@@ -110,96 +112,151 @@ end
             end
             
             w_p = nodes_sum[2*K+1, node]
-            gain_p = zero(T)
-            for k in 1:K
-                g = nodes_sum[k, node]
-                h = nodes_sum[K+k, node]
-                gain_p += g^2 / (h + lambda * w_p + L2 + eps)
-            end
-
             g_best, b_best, f_best = T(-Inf), Int32(0), Int32(0)
             
-            for j_idx in 1:length(js)
-                f = js[j_idx]
-                is_numeric = feattypes[f]
-                constraint = monotone_constraints[f]
-                
-                if is_numeric  
-                    
-                    s_w = zero(T)
-                    cum_g = MVector{MAX_K,T}(ntuple(_->zero(T), MAX_K))
-                    cum_h = MVector{MAX_K,T}(ntuple(_->zero(T), MAX_K))
-                    for b in 1:(nbins - 1)
-                        s_w += h∇[2*K+1, b, f, node]
-                        @inbounds for kk in 1:K
-                            cum_g[kk] += h∇[kk, b, f, node]
-                            cum_h[kk] += h∇[K+kk, b, f, node]
+            if is_mae || is_quantile
+                # MAE/Quantile gains (match CPU get_gain)
+                parent_g = nodes_sum[1, node]
+                parent_avg = w_p > eps ? parent_g / w_p : zero(T)
+                for j_idx in 1:length(js)
+                    f = js[j_idx]
+                    is_numeric = feattypes[f]
+                    if is_numeric
+                        s_w = zero(T)
+                        cum_g = zero(T)
+                        for b in 1:(nbins - 1)
+                            s_w += h∇[2*K+1, b, f, node]
+                            cum_g += h∇[1, b, f, node]
+                            l_w = s_w
+                            r_w = w_p - l_w
+                            if l_w >= min_weight && r_w >= min_weight
+                                l_g = cum_g
+                                r_g = parent_g - l_g
+                                denomL = (one(T) + lambda + (l_w > eps ? L2 / l_w : L2))
+                                denomR = (one(T) + lambda + (r_w > eps ? L2 / r_w : L2))
+                                l_avg = l_w > eps ? l_g / l_w : zero(T)
+                                r_avg = r_w > eps ? r_g / r_w : zero(T)
+                                gain_l = abs(l_avg - parent_avg) * l_w / denomL
+                                gain_r = abs(r_avg - parent_avg) * r_w / denomR
+                                g = gain_l + gain_r
+                                if g > g_best
+                                    g_best = g
+                                    b_best = Int32(b)
+                                    f_best = Int32(f)
+                                end
+                            end
                         end
-                        if s_w >= min_weight && (w_p - s_w) >= min_weight
-                            gain_l = zero(T)
-                            gain_r = zero(T)
-                            predL = zero(T)
-                            predR = zero(T)
-                            @inbounds for kk in 1:K
-                                l_g = cum_g[kk]
-                                l_h = cum_h[kk]
-                                r_g = nodes_sum[kk, node] - l_g
-                                r_h = nodes_sum[K+kk, node] - l_h
-                                denomL = l_h + lambda * s_w + L2 + eps
-                                denomR = r_h + lambda * (w_p - s_w) + L2 + eps
-                                gain_l += l_g^2 / denomL
-                                gain_r += r_g^2 / denomR
-                                if constraint != 0
-                                    predL += -l_g / denomL
-                                    predR += -r_g / denomR
+                    else
+                        for b in 1:(nbins - 1)
+                            l_w = h∇[2*K+1, b, f, node]
+                            r_w = w_p - l_w
+                            if l_w >= min_weight && r_w >= min_weight
+                                l_g = h∇[1, b, f, node]
+                                r_g = nodes_sum[1, node] - l_g
+                                denomL = (one(T) + lambda + (l_w > eps ? L2 / l_w : L2))
+                                denomR = (one(T) + lambda + (r_w > eps ? L2 / r_w : L2))
+                                l_avg = l_w > eps ? l_g / l_w : zero(T)
+                                r_avg = r_w > eps ? r_g / r_w : zero(T)
+                                gain_l = abs(l_avg - parent_avg) * l_w / denomL
+                                gain_r = abs(r_avg - parent_avg) * r_w / denomR
+                                g = gain_l + gain_r
+                                if g > g_best
+                                    g_best = g
+                                    b_best = Int32(b)
+                                    f_best = Int32(f)
                                 end
-                            end
-                            if constraint != 0
-                                if !((constraint == 0) || (constraint == -1 && predL > predR) || (constraint == 1 && predL < predR))
-                                    continue
-                                end
-                            end
-                            g = (gain_l + gain_r - gain_p) * T(0.5)
-                            if g > g_best
-                                g_best = g
-                                b_best = Int32(b)
-                                f_best = Int32(f)
                             end
                         end
                     end
-                else  
-                    for b in 1:(nbins - 1)
-                        l_w = h∇[2*K+1, b, f, node]
-                        r_w = w_p - l_w
-                        if l_w >= min_weight && r_w >= min_weight
-                            gain_l = zero(T)
-                            gain_r = zero(T)
-                            predL = zero(T)
-                            predR = zero(T)
+                end
+            else
+                # GradientRegression / others (original g^2/h formulation)
+                gain_p = zero(T)
+                for kk in 1:K
+                    g = nodes_sum[kk, node]
+                    h = nodes_sum[K+kk, node]
+                    gain_p += g^2 / (h + lambda * w_p + L2 + eps)
+                end
+                for j_idx in 1:length(js)
+                    f = js[j_idx]
+                    is_numeric = feattypes[f]
+                    constraint = monotone_constraints[f]
+                    if is_numeric  
+                        s_w = zero(T)
+                        cum_g = MVector{MAX_K,T}(ntuple(_->zero(T), MAX_K))
+                        cum_h = MVector{MAX_K,T}(ntuple(_->zero(T), MAX_K))
+                        for b in 1:(nbins - 1)
+                            s_w += h∇[2*K+1, b, f, node]
                             @inbounds for kk in 1:K
-                                l_g = h∇[kk, b, f, node]
-                                l_h = h∇[K+kk, b, f, node]
-                                r_g = nodes_sum[kk, node] - l_g
-                                r_h = nodes_sum[K+kk, node] - l_h
-                                denomL = l_h + lambda * l_w + L2 + eps
-                                denomR = r_h + lambda * r_w + L2 + eps
-                                gain_l += l_g^2 / denomL
-                                gain_r += r_g^2 / denomR
+                                cum_g[kk] += h∇[kk, b, f, node]
+                                cum_h[kk] += h∇[K+kk, b, f, node]
+                            end
+                            if s_w >= min_weight && (w_p - s_w) >= min_weight
+                                gain_l = zero(T)
+                                gain_r = zero(T)
+                                predL = zero(T)
+                                predR = zero(T)
+                                @inbounds for kk in 1:K
+                                    l_g = cum_g[kk]
+                                    l_h = cum_h[kk]
+                                    r_g = nodes_sum[kk, node] - l_g
+                                    r_h = nodes_sum[K+kk, node] - l_h
+                                    denomL = l_h + lambda * s_w + L2 + eps
+                                    denomR = r_h + lambda * (w_p - s_w) + L2 + eps
+                                    gain_l += l_g^2 / denomL
+                                    gain_r += r_g^2 / denomR
+                                    if constraint != 0
+                                        predL += -l_g / denomL
+                                        predR += -r_g / denomR
+                                    end
+                                end
                                 if constraint != 0
-                                    predL += -l_g / denomL
-                                    predR += -r_g / denomR
+                                    if !((constraint == 0) || (constraint == -1 && predL > predR) || (constraint == 1 && predL < predR))
+                                        continue
+                                    end
+                                end
+                                g = (gain_l + gain_r - gain_p) * T(0.5)
+                                if g > g_best
+                                    g_best = g
+                                    b_best = Int32(b)
+                                    f_best = Int32(f)
                                 end
                             end
-                            if constraint != 0
-                                if !((constraint == 0) || (constraint == -1 && predL > predR) || (constraint == 1 && predL < predR))
-                                    continue
+                        end
+                    else  
+                        for b in 1:(nbins - 1)
+                            l_w = h∇[2*K+1, b, f, node]
+                            r_w = w_p - l_w
+                            if l_w >= min_weight && r_w >= min_weight
+                                gain_l = zero(T)
+                                gain_r = zero(T)
+                                predL = zero(T)
+                                predR = zero(T)
+                                @inbounds for kk in 1:K
+                                    l_g = h∇[kk, b, f, node]
+                                    l_h = h∇[K+kk, b, f, node]
+                                    r_g = nodes_sum[kk, node] - l_g
+                                    r_h = nodes_sum[K+kk, node] - l_h
+                                    denomL = l_h + lambda * l_w + L2 + eps
+                                    denomR = r_h + lambda * r_w + L2 + eps
+                                    gain_l += l_g^2 / denomL
+                                    gain_r += r_g^2 / denomR
+                                    if constraint != 0
+                                        predL += -l_g / denomL
+                                        predR += -r_g / denomR
+                                    end
                                 end
-                            end
-                            g = (gain_l + gain_r - gain_p) * T(0.5)
-                            if g > g_best
-                                g_best = g
-                                b_best = Int32(b)
-                                f_best = Int32(f)
+                                if constraint != 0
+                                    if !((constraint == 0) || (constraint == -1 && predL > predR) || (constraint == 1 && predL < predR))
+                                        continue
+                                    end
+                                end
+                                g = (gain_l + gain_r - gain_p) * T(0.5)
+                                if g > g_best
+                                    g_best = g
+                                    b_best = Int32(b)
+                                    f_best = Int32(f)
+                                end
                             end
                         end
                     end
@@ -248,7 +305,7 @@ end
             b = remainder ÷ n_k + 1
             k = remainder % n_k + 1
             
-            @inbounds h∇[k, b, j, node] = h∇[k, b, j, parent] - h∇[k, b, j, sibling]
+            h∇[k, b, j, node] = h∇[k, b, j, parent] - h∇[k, b, j, sibling]
         end
     end
 end
@@ -256,7 +313,8 @@ end
 function update_hist_gpu!(
     h∇, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes,
     nodes_sum_gpu, params, left_nodes_buf, right_nodes_buf, target_mask_buf,
-    feattypes, monotone_constraints, K
+    feattypes, monotone_constraints, K;
+    is_mae::Bool=false, is_quantile::Bool=false
 )
     backend = KernelAbstractions.get_backend(h∇)
     n_active = length(active_nodes)
@@ -299,7 +357,9 @@ function update_hist_gpu!(
         eltype(gains)(params.lambda),
         eltype(gains)(params.min_weight),
         eltype(gains)(params.L2),
-        K;
+        K,
+        is_mae,
+        is_quantile;
         ndrange = n_active,
         workgroupsize = min(256, n_active)
     )
