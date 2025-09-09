@@ -191,25 +191,12 @@ function EvoTrees.quantile(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval:
     return sum(Float64, eval) / sum(Float64, w)
 end
 
-########################
-# Credibility
-########################
-function credibility_metric_gpu(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; kwargs...) where {T}
-    backend = get_backend(p)
-    n = length(y)
-    workgroupsize = min(256, n)
-    eval_mse_kernel!(backend)(eval, p, y, w; ndrange=n, workgroupsize=workgroupsize)
-    KernelAbstractions.synchronize(backend)
-    return sum(Float64, eval) / sum(Float64, w)
-end
-
 EvoTrees.wmae(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; kwargs...) where {T} = 
     EvoTrees.quantile(p, y, w, eval; kwargs...)
 
 ########################
 # Registration
 ########################
-push!(EvoTrees.metric_dict, :cred_var => credibility_metric_gpu)
-push!(EvoTrees.metric_dict, :cred_std => credibility_metric_gpu)
+# Remove credibility GPU metrics - let them fall back to CPU defaults
 push!(EvoTrees.metric_dict, :quantile => EvoTrees.quantile)
 
