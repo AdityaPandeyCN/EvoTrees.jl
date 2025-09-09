@@ -159,7 +159,7 @@ function grow_tree!(
             cache.h∇,
             view(cache.anodes_gpu, 1:n_nodes_level),
             depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), Float32(params.L2),
-            K, is_quantile, is_mae, alpha;
+            K, is_quantile, is_mae, alpha, Float32(params.bagging_size);
             ndrange = n_active, workgroupsize=min(256, n_active)
         )
         
@@ -196,7 +196,7 @@ end
     h∇,
     active_nodes,
     depth, max_depth, lambda, gamma, L2,
-    K, is_quantile::Bool, is_mae::Bool, alpha::Float32
+    K, is_quantile::Bool, is_mae::Bool, alpha::Float32, bagging_size::Float32
 )
     n_idx = @index(Global)
     node = active_nodes[n_idx]
@@ -223,7 +223,7 @@ end
                 @inbounds for kk in 1:K
                     gk = nodes_sum[kk, node]
                     hk = nodes_sum[K+kk, node]
-                    tree_pred[kk, node] = -gk / (hk + lambda * w + L2 + epsv)
+                    tree_pred[kk, node] = (-gk / (hk + lambda * w + L2 + epsv)) / bagging_size
                 end
             end
         end
@@ -246,3 +246,4 @@ end
         nodes_gain[node] = gain
     end
 end
+

@@ -159,7 +159,7 @@ end
                                     continue
                                 end
                             end
-                            g = gain_l + gain_r - gain_p
+                            g = (gain_l + gain_r - gain_p) * T(0.5)
                             if g > g_best
                                 g_best = g
                                 b_best = Int32(b)
@@ -195,7 +195,7 @@ end
                                     continue
                                 end
                             end
-                            g = gain_l + gain_r - gain_p
+                            g = (gain_l + gain_r - gain_p) * T(0.5)
                             if g > g_best
                                 g_best = g
                                 b_best = Int32(b)

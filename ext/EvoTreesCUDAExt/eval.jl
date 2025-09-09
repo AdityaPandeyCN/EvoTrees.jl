@@ -72,7 +72,7 @@ end
     i = @index(Global)
     if i <= length(y)
         @inbounds sigma2 = exp(2 * p[2, i])
-        @inbounds eval[i] = -w[i] * (p[2, i] + 0.5 * (y[i] - p[1, i])^2 / sigma2)
+        @inbounds eval[i] = -w[i] * (p[2, i] + (y[i] - p[1, i])^2 / (2 * sigma2))
     end
 end
 
@@ -198,7 +198,7 @@ function credibility_metric_gpu(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, 
     backend = get_backend(p)
     n = length(y)
     workgroupsize = min(256, n)
-    eval_gaussian_kernel!(backend)(eval, p, y, w; ndrange=n, workgroupsize=workgroupsize)
+    eval_mse_kernel!(backend)(eval, p, y, w; ndrange=n, workgroupsize=workgroupsize)
     KernelAbstractions.synchronize(backend)
     return sum(Float64, eval) / sum(Float64, w)
 end

@@ -29,8 +29,8 @@ end
     @inbounds if i <= length(y)
         diff = y[i] - p[1, i]
         ∇[1, i] = (y[i] - p[1, i]) * ∇[3, i]
-        # Trick: Store the raw residual in the hessian slot, weighted
-        ∇[2, i] = diff * ∇[3, i]
+        # Store the raw residual (unweighted) in the hessian slot for MAE leaf computation
+        ∇[2, i] = diff
     end
 end
 
@@ -283,3 +283,4 @@ function EvoTrees.update_grads!(
     KernelAbstractions.synchronize(backend)
     return
 end
+
