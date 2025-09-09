@@ -173,9 +173,9 @@ function EvoTrees.mlogloss(p::CuMatrix{T}, y::CuVector, w::CuVector{T}, eval::Cu
     return sum(eval) / sum(w)
 end
 
-#################################################################
-# Fix: Added missing GPU implementation for Quantile Loss
-#################################################################
+########################
+# Quantile
+########################
 @kernel function eval_quantile_kernel!(eval, p, y, w, alpha)
     i = @index(Global)
     @inbounds if i <= length(y)
@@ -193,9 +193,9 @@ function EvoTrees.quantile(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval:
     return sum(Float64, eval) / sum(Float64, w)
 end
 
-#################################################################
-# Fix: Added missing GPU implementations for Credibility Losses
-#################################################################
+########################
+# Credibility
+########################
 function credibility_metric_gpu(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; kwargs...) where {T}
     backend = get_backend(p)
     n = length(y)
@@ -208,9 +208,9 @@ end
 EvoTrees.wmae(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; kwargs...) where {T} = 
     EvoTrees.quantile(p, y, w, eval; kwargs...)
 
-#################################################################
-# Fix: Add metrics to dictionary to solve UndefVarError
-#################################################################
+########################
+# Registration
+########################
 push!(EvoTrees.metric_dict, :cred_var => credibility_metric_gpu)
 push!(EvoTrees.metric_dict, :cred_std => credibility_metric_gpu)
 push!(EvoTrees.metric_dict, :quantile => EvoTrees.quantile)
