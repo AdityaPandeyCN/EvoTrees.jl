@@ -195,10 +195,16 @@ EvoTrees.wmae(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T};
     EvoTrees.quantile(p, y, w, eval; kwargs...)
 
 ########################
+# Credibility metrics - use MSE
+########################
+function credibility_mse_gpu(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T}; kwargs...) where {T}
+    return EvoTrees.mse(p, y, w, eval; kwargs...)
+end
+
+########################
 # Registration
 ########################
-# Add MSE as the evaluation metric for credibility losses
-push!(EvoTrees.metric_dict, :cred_var => EvoTrees.mse)
-push!(EvoTrees.metric_dict, :cred_std => EvoTrees.mse)
+push!(EvoTrees.metric_dict, :cred_var => credibility_mse_gpu)
+push!(EvoTrees.metric_dict, :cred_std => credibility_mse_gpu)
 push!(EvoTrees.metric_dict, :quantile => EvoTrees.quantile)
 
