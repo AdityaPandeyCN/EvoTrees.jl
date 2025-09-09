@@ -105,9 +105,10 @@ end
 ########################
 @kernel function eval_poisson_kernel!(eval, p, y, w)
     i = @index(Global)
+    ϵ = eps(eltype(p)(1e-7))
     if i <= length(y)
         @inbounds pred = exp(p[1, i])
-        @inbounds eval[i] = w[i] * 2 * (y[i] * (log(y[i]) - log(pred)) + pred - y[i])
+        @inbounds eval[i] = w[i] * 2 * (y[i] * log(y[i] / pred + ϵ) + pred - y[i])
     end
 end
 
