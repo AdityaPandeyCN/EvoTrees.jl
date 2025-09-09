@@ -65,7 +65,7 @@ end
             cond = feattypes[feat] ? x_bin[i, feat] <= cond_bins[nid] : x_bin[i, feat] == cond_bins[nid]
             nid = nid << 1 + !cond
         end
-        pred[1, i] = min(eltype(pred)(15), max(eltype(pred)(-15), pred[1, i] + leaf_pred[1, nid]))
+        pred[1, i] += leaf_pred[1, nid]
     end
 end
 
