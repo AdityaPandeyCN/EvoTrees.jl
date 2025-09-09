@@ -197,7 +197,8 @@ EvoTrees.wmae(p::CuMatrix{T}, y::CuVector{T}, w::CuVector{T}, eval::CuVector{T};
 ########################
 # Registration
 ########################
-# Credibility losses use MAE metric by default (see learners.jl line 77-78)
-# No need to register anything - they will use the existing MAE metric
+# Credibility losses should use MAE for evaluation (same as CPU default)
+push!(EvoTrees.metric_dict, :cred_var => EvoTrees.mae)
+push!(EvoTrees.metric_dict, :cred_std => EvoTrees.mae)
 push!(EvoTrees.metric_dict, :quantile => EvoTrees.quantile)
 
