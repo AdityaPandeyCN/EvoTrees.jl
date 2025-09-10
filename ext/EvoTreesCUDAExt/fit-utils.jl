@@ -29,14 +29,6 @@ const MAX_K = 8
     end
 end
 
-@kernel function fill_mask_kernel!(mask::AbstractVector{UInt8}, @Const(nodes))
-    i = @index(Global)
-    @inbounds if i <= length(nodes)
-        node = nodes[i]
-        node > 0 && node <= length(mask) && (mask[node] = UInt8(1))
-    end
-end
-
 @kernel function hist_kernel!(
     h∇::AbstractArray{T,4},
     @Const(∇),
@@ -102,6 +94,7 @@ end
             nbins = size(h∇, 2)
             eps = T(1e-8)
             
+            # Compute node sums using first feature
             @inbounds let f = js[1]
                 for k in 1:(2*K+1)
                     sum_val = zero(T)
@@ -116,169 +109,101 @@ end
             g_best, b_best, f_best = T(-Inf), Int32(0), Int32(0)
             
             if is_mae || is_quantile
+                # MAE/Quantile path - simplified
                 parent_g = nodes_sum[1, node]
                 parent_avg = w_p > eps ? parent_g / w_p : zero(T)
                 for j_idx in 1:length(js)
                     f = js[j_idx]
                     is_numeric = feattypes[f]
-                    if is_numeric  
-                        s_w = zero(T)
-                        cum_g = zero(T)
-                        for b in 1:(nbins - 1)
+                    
+                    bin_range = is_numeric ? (1:(nbins-1)) : (1:(nbins-1))
+                    s_w = zero(T)
+                    cum_g = zero(T)
+                    
+                    for b in bin_range
+                        if is_numeric
                             s_w += h∇[2*K+1, b, f, node]
                             cum_g += h∇[1, b, f, node]
-                            l_w = s_w
-                            r_w = w_p - l_w
-                            if l_w >= min_weight && r_w >= min_weight
-                                l_g = cum_g
-                                r_g = parent_g - l_g
-                                denomL = (one(T) + lambda + (l_w > eps ? L2 / l_w : L2))
-                                denomR = (one(T) + lambda + (r_w > eps ? L2 / r_w : L2))
-                                l_avg = l_w > eps ? l_g / l_w : zero(T)
-                                r_avg = r_w > eps ? r_g / r_w : zero(T)
-                                gain_l = abs(l_avg - parent_avg) * l_w / denomL
-                                gain_r = abs(r_avg - parent_avg) * r_w / denomR
-                                g = gain_l + gain_r
-                                if g > g_best
-                                    g_best = g
-                                    b_best = Int32(b)
-                                    f_best = Int32(f)
-                                end
-                            end
+                        else
+                            s_w = h∇[2*K+1, b, f, node]
+                            cum_g = h∇[1, b, f, node]
                         end
-                    else
-                        for b in 1:(nbins - 1)
-                            l_w = h∇[2*K+1, b, f, node]
-                            r_w = w_p - l_w
-                            if l_w >= min_weight && r_w >= min_weight
-                                l_g = h∇[1, b, f, node]
-                                r_g = nodes_sum[1, node] - l_g
-                                denomL = (one(T) + lambda + (l_w > eps ? L2 / l_w : L2))
-                                denomR = (one(T) + lambda + (r_w > eps ? L2 / r_w : L2))
-                                l_avg = l_w > eps ? l_g / l_w : zero(T)
-                                r_avg = r_w > eps ? r_g / r_w : zero(T)
-                                gain_l = abs(l_avg - parent_avg) * l_w / denomL
-                                gain_r = abs(r_avg - parent_avg) * r_w / denomR
-                                g = gain_l + gain_r
-                                if g > g_best
-                                    g_best = g
-                                    b_best = Int32(b)
-                                    f_best = Int32(f)
-                                end
+                        
+                        l_w, r_w = s_w, w_p - s_w
+                        if l_w >= min_weight && r_w >= min_weight
+                            l_g, r_g = cum_g, parent_g - cum_g
+                            denomL = (one(T) + lambda + (l_w > eps ? L2 / l_w : L2))
+                            denomR = (one(T) + lambda + (r_w > eps ? L2 / r_w : L2))
+                            l_avg = l_w > eps ? l_g / l_w : zero(T)
+                            r_avg = r_w > eps ? r_g / r_w : zero(T)
+                            g = abs(l_avg - parent_avg) * l_w / denomL + abs(r_avg - parent_avg) * r_w / denomR
+                            if g > g_best
+                                g_best, b_best, f_best = g, Int32(b), Int32(f)
                             end
                         end
                     end
                 end
             else
+                # Standard gradient boosting path
                 gain_p = zero(T)
                 for kk in 1:K
-                    g = nodes_sum[kk, node]
-                    h = nodes_sum[K+kk, node]
+                    g, h = nodes_sum[kk, node], nodes_sum[K+kk, node]
                     gain_p += g^2 / (h + lambda * w_p + L2 + eps)
                 end
+                
                 for j_idx in 1:length(js)
                     f = js[j_idx]
                     is_numeric = feattypes[f]
                     constraint = monotone_constraints[f]
-                    if is_numeric  
-                        s_w = zero(T)
-                        cum_g = MVector{MAX_K,T}(ntuple(_->zero(T), MAX_K))
-                        cum_h = MVector{MAX_K,T}(ntuple(_->zero(T), MAX_K))
-                        for b in 1:(nbins - 1)
+                    
+                    bin_range = is_numeric ? (1:(nbins-1)) : (1:(nbins-1))
+                    s_w = zero(T)
+                    cum_g = MVector{MAX_K,T}(ntuple(_->zero(T), MAX_K))
+                    cum_h = MVector{MAX_K,T}(ntuple(_->zero(T), MAX_K))
+                    
+                    for b in bin_range
+                        if is_numeric
                             s_w += h∇[2*K+1, b, f, node]
                             @inbounds for kk in 1:K
                                 cum_g[kk] += h∇[kk, b, f, node]
                                 cum_h[kk] += h∇[K+kk, b, f, node]
                             end
-                            if s_w >= min_weight && (w_p - s_w) >= min_weight
-                                gain_l = zero(T)
-                                gain_r = zero(T)
-                                predL = zero(T)
-                                predR = zero(T)
-                                predL_mu = zero(T)
-                                predR_mu = zero(T)
-                                @inbounds for kk in 1:K
-                                    l_g = cum_g[kk]
-                                    l_h = cum_h[kk]
-                                    r_g = nodes_sum[kk, node] - l_g
-                                    r_h = nodes_sum[K+kk, node] - l_h
-                                    denomL = l_h + lambda * s_w + L2 + eps
-                                    denomR = r_h + lambda * (w_p - s_w) + L2 + eps
-                                    gain_l += l_g^2 / denomL
-                                    gain_r += r_g^2 / denomR
-                                    if constraint != 0
-                                        predL += -l_g / denomL
-                                        predR += -r_g / denomR
-                                        if is_mle2p && kk == 1
-                                            predL_mu += -l_g / denomL
-                                            predR_mu += -r_g / denomR
-                                        end
-                                    end
-                                end
-                                if constraint != 0
-                                    if is_mle2p
-                                        if !((constraint == 0) || (constraint == -1 && predL_mu > predR_mu) || (constraint == 1 && predL_mu < predR_mu))
-                                            continue
-                                        end
-                                    else
-                                        if !((constraint == 0) || (constraint == -1 && predL > predR) || (constraint == 1 && predL < predR))
-                                            continue
-                                        end
-                                    end
-                                end
-                                g = (gain_l + gain_r - gain_p) * T(0.5)
-                                if g > g_best
-                                    g_best = g
-                                    b_best = Int32(b)
-                                    f_best = Int32(f)
-                                end
+                        else
+                            s_w = h∇[2*K+1, b, f, node]
+                            @inbounds for kk in 1:K
+                                cum_g[kk] = h∇[kk, b, f, node]
+                                cum_h[kk] = h∇[K+kk, b, f, node]
                             end
                         end
-                    else  
-                        for b in 1:(nbins - 1)
-                            l_w = h∇[2*K+1, b, f, node]
-                            r_w = w_p - l_w
-                            if l_w >= min_weight && r_w >= min_weight
-                                gain_l = zero(T)
-                                gain_r = zero(T)
-                                predL = zero(T)
-                                predR = zero(T)
-                                predL_mu = zero(T)
-                                predR_mu = zero(T)
-                                @inbounds for kk in 1:K
-                                    l_g = h∇[kk, b, f, node]
-                                    l_h = h∇[K+kk, b, f, node]
-                                    r_g = nodes_sum[kk, node] - l_g
-                                    r_h = nodes_sum[K+kk, node] - l_h
-                                    denomL = l_h + lambda * l_w + L2 + eps
-                                    denomR = r_h + lambda * r_w + L2 + eps
-                                    gain_l += l_g^2 / denomL
-                                    gain_r += r_g^2 / denomR
-                                    if constraint != 0
-                                        predL += -l_g / denomL
-                                        predR += -r_g / denomR
-                                        if is_mle2p && kk == 1
-                                            predL_mu += -l_g / denomL
-                                            predR_mu += -r_g / denomR
-                                        end
-                                    end
+                        
+                        if s_w >= min_weight && (w_p - s_w) >= min_weight
+                            gain_l, gain_r = zero(T), zero(T)
+                            predL, predR = zero(T), zero(T)
+                            
+                            @inbounds for kk in 1:K
+                                l_g, l_h = cum_g[kk], cum_h[kk]
+                                r_g, r_h = nodes_sum[kk, node] - l_g, nodes_sum[K+kk, node] - l_h
+                                denomL = l_h + lambda * s_w + L2 + eps
+                                denomR = r_h + lambda * (w_p - s_w) + L2 + eps
+                                gain_l += l_g^2 / denomL
+                                gain_r += r_g^2 / denomR
+                                
+                                # For monotone constraints: use mu (kk=1) for MLE2P, all params otherwise
+                                if constraint != 0 && (!is_mle2p || kk == 1)
+                                    predL += -l_g / denomL
+                                    predR += -r_g / denomR
                                 end
-                                if constraint != 0
-                                    if is_mle2p
-                                        if !((constraint == 0) || (constraint == -1 && predL_mu > predR_mu) || (constraint == 1 && predL_mu < predR_mu))
-                                            continue
-                                        end
-                                    else
-                                        if !((constraint == 0) || (constraint == -1 && predL > predR) || (constraint == 1 && predL < predR))
-                                            continue
-                                        end
-                                    end
-                                end
+                            end
+                            
+                            # Check monotone constraint
+                            constraint_ok = (constraint == 0) || 
+                                           (constraint == -1 && predL > predR) || 
+                                           (constraint == 1 && predL < predR)
+                            
+                            if constraint_ok
                                 g = (gain_l + gain_r - gain_p) * T(0.5)
                                 if g > g_best
-                                    g_best = g
-                                    b_best = Int32(b)
-                                    f_best = Int32(f)
+                                    g_best, b_best, f_best = g, Int32(b), Int32(f)
                                 end
                             end
                         end
