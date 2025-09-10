@@ -64,7 +64,7 @@ function grow_tree!(
         is_mae=(L <: EvoTrees.MAE), is_quantile=(L <: EvoTrees.Quantile), is_cred=(L <: EvoTrees.Cred), is_mle2p=(L <: EvoTrees.MLE2P)
     )
     
-    get_gain_gpu!(backend)(cache.nodes_gain_gpu, cache.nodes_sum_gpu, view(cache.anodes_gpu, 1:1), Float32(params.lambda), Float32(params.L2), cache.K; ndrange=1, workgroupsize=1)
+    get_gain_gpu!(backend)(cache.nodes_gain_gpu, cache.nodes_sum_gpu, view(cache.anodes_gpu, 1:1), Float32(params.lambda), Float32(params.L2), cache.K, (L <: EvoTrees.MLE2P); ndrange=1, workgroupsize=1)
     KernelAbstractions.synchronize(backend)
 
     n_active = 1
@@ -249,19 +249,34 @@ end
     end
 end
 
-@kernel function get_gain_gpu!(nodes_gain::AbstractVector{T}, nodes_sum::AbstractArray{T,2}, nodes, lambda::T, L2::T, K::Int) where {T}
+@kernel function get_gain_gpu!(nodes_gain::AbstractVector{T}, nodes_sum::AbstractArray{T,2}, nodes, lambda::T, L2::T, K::Int, is_mle2p::Bool=false) where {T}
     n_idx = @index(Global)
     node = nodes[n_idx]
     @inbounds if node > 0
-        w = nodes_sum[2*K+1, node]
+        eps = T(1e-8)
         gain = zero(T)
-        if w > 1.0f-8
-            @inbounds for kk in 1:K
-                p1 = nodes_sum[kk, node]
-                p2 = nodes_sum[K+kk, node]
-                gain += p1^2 / (p2 + lambda * w + L2)
+        
+        if is_mle2p && K == 2
+            # MLE2P: use positions [1,2] for gradients, [3,4] for hessians, [5] for weights
+            w = nodes_sum[5, node]
+            if w > eps
+                g1, g2 = nodes_sum[1, node], nodes_sum[2, node]
+                h1, h2 = nodes_sum[3, node], nodes_sum[4, node]
+                gain = (g1^2 / max(eps, (h1 + lambda * w + L2)) + g2^2 / max(eps, (h2 + lambda * w + L2))) / 2
+            end
+        else
+            # Standard K-parameter case
+            w = nodes_sum[2*K+1, node]
+            if w > eps
+                @inbounds for kk in 1:K
+                    g = nodes_sum[kk, node]
+                    h = nodes_sum[K+kk, node]
+                    gain += g^2 / max(eps, (h + lambda * w + L2))
+                end
+                gain /= 2
             end
         end
+        
         nodes_gain[node] = gain
     end
 end

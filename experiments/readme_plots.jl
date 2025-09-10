@@ -274,9 +274,39 @@ config = EvoTreeGaussian(;
 
 println("=== GAUSSIAN MLE DEBUG ===")
 println("Device: $_device, Tree type: $tree_type")
-println("Config: nrounds=$(config.nrounds), eta=$(config.eta), L2=$(config.L2)")
+println("Config: nrounds=$(config.nrounds), eta=$(config.eta), L2=$(config.L2), min_weight=$(config.min_weight)")
 println("Training data: x_train size=$(size(x_train)), y_train size=$(size(y_train))")
 println("y_train stats: min=$(minimum(y_train)), max=$(maximum(y_train)), mean=$(mean(y_train)), std=$(std(y_train))")
+
+# Let's also try CPU for comparison
+println("\n--- TESTING CPU VERSION FOR COMPARISON ---")
+config_cpu = EvoTreeGaussian(;
+    nrounds=100,
+    early_stopping_rounds=25,
+    nbins=64,
+    L2=1.0,
+    eta=0.1,
+    max_depth=6,
+    min_weight=8,
+    rowsample=0.5,
+    colsample=1.0,
+    rng=123,
+    tree_type,
+    device=:cpu
+)
+
+@time model_cpu = fit(
+    config_cpu;
+    x_train,
+    y_train,
+    x_eval,
+    y_eval,
+    print_every_n=25,
+);
+pred_cpu = model_cpu(x_train; device=:cpu)
+println("CPU μ stats: min=$(minimum(pred_cpu[:, 1])), max=$(maximum(pred_cpu[:, 1])), mean=$(mean(pred_cpu[:, 1]))")
+println("CPU σ stats: min=$(minimum(pred_cpu[:, 2])), max=$(maximum(pred_cpu[:, 2])), mean=$(mean(pred_cpu[:, 2]))")
+println("--- END CPU COMPARISON ---\n")
 
 @time model = fit(
     config;
