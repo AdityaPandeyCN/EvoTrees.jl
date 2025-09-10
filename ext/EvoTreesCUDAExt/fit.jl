@@ -234,8 +234,8 @@ end
                 h1 = nodes_sum[3, node]
                 g2 = nodes_sum[2, node]
                 h2 = nodes_sum[4, node]
-                tree_pred[1, node] = (-g1 / (h1 + lambda * w + L2 * eltype(tree_pred)(1e-7) + epsv)) / bagging_size
-                tree_pred[2, node] = (-g2 / (h2 + lambda * w + L2 * eltype(tree_pred)(1e-7) + epsv)) / bagging_size
+                tree_pred[1, node] = (-g1 / (h1 + lambda * w + L2 + epsv)) / bagging_size
+                tree_pred[2, node] = (-g2 / (h2 + lambda * w + L2 + epsv)) / bagging_size
             end
         else
             w = nodes_sum[2*K+1, node]
@@ -263,7 +263,7 @@ end
             if w > eps
                 g1, g2 = nodes_sum[1, node], nodes_sum[2, node]
                 h1, h2 = nodes_sum[3, node], nodes_sum[4, node]
-                gain = (g1^2 / max(eps, (h1 + lambda * w + L2 * T(1e-7))) + g2^2 / max(eps, (h2 + lambda * w + L2 * T(1e-7)))) / 2
+                gain = (g1^2 / max(eps, (h1 + lambda * w + L2)) + g2^2 / max(eps, (h2 + lambda * w + L2))) / 2
             end
         else
             # Standard K-parameter case
