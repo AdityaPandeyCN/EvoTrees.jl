@@ -358,20 +358,19 @@ println("=== END GAUSSIAN DEBUG ===")
 
 # Debug tree structure
 if _device == :gpu
-    println("\\n--- TREE STRUCTURE DEBUG ---")
+    println("\n--- TREE STRUCTURE DEBUG ---")
     tree_count = length(model.trees)
-    println("Number of trees: $tree_count")
-    if tree_count > 0
-        first_tree = model.trees[1]
-        println("First tree splits: $(sum(first_tree.split))")
-        println("First tree depth estimate: $(floor(log2(length(first_tree.split))))")
-        println("Sample leaf predictions: $(first_tree.pred[1:2, 1:min(8, size(first_tree.pred, 2))])")
-        
-        # Check if we're getting diverse leaf values
-        unique_pred1 = length(unique(first_tree.pred[1, :]))
-        unique_pred2 = length(unique(first_tree.pred[2, :]))
-        println("Unique μ leaf values: $unique_pred1")
-        println("Unique σ leaf values: $unique_pred2")
+    println("Number of trees: $tree_count (tree[1] is the bias tree)")
+    if tree_count > 1
+        inspect_idxs = collect(unique(filter(i -> 2 <= i <= tree_count, [2, max(2, Int(cld(tree_count, 2))), tree_count])))
+        for idx in inspect_idxs
+            t = model.trees[idx]
+            depth_est = Int(floor(log2(length(t.split))))
+            println("Tree $idx: splits=$(sum(t.split)), depth=$depth_est")
+            println("  unique μ leaves=$(length(unique(t.pred[1, :]))) unique σ leaves=$(length(unique(t.pred[2, :])))")
+        end
+    else
+        println("Only bias tree present")
     end
     println("--- END TREE DEBUG ---")
 end
