@@ -354,7 +354,27 @@ for i in 1:min(5, length(y_train))
     println("  y[$i]=$(y_train[i]), μ=$μ, σ=$σ, q20=$(pred_q20[i]), q80=$(pred_q80[i])")
 end
 
-println("=== END GAUSSIAN DEBUG ===\n")
+println("=== END GAUSSIAN DEBUG ===
+
+# Debug tree structure
+if _device == :gpu
+    println("\\n--- TREE STRUCTURE DEBUG ---")
+    tree_count = length(model.trees)
+    println("Number of trees: $tree_count")
+    if tree_count > 0
+        first_tree = model.trees[1]
+        println("First tree splits: $(sum(first_tree.split))")
+        println("First tree depth estimate: $(floor(log2(length(first_tree.split))))")
+        println("Sample leaf predictions: $(first_tree.pred[1:2, 1:min(8, size(first_tree.pred, 2))])")
+        
+        # Check if we're getting diverse leaf values
+        unique_pred1 = length(unique(first_tree.pred[1, :]))
+        unique_pred2 = length(unique(first_tree.pred[2, :]))
+        println("Unique μ leaf values: $unique_pred1")
+        println("Unique σ leaf values: $unique_pred2")
+    end
+    println("--- END TREE DEBUG ---")
+end\n")
 
 ###########################################
 # plot
