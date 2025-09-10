@@ -227,12 +227,13 @@ end
                 tree_pred[1, node] = (g / (w + L2 + epsv)) / bagging_size
             end
         elseif is_mle2p
-            w = nodes_sum[2*K+1, node]
+            # MLE2P uses layout: [g1, g2, h1, h2, w] at positions [1, 2, 3, 4, 5]
+            w = nodes_sum[5, node]
             if w > epsv
                 g1 = nodes_sum[1, node]
-                h1 = nodes_sum[K+1, node]
+                h1 = nodes_sum[3, node]
                 g2 = nodes_sum[2, node]
-                h2 = nodes_sum[K+2, node]
+                h2 = nodes_sum[4, node]
                 tree_pred[1, node] = (-g1 / (h1 + lambda * w + L2 + epsv)) / bagging_size
                 tree_pred[2, node] = (-g2 / (h2 + lambda * w + L2 + epsv)) / bagging_size
             end
