@@ -206,7 +206,7 @@ end
     node = active_nodes[n_idx]
     epsv = eltype(tree_pred)(1e-8)
 
-    @inbounds if node > 0 && depth < max_depth && best_gain[n_idx] > gamma
+    @inbounds if node > 0 && depth < max_depth && (is_mle2p ? best_gain[n_idx] > 0 : best_gain[n_idx] > gamma)
         tree_split[node] = true
         tree_cond_bin[node] = best_bin[n_idx]
         tree_feat[node] = best_feat[n_idx]

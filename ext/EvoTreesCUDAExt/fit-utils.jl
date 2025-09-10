@@ -157,7 +157,7 @@ end
                     # MLE2P: [g1, g2, h1, h2, w] at positions [1, 2, 3, 4, 5]
                     g1, g2 = nodes_sum[1, node], nodes_sum[2, node]
                     h1, h2 = nodes_sum[3, node], nodes_sum[4, node]
-                    eff_L2 = L2 * T(1e-5)
+                    eff_L2 = L2 * T(1e-6)
                     gain_p = (g1^2 / (h1 + lambda * w_p + eff_L2 + eps) + g2^2 / (h2 + lambda * w_p + eff_L2 + eps)) / 2
                 else
                     for kk in 1:K
@@ -210,8 +210,8 @@ end
                                 else
                                     r_g, r_h = nodes_sum[kk, node] - l_g, nodes_sum[K+kk, node] - l_h
                                 end
-                                denomL = l_h + lambda * s_w + (is_mle2p ? L2*T(1e-5) : L2) + eps
-                                denomR = r_h + lambda * (w_p - s_w) + (is_mle2p ? L2*T(1e-5) : L2) + eps
+                                denomL = l_h + lambda * s_w + (is_mle2p ? L2*T(1e-6) : L2) + eps
+                                denomR = r_h + lambda * (w_p - s_w) + (is_mle2p ? L2*T(1e-6) : L2) + eps
                                 gain_l += l_g^2 / denomL
                                 gain_r += r_g^2 / denomR
                                 
