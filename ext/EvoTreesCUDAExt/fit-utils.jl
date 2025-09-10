@@ -96,7 +96,8 @@ end
             
             # Compute node sums using first feature
             @inbounds let f = js[1]
-                for k in 1:(2*K+1)
+                n_grad_hess = is_mle2p ? 5 : (2*K+1)
+                for k in 1:n_grad_hess
                     sum_val = zero(T)
                     for b in 1:nbins
                         sum_val += h∇[k, b, f, node]
@@ -105,7 +106,7 @@ end
                 end
             end
             
-            w_p = nodes_sum[2*K+1, node]
+            w_p = is_mle2p ? nodes_sum[5, node] : nodes_sum[2*K+1, node]
             g_best, b_best, f_best = T(-Inf), Int32(0), Int32(0)
             
             if is_mae || is_quantile
@@ -146,9 +147,16 @@ end
             else
                 # Standard gradient boosting path
                 gain_p = zero(T)
-                for kk in 1:K
-                    g, h = nodes_sum[kk, node], nodes_sum[K+kk, node]
-                    gain_p += g^2 / (h + lambda * w_p + L2 + eps)
+                if is_mle2p && K == 2
+                    # MLE2P: [g1, g2, h1, h2, w] at positions [1, 2, 3, 4, 5]
+                    g1, g2 = nodes_sum[1, node], nodes_sum[2, node]
+                    h1, h2 = nodes_sum[3, node], nodes_sum[4, node]
+                    gain_p = (g1^2 / (h1 + lambda * w_p + L2 + eps) + g2^2 / (h2 + lambda * w_p + L2 + eps)) / 2
+                else
+                    for kk in 1:K
+                        g, h = nodes_sum[kk, node], nodes_sum[K+kk, node]
+                        gain_p += g^2 / (h + lambda * w_p + L2 + eps)
+                    end
                 end
                 
                 for j_idx in 1:length(js)
@@ -163,16 +171,24 @@ end
                     
                     for b in bin_range
                         if is_numeric
-                            s_w += h∇[2*K+1, b, f, node]
+                            s_w += is_mle2p ? h∇[5, b, f, node] : h∇[2*K+1, b, f, node]
                             @inbounds for kk in 1:K
                                 cum_g[kk] += h∇[kk, b, f, node]
-                                cum_h[kk] += h∇[K+kk, b, f, node]
+                                if is_mle2p
+                                    cum_h[kk] += h∇[kk+2, b, f, node]  # h1 at pos 3, h2 at pos 4
+                                else
+                                    cum_h[kk] += h∇[K+kk, b, f, node]
+                                end
                             end
                         else
-                            s_w = h∇[2*K+1, b, f, node]
+                            s_w = is_mle2p ? h∇[5, b, f, node] : h∇[2*K+1, b, f, node]
                             @inbounds for kk in 1:K
                                 cum_g[kk] = h∇[kk, b, f, node]
-                                cum_h[kk] = h∇[K+kk, b, f, node]
+                                if is_mle2p
+                                    cum_h[kk] = h∇[kk+2, b, f, node]  # h1 at pos 3, h2 at pos 4
+                                else
+                                    cum_h[kk] = h∇[K+kk, b, f, node]
+                                end
                             end
                         end
                         
@@ -182,7 +198,11 @@ end
                             
                             @inbounds for kk in 1:K
                                 l_g, l_h = cum_g[kk], cum_h[kk]
-                                r_g, r_h = nodes_sum[kk, node] - l_g, nodes_sum[K+kk, node] - l_h
+                                if is_mle2p
+                                    r_g, r_h = nodes_sum[kk, node] - l_g, nodes_sum[kk+2, node] - l_h  # h1 at pos 3, h2 at pos 4
+                                else
+                                    r_g, r_h = nodes_sum[kk, node] - l_g, nodes_sum[K+kk, node] - l_h
+                                end
                                 denomL = l_h + lambda * s_w + L2 + eps
                                 denomR = r_h + lambda * (w_p - s_w) + L2 + eps
                                 gain_l += l_g^2 / denomL
