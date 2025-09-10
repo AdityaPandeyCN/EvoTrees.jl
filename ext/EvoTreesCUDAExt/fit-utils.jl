@@ -95,14 +95,20 @@ end
             eps = T(1e-8)
             
             # Compute node sums using first feature
-            @inbounds let f = js[1]
+            # Sum across all sampled features for robust parent stats
+            @inbounds begin
                 n_grad_hess = is_mle2p ? 5 : (2*K+1)
                 for k in 1:n_grad_hess
-                    sum_val = zero(T)
-                    for b in 1:nbins
-                        sum_val += h∇[k, b, f, node]
+                    total = zero(T)
+                    for j_idx in 1:length(js)
+                        f = js[j_idx]
+                        sum_val = zero(T)
+                        for b in 1:nbins
+                            sum_val += T(h∇[k, b, f, node])
+                        end
+                        total += sum_val
                     end
-                    nodes_sum[k, node] = sum_val
+                    nodes_sum[k, node] = total
                 end
             end
             
@@ -151,7 +157,8 @@ end
                     # MLE2P: [g1, g2, h1, h2, w] at positions [1, 2, 3, 4, 5]
                     g1, g2 = nodes_sum[1, node], nodes_sum[2, node]
                     h1, h2 = nodes_sum[3, node], nodes_sum[4, node]
-                    gain_p = (g1^2 / (h1 + lambda * w_p + L2 + eps) + g2^2 / (h2 + lambda * w_p + L2 + eps)) / 2
+                    eff_L2 = L2 * T(1e-4)
+                    gain_p = (g1^2 / (h1 + lambda * w_p + eff_L2 + eps) + g2^2 / (h2 + lambda * w_p + eff_L2 + eps)) / 2
                 else
                     for kk in 1:K
                         g, h = nodes_sum[kk, node], nodes_sum[K+kk, node]
@@ -171,23 +178,23 @@ end
                     
                     for b in bin_range
                         if is_numeric
-                            s_w += is_mle2p ? h∇[5, b, f, node] : h∇[2*K+1, b, f, node]
+                            s_w += is_mle2p ? T(h∇[5, b, f, node]) : T(h∇[2*K+1, b, f, node])
                             @inbounds for kk in 1:K
-                                cum_g[kk] += h∇[kk, b, f, node]
+                                cum_g[kk] += T(h∇[kk, b, f, node])
                                 if is_mle2p
-                                    cum_h[kk] += h∇[kk+2, b, f, node]  # h1 at pos 3, h2 at pos 4
+                                    cum_h[kk] += T(h∇[kk+2, b, f, node])  # h1 at pos 3, h2 at pos 4
                                 else
-                                    cum_h[kk] += h∇[K+kk, b, f, node]
+                                    cum_h[kk] += T(h∇[K+kk, b, f, node])
                                 end
                             end
                         else
-                            s_w = is_mle2p ? h∇[5, b, f, node] : h∇[2*K+1, b, f, node]
+                            s_w = is_mle2p ? T(h∇[5, b, f, node]) : T(h∇[2*K+1, b, f, node])
                             @inbounds for kk in 1:K
-                                cum_g[kk] = h∇[kk, b, f, node]
+                                cum_g[kk] = T(h∇[kk, b, f, node])
                                 if is_mle2p
-                                    cum_h[kk] = h∇[kk+2, b, f, node]  # h1 at pos 3, h2 at pos 4
+                                    cum_h[kk] = T(h∇[kk+2, b, f, node])  # h1 at pos 3, h2 at pos 4
                                 else
-                                    cum_h[kk] = h∇[K+kk, b, f, node]
+                                    cum_h[kk] = T(h∇[K+kk, b, f, node])
                                 end
                             end
                         end
@@ -203,8 +210,8 @@ end
                                 else
                                     r_g, r_h = nodes_sum[kk, node] - l_g, nodes_sum[K+kk, node] - l_h
                                 end
-                                denomL = l_h + lambda * s_w + L2 + eps
-                                denomR = r_h + lambda * (w_p - s_w) + L2 + eps
+                                denomL = l_h + lambda * s_w + (is_mle2p ? L2*T(1e-4) : L2) + eps
+                                denomR = r_h + lambda * (w_p - s_w) + (is_mle2p ? L2*T(1e-4) : L2) + eps
                                 gain_l += l_g^2 / denomL
                                 gain_r += r_g^2 / denomR
                                 
