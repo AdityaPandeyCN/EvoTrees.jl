@@ -253,6 +253,9 @@ save("docs/src/assets/regression-sinus-$tree_type-$_device.png", f)
 ###############################
 ## gaussian
 ###############################
+println("\n" * "="^60)
+println("STARTING GAUSSIAN MLE SECTION")
+println("="^60)
 config = EvoTreeGaussian(;
     nrounds=500,
     early_stopping_rounds=50,
@@ -269,6 +272,12 @@ config = EvoTreeGaussian(;
     device=_device
 )
 
+println("=== GAUSSIAN MLE DEBUG ===")
+println("Device: $_device, Tree type: $tree_type")
+println("Config: nrounds=$(config.nrounds), eta=$(config.eta), L2=$(config.L2)")
+println("Training data: x_train size=$(size(x_train)), y_train size=$(size(y_train))")
+println("y_train stats: min=$(minimum(y_train)), max=$(maximum(y_train)), mean=$(mean(y_train)), std=$(std(y_train))")
+
 @time model = fit(
     config;
     x_train,
@@ -277,7 +286,23 @@ config = EvoTreeGaussian(;
     y_eval,
     print_every_n=25,
 );
+
+# Check if model has logger info
+if haskey(model.info, :logger) && !isnothing(model.info[:logger])
+    logger = model.info[:logger]
+    println("Final metric: $(logger[:metrics][end]) (should be increasing for Gaussian MLE)")
+    println("Best metric: $(logger[:best_metric]) at iteration $(logger[:best_iter])")
+    println("Total rounds: $(logger[:nrounds])")
+else
+    println("No logger information available")
+end
+
 @time pred_train_gaussian = model(x_train; device=_device)
+
+println("Predictions shape: $(size(pred_train_gaussian))")
+println("μ (col 1) stats: min=$(minimum(pred_train_gaussian[:, 1])), max=$(maximum(pred_train_gaussian[:, 1])), mean=$(mean(pred_train_gaussian[:, 1]))")
+println("σ (col 2) stats: min=$(minimum(pred_train_gaussian[:, 2])), max=$(maximum(pred_train_gaussian[:, 2])), mean=$(mean(pred_train_gaussian[:, 2]))")
+println("σ exp stats: min=$(minimum(exp.(pred_train_gaussian[:, 2]))), max=$(maximum(exp.(pred_train_gaussian[:, 2]))), mean=$(mean(exp.(pred_train_gaussian[:, 2])))")
 
 pred_gauss = [
     Distributions.Normal(pred_train_gaussian[i, 1], pred_train_gaussian[i, 2]) for
@@ -286,8 +311,20 @@ pred_gauss = [
 pred_q80 = quantile.(pred_gauss, 0.8)
 pred_q20 = quantile.(pred_gauss, 0.2)
 
-mean(y_train .< pred_q80)
-mean(y_train .< pred_q20)
+# Validate quantile coverage
+coverage_q80 = mean(y_train .< pred_q80)
+coverage_q20 = mean(y_train .< pred_q20)
+println("Q80 coverage: $(coverage_q80) (should be ~0.8)")
+println("Q20 coverage: $(coverage_q20) (should be ~0.2)")
+
+# Check if predictions make sense
+println("Sample predictions (first 5):")
+for i in 1:min(5, length(y_train))
+    μ, σ = pred_train_gaussian[i, 1], exp(pred_train_gaussian[i, 2])
+    println("  y[$i]=$(y_train[i]), μ=$μ, σ=$σ, q20=$(pred_q20[i]), q80=$(pred_q80[i])")
+end
+
+println("=== END GAUSSIAN DEBUG ===\n")
 
 ###########################################
 # plot
