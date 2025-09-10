@@ -354,7 +354,7 @@ for i in 1:min(5, length(y_train))
     println("  y[$i]=$(y_train[i]), μ=$μ, σ=$σ, q20=$(pred_q20[i]), q80=$(pred_q80[i])")
 end
 
-println("=== END GAUSSIAN DEBUG ===
+println("=== END GAUSSIAN DEBUG ===")
 
 # Debug tree structure
 if _device == :gpu
@@ -374,7 +374,7 @@ if _device == :gpu
         println("Unique σ leaf values: $unique_pred2")
     end
     println("--- END TREE DEBUG ---")
-end\n")
+end
 
 ###########################################
 # plot
