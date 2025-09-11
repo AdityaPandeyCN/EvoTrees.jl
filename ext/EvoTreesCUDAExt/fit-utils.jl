@@ -1,3 +1,4 @@
+# FILE: fit-utils.jl (Final Corrected Version)
 using KernelAbstractions
 using Atomix
 using StaticArrays
@@ -145,16 +146,22 @@ end
                     end
                 end
             else
-                # Standard gradient boosting path with standard L2 regularization
+                # Standard gradient boosting path
                 gain_p = zero(T)
                 if is_mle2p && K == 2
                     g1, g2 = nodes_sum[1, node], nodes_sum[2, node]
                     h1, h2 = nodes_sum[3, node], nodes_sum[4, node]
-                    gain_p = (g1^2 / (h1 + L2 + eps) + g2^2 / (h2 + L2 + eps))
+                    # Consistent formula from get_gain_gpu!
+                    gain_p = (g1^2 / (h1 + lambda * w_p + L2 + eps) + g2^2 / (h2 + lambda * w_p + L2 + eps)) / 2
                 else
-                    for kk in 1:K
-                        g, h = nodes_sum[kk, node], nodes_sum[K+kk, node]
-                        gain_p += g^2 / (h + L2 + eps)
+                    w = nodes_sum[2*K+1, node]
+                    if w > eps
+                        for kk in 1:K
+                            g = nodes_sum[kk, node]
+                            h = nodes_sum[K+kk, node]
+                            gain_p += g^2 / (h + lambda * w + L2 + eps)
+                        end
+                        gain_p /= 2
                     end
                 end
                 
@@ -192,21 +199,25 @@ end
                         end
                         
                         if s_w >= min_weight && (w_p - s_w) >= min_weight
-                            gain_l, gain_r = zero(T), zero(T)
+                            gain_l_unscaled, gain_r_unscaled = zero(T), zero(T)
                             predL, predR = zero(T), zero(T)
                             
                             @inbounds for kk in 1:K
                                 l_g, l_h = cum_g[kk], cum_h[kk]
+                                r_w = w_p - s_w
+
                                 if is_mle2p
                                     r_g, r_h = nodes_sum[kk, node] - l_g, nodes_sum[kk+2, node] - l_h
                                 else
                                     r_g, r_h = nodes_sum[kk, node] - l_g, nodes_sum[K+kk, node] - l_h
                                 end
-                                denomL = l_h + L2 + eps
-                                denomR = r_h + L2 + eps
-                                gain_l += l_g^2 / denomL
-                                gain_r += r_g^2 / denomR
-                                
+
+                                denomL = l_h + lambda * s_w + L2 + eps
+                                denomR = r_h + lambda * r_w + L2 + eps
+
+                                gain_l_unscaled += l_g^2 / denomL
+                                gain_r_unscaled += r_g^2 / denomR
+
                                 if constraint != 0 && (!is_mle2p || kk == 1)
                                     predL += -l_g / denomL
                                     predR += -r_g / denomR
@@ -218,7 +229,10 @@ end
                                            (constraint == 1 && predL < predR)
 
                             if constraint_ok
-                                g = (gain_l + gain_r - gain_p) * T(0.5)
+                                # Consistent scaling and final gain formula
+                                gain_l = gain_l_unscaled / 2
+                                gain_r = gain_r_unscaled / 2
+                                g = gain_l + gain_r - gain_p
                                 if g > g_best
                                     g_best, b_best, f_best = g, Int32(b), Int32(f)
                                 end
@@ -227,7 +241,6 @@ end
                     end
                 end
             end
-            
             gains[n_idx], bins[n_idx], feats[n_idx] = g_best, b_best, f_best
         end
     end
