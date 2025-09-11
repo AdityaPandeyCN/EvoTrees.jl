@@ -111,7 +111,40 @@ end
             g_best, b_best, f_best = T(-Inf), Int32(0), Int32(0)
             
             if is_mae || is_quantile
-                # ... (MAE/Quantile path remains the same)
+                # MAE/Quantile path - simplified
+                parent_g = nodes_sum[1, node]
+                parent_avg = w_p > eps ? parent_g / w_p : zero(T)
+                for j_idx in 1:length(js)
+                    f = js[j_idx]
+                    is_numeric = feattypes[f]
+                    
+                    bin_range = is_numeric ? (1:(nbins-1)) : (1:(nbins-1))
+                    s_w = zero(T)
+                    cum_g = zero(T)
+                    
+                    for b in bin_range
+                        if is_numeric
+                            s_w += h∇[2*K+1, b, f, node]
+                            cum_g += h∇[1, b, f, node]
+                        else
+                            s_w = h∇[2*K+1, b, f, node]
+                            cum_g = h∇[1, b, f, node]
+                        end
+                        
+                        l_w, r_w = s_w, w_p - s_w
+                        if l_w >= min_weight && r_w >= min_weight
+                            l_g, r_g = cum_g, parent_g - cum_g
+                            denomL = (one(T) + lambda + (l_w > eps ? L2 / l_w : L2))
+                            denomR = (one(T) + lambda + (r_w > eps ? L2 / r_w : L2))
+                            l_avg = l_w > eps ? l_g / l_w : zero(T)
+                            r_avg = r_w > eps ? r_g / r_w : zero(T)
+                            g = abs(l_avg - parent_avg) * l_w / denomL + abs(r_avg - parent_avg) * r_w / denomR
+                            if g > g_best
+                                g_best, b_best, f_best = g, Int32(b), Int32(f)
+                            end
+                        end
+                    end
+                end
             else
                 # Standard gradient boosting path
                 gain_p = zero(T)
@@ -168,6 +201,7 @@ end
                         
                         if s_w >= min_weight && (w_p - s_w) >= min_weight
                             gain_l, gain_r = zero(T), zero(T)
+                            predL, predR = zero(T), predR = zero(T)
                             
                             @inbounds for kk in 1:K
                                 l_g, l_h = cum_g[kk], cum_h[kk]
@@ -180,26 +214,37 @@ end
                                 denomR = r_h + lambda * (w_p - s_w) + L2 + eps
                                 gain_l += l_g^2 / denomL
                                 gain_r += r_g^2 / denomR
+                                
+                                if constraint != 0 && (!is_mle2p || kk == 1)
+                                    predL += -l_g / denomL
+                                    predR += -r_g / denomR
+                                end
                             end
                             
-                            g = (gain_l + gain_r - gain_p) * T(0.5)
+                            constraint_ok = (constraint == 0) || 
+                                           (constraint == -1 && predL > predR) || 
+                                           (constraint == 1 && predL < predR)
 
-                            # DEBUGGING: For the first thread, first feature, and first 5 bins, record values
-                            if is_mle2p && n_idx == 1 && j_idx == 1 && b <= 5
-                                l_g1, l_h1 = cum_g[1], cum_h[1]
-                                r_g1, r_h1 = nodes_sum[1, node] - l_g1, nodes_sum[3, node] - l_h1
-                                denomL_1 = l_h1 + lambda * s_w + L2 + eps
-                                denomR_1 = r_h1 + lambda * (w_p - s_w) + L2 + eps
+                            if constraint_ok
+                                g = (gain_l + gain_r - gain_p) * T(0.5)
 
-                                debug_idx = b + 1
-                                debug_array[debug_idx, 1] = l_g1; debug_array[debug_idx, 2] = l_h1
-                                debug_array[debug_idx, 3] = r_g1; debug_array[debug_idx, 4] = r_h1
-                                debug_array[debug_idx, 5] = denomL_1; debug_array[debug_idx, 6] = denomR_1
-                                debug_array[debug_idx, 7] = g
-                            end
+                                # DEBUGGING: For the first thread, first feature, and first 5 bins, record values
+                                if is_mle2p && n_idx == 1 && j_idx == 1 && b <= 5
+                                    l_g1, l_h1 = cum_g[1], cum_h[1]
+                                    r_g1, r_h1 = nodes_sum[1, node] - l_g1, nodes_sum[3, node] - l_h1
+                                    denomL_1 = l_h1 + lambda * s_w + L2 + eps
+                                    denomR_1 = r_h1 + lambda * (w_p - s_w) + L2 + eps
 
-                            if g > g_best
-                                g_best, b_best, f_best = g, Int32(b), Int32(f)
+                                    debug_idx = b + 1
+                                    debug_array[debug_idx, 1] = l_g1; debug_array[debug_idx, 2] = l_h1
+                                    debug_array[debug_idx, 3] = r_g1; debug_array[debug_idx, 4] = r_h1
+                                    debug_array[debug_idx, 5] = denomL_1; debug_array[debug_idx, 6] = denomR_1
+                                    debug_array[debug_idx, 7] = g
+                                end
+
+                                if g > g_best
+                                    g_best, b_best, f_best = g, Int32(b), Int32(f)
+                                end
                             end
                         end
                     end
@@ -295,6 +340,7 @@ function update_hist_gpu!(
     end
 
     # DEBUGGING: Create the debug array on the GPU
+    # It has 6 rows (1 for parent, 5 for bins) and 7 columns for different stats
     debug_array = KernelAbstractions.zeros(backend, eltype(gains), 6, 7)
     
     find_best_split_from_hist_kernel!(backend)(
@@ -314,7 +360,7 @@ function update_hist_gpu!(
     
     KernelAbstractions.synchronize(backend)
 
-    # DEBUGGING: Copy debug results from GPU to CPU and print them
+    # DEBUGGING: Copy debug results from GPU to CPU and print them if is_mle2p is true
     if is_mle2p
         debug_results = Array(debug_array)
         println("\n┌───────────────────────────────────┐")
