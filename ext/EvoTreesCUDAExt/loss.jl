@@ -229,17 +229,13 @@ end
     i = @index(Global)
     @inbounds if i <= length(y)
         μ = p[1, i]
-        
-        # Enforce a minimum value for sigma to prevent division by zero and instability
         MIN_LOG_SIGMA = eltype(p)(-8.0)
         log_σ = max(p[2, i], MIN_LOG_SIGMA)
         σ_sq = exp(2 * log_σ)
 
-        # First order gradients
         ∇[1, i] = (y[i] - μ) / σ_sq * ∇[5, i]
         ∇[2, i] = ((μ - y[i])^2 / σ_sq - 1) * ∇[5, i]
         
-        # Second order gradients
         ∇[3, i] = ∇[5, i] / σ_sq
         h_log_sigma = 2 * ∇[5, i] * (μ - y[i])^2 / σ_sq
         ∇[4, i] = min(h_log_sigma, eltype(p)(10.0))
