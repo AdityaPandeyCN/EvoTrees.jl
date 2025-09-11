@@ -94,19 +94,16 @@ end
             nbins = size(h∇, 2)
             eps = T(1e-8)
             
-            # Compute node sums using first feature
-            # Sum across all sampled features for robust parent stats
+            # 📌 FIX: Compute node sums using the histogram of the first feature
+            # The sum of gradients/hessians is independent of the feature used for binning.
+            # Looping over all features would incorrectly inflate the totals.
             @inbounds begin
-                n_grad_hess = is_mle2p ? 5 : (2*K+1)
+                local_f = js[1]
+                n_grad_hess = is_mle2p ? 5 : (2 * K + 1)
                 for k in 1:n_grad_hess
                     total = zero(T)
-                    for j_idx in 1:length(js)
-                        f = js[j_idx]
-                        sum_val = zero(T)
-                        for b in 1:nbins
-                            sum_val += T(h∇[k, b, f, node])
-                        end
-                        total += sum_val
+                    for b in 1:nbins
+                        total += T(h∇[k, b, local_f, node])
                     end
                     nodes_sum[k, node] = total
                 end
