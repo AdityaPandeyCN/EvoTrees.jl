@@ -233,12 +233,14 @@ end
         log_σ = max(p[2, i], MIN_LOG_SIGMA)
         σ_sq = exp(2 * log_σ)
 
-        ∇[1, i] = (y[i] - μ) / σ_sq * ∇[5, i]
-        ∇[2, i] = ((μ - y[i])^2 / σ_sq - 1) * ∇[5, i]
+        # first order (match CPU implementation)
+        diff = μ - y[i]
+        ∇[1, i] = diff / σ_sq * ∇[5, i]
+        ∇[2, i] = (1 - (diff * diff) / σ_sq) * ∇[5, i]
         
+        # second order (positive curvature terms used by boosting)
         ∇[3, i] = ∇[5, i] / σ_sq
-        h_log_sigma = 2 * ∇[5, i] * (μ - y[i])^2 / σ_sq
-        ∇[4, i] = min(h_log_sigma, eltype(p)(10.0))
+        ∇[4, i] = 2 * ∇[5, i] * (diff * diff) / σ_sq
     end
 end
 
