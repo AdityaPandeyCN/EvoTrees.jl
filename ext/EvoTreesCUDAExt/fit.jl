@@ -103,7 +103,6 @@ function grow_tree!(
             end
             
             if build_count_val > 0
-                
                 update_hist_gpu!(
                     cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
                     cache.∇, cache.x_bin, cache.nidx, cache.js, is,
@@ -119,39 +118,7 @@ function grow_tree!(
         is_quantile = L <: EvoTrees.Quantile
         is_cred = L <: EvoTrees.Cred
         is_mle2p = L <: EvoTrees.MLE2P
-        alpha = is_mae ? 0.5f0 : Float32(params.alpha)
-
-        if is_mae || is_quantile
-            
-            nidx_host = Array(cache.nidx)
-            res_host = Array(view(cache.∇, 2, :)) 
-            w_host = Array(view(cache.∇, size(cache.∇, 1), :)) 
-            max_node = maximum(nidx_host)
-            pre_leaf = zeros(Float32, max_node)
-            for node in 1:max_node
-                idxs = findall(==(node), nidx_host)
-                if !isempty(idxs)
-                    if is_mae
-                        
-                        g = sum(res_host[idxs] .* w_host[idxs])
-                        wsum = sum(w_host[idxs])
-                        denom = wsum + Float32(params.lambda) * wsum + Float32(params.L2)
-                        pre = denom > 0 ? g / denom : 0f0
-                        pre_leaf[node] = pre / Float32(params.bagging_size)
-                    else
-                        
-                        vals = res_host[idxs]
-                        wsum = sum(w_host[idxs])
-                        denom = 1f0 + Float32(params.lambda) + (wsum > 0 ? Float32(params.L2) / wsum : Float32(params.L2))
-                        q = quantile(vals, alpha)
-                        pre_leaf[node] = (Float32(q) / denom) / Float32(params.bagging_size)
-                    end
-                end
-            end
-            copyto!(cache.pre_leaf_gpu, pre_leaf)
-            
-            cache.nodes_sum_gpu[1, 1:length(pre_leaf)] .= cache.pre_leaf_gpu[1:length(pre_leaf)]
-        end
+        alpha = is_quantile ? Float32(params.alpha) : 0.5f0
 
         apply_splits_kernel!(backend)(
             cache.tree_split_gpu, cache.tree_cond_bin_gpu, cache.tree_feat_gpu, cache.tree_gain_gpu, cache.tree_pred_gpu,
@@ -219,23 +186,28 @@ end
         n_next[idx_base] = child_r
     else 
         if is_mae || is_quantile
-            tree_pred[1, node] = nodes_sum[1, node]
+            w = nodes_sum[2*K+1, node]
+            if w > epsv
+                g = nodes_sum[1, node]
+                h = nodes_sum[2, node]
+                tree_pred[1, node] = -g / (h + lambda * w + L2 + epsv) / bagging_size
+            end
         elseif is_cred
             w = nodes_sum[2*K+1, node]
-            g = nodes_sum[1, node]
             if w > epsv
-                tree_pred[1, node] = (g / (w + L2 + epsv)) / bagging_size
+                g = nodes_sum[1, node]
+                h = nodes_sum[2, node]
+                tree_pred[1, node] = -g / (h + lambda * w + L2 + epsv) / bagging_size
             end
         elseif is_mle2p
-            # MLE2P uses layout: [g1, g2, h1, h2, w] at positions [1, 2, 3, 4, 5]
             w = nodes_sum[5, node]
             if w > epsv
                 g1 = nodes_sum[1, node]
                 h1 = nodes_sum[3, node]
                 g2 = nodes_sum[2, node]
                 h2 = nodes_sum[4, node]
-                tree_pred[1, node] = (-g1 / (h1 + lambda * w + L2 + epsv)) / bagging_size
-                tree_pred[2, node] = (-g2 / (h2 + lambda * w + L2 + epsv)) / bagging_size
+                tree_pred[1, node] = -g1 / (h1 + lambda * w + L2 + epsv) / bagging_size
+                tree_pred[2, node] = -g2 / (h2 + lambda * w + L2 + epsv) / bagging_size
             end
         else
             w = nodes_sum[2*K+1, node]
@@ -243,7 +215,7 @@ end
                 @inbounds for kk in 1:K
                     gk = nodes_sum[kk, node]
                     hk = nodes_sum[K+kk, node]
-                    tree_pred[kk, node] = (-gk / (hk + lambda * w + L2 + epsv)) / bagging_size
+                    tree_pred[kk, node] = -gk / (hk + lambda * w + L2 + epsv) / bagging_size
                 end
             end
         end
@@ -258,7 +230,6 @@ end
         gain = zero(T)
         
         if is_mle2p && K == 2
-            # MLE2P: use positions [1,2] for gradients, [3,4] for hessians, [5] for weights
             w = nodes_sum[5, node]
             if w > eps
                 g1, g2 = nodes_sum[1, node], nodes_sum[2, node]
@@ -266,7 +237,6 @@ end
                 gain = (g1^2 / max(eps, (h1 + lambda * w + L2)) + g2^2 / max(eps, (h2 + lambda * w + L2))) / 2
             end
         else
-            # Standard K-parameter case
             w = nodes_sum[2*K+1, node]
             if w > eps
                 @inbounds for kk in 1:K

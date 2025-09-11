@@ -1,4 +1,3 @@
-# FILE: loss.jl (Final Corrected Version)
 using KernelAbstractions
 
 #####################
@@ -28,12 +27,17 @@ function EvoTrees.update_grads!(
 end
 
 #####################
-# MAE
+# MAE - FIXED
 #####################
 @kernel function kernel_mae_∇!(∇, p, y)
     i = @index(Global)
     if i <= length(y)
-        @inbounds ∇[1, i] = (y[i] - p[1, i]) * ∇[3, i]
+        diff = y[i] - p[1, i]
+        eps = eltype(∇)(1e-8)
+        # Gradient is sign of residual
+        @inbounds ∇[1, i] = sign(diff) * ∇[3, i]
+        # Hessian approximation for stability (smoothed second derivative)
+        @inbounds ∇[2, i] = ∇[3, i] / max(eps, abs(diff))
     end
 end
 
@@ -53,13 +57,14 @@ function EvoTrees.update_grads!(
 end
 
 #####################
-# Credibility
+# Credibility - FIXED
 #####################
 @kernel function kernel_cred_∇!(∇, p, y)
     i = @index(Global)
     if i <= length(y)
-        @inbounds ∇[1, i] = (y[i] - p[1, i]) * ∇[3, i]
-        @inbounds ∇[2, i] = (y[i] - p[1, i])^2 * ∇[3, i]
+        diff = y[i] - p[1, i]
+        @inbounds ∇[1, i] = diff * ∇[3, i]
+        @inbounds ∇[2, i] = ∇[3, i]  # Constant Hessian for L2 loss component
     end
 end
 
@@ -79,14 +84,17 @@ function EvoTrees.update_grads!(
 end
 
 #####################
-# Quantile
+# Quantile - FIXED
 #####################
 @kernel function kernel_quantile_∇!(∇, p, y, alpha)
     i = @index(Global)
     if i <= length(y)
-        diff = (y[i] - p[1, i])
-        @inbounds ∇[1, i] = diff > 0 ? alpha * ∇[3, i] : (alpha - 1) * ∇[3, i]
-        @inbounds ∇[2, i] = diff
+        diff = y[i] - p[1, i]
+        eps = eltype(∇)(1e-8)
+        # Gradient based on quantile loss
+        @inbounds ∇[1, i] = (diff > 0 ? alpha : (alpha - 1)) * ∇[3, i]
+        # Smoothed Hessian for stability
+        @inbounds ∇[2, i] = ∇[3, i] / max(eps, abs(diff))
     end
 end
 
@@ -254,21 +262,13 @@ function EvoTrees.update_grads!(
 end
 
 ################################################################################
-# Gaussian - http://jrmeyer.github.io/machinelearning/2017/08/18/mle.html
-# pred[i][1] = μ
-# pred[i][2] = log(σ)
+# Gaussian
 ################################################################################
 @kernel function kernel_gauss_∇!(∇, p, y)
     i = @index(Global)
     @inbounds if i <= length(y)
-        # first order gradients (negative of the derivative of the loss)
-        # ∇[1,i] is for μ, ∇[2,i] is for log(σ)
         ∇[1, i] = (y[i] - p[1, i]) / exp(2 * p[2, i]) * ∇[5, i]
-        # 📌 FINAL FIX: Corrected the sign of the gradient for log(σ).
-        # It should be (residual²/σ² - 1), not (1 - residual²/σ²).
         ∇[2, i] = ((p[1, i] - y[i])^2 / exp(2 * p[2, i]) - 1) * ∇[5, i]
-        
-        # second order gradients (fisher information)
         ∇[3, i] = ∇[5, i] / exp(2 * p[2, i])
         ∇[4, i] = 2 * ∇[5, i] / exp(2 * p[2, i]) * (p[1, i] - y[i])^2
     end
