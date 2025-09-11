@@ -1,3 +1,4 @@
+# FILE: loss.jl (Final Corrected Version)
 using KernelAbstractions
 
 #####################
@@ -260,8 +261,10 @@ end
 @kernel function kernel_gauss_∇!(∇, p, y)
     i = @index(Global)
     @inbounds if i <= length(y)
+        # 📌 FINAL FIX: Corrected the sign of the gradient for the mean (μ).
+        # It should be (y - μ), not (μ - y).
         # first order gradients
-        ∇[1, i] = (p[1, i] - y[i]) / exp(2 * p[2, i]) * ∇[5, i]
+        ∇[1, i] = (y[i] - p[1, i]) / exp(2 * p[2, i]) * ∇[5, i]
         ∇[2, i] = (1 - (p[1, i] - y[i])^2 / exp(2 * p[2, i])) * ∇[5, i]
         # second order gradients
         ∇[3, i] = ∇[5, i] / exp(2 * p[2, i])
