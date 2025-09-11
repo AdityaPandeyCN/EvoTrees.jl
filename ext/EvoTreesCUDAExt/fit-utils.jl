@@ -201,7 +201,8 @@ end
                         
                         if s_w >= min_weight && (w_p - s_w) >= min_weight
                             gain_l, gain_r = zero(T), zero(T)
-                            predL, predR = zero(T), predR = zero(T)
+                            # 📌 FIX: Corrected the typo on this line
+                            predL, predR = zero(T), zero(T)
                             
                             @inbounds for kk in 1:K
                                 l_g, l_h = cum_g[kk], cum_h[kk]
@@ -340,7 +341,6 @@ function update_hist_gpu!(
     end
 
     # DEBUGGING: Create the debug array on the GPU
-    # It has 6 rows (1 for parent, 5 for bins) and 7 columns for different stats
     debug_array = KernelAbstractions.zeros(backend, eltype(gains), 6, 7)
     
     find_best_split_from_hist_kernel!(backend)(
