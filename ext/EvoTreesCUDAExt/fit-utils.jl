@@ -94,9 +94,6 @@ end
             nbins = size(h∇, 2)
             eps = T(1e-8)
             
-            # 📌 FIX: Compute node sums using the histogram of the first feature
-            # The sum of gradients/hessians is independent of the feature used for binning.
-            # Looping over all features would incorrectly inflate the totals.
             @inbounds begin
                 local_f = js[1]
                 n_grad_hess = is_mle2p ? 5 : (2 * K + 1)
@@ -154,7 +151,10 @@ end
                     # MLE2P: [g1, g2, h1, h2, w] at positions [1, 2, 3, 4, 5]
                     g1, g2 = nodes_sum[1, node], nodes_sum[2, node]
                     h1, h2 = nodes_sum[3, node], nodes_sum[4, node]
-                    gain_p = (g1^2 / (h1 + lambda * w_p + L2 + eps) + g2^2 / (h2 + lambda * w_p + L2 + eps)) / 2
+                    # 📌 FIX: Removed division by 2. The 0.5 factor is applied once at the end.
+                    # The original formula was Gain = 0.5 * (Score_L + Score_R - 0.5 * Score_P), which is incorrect.
+                    # This corrects it to Gain = 0.5 * (Score_L + Score_R - Score_P).
+                    gain_p = (g1^2 / (h1 + lambda * w_p + L2 + eps) + g2^2 / (h2 + lambda * w_p + L2 + eps))
                 else
                     for kk in 1:K
                         g, h = nodes_sum[kk, node], nodes_sum[K+kk, node]
@@ -211,14 +211,12 @@ end
                                 gain_l += l_g^2 / denomL
                                 gain_r += r_g^2 / denomR
                                 
-                                # For monotone constraints: use mu (kk=1) for MLE2P, all params otherwise
                                 if constraint != 0 && (!is_mle2p || kk == 1)
                                     predL += -l_g / denomL
                                     predR += -r_g / denomR
                                 end
                             end
                             
-                            # Check monotone constraint
                             constraint_ok = (constraint == 0) || 
                                            (constraint == -1 && predL > predR) || 
                                            (constraint == 1 && predL < predR)
@@ -248,7 +246,6 @@ end
     @inbounds if idx <= length(active_nodes)
         node = active_nodes[idx]
         if node > 0
-            # Pair siblings by node id: even (left) -> build, odd (right) -> subtract
             if (node % 2) == 0
                 pos = Atomix.@atomic build_count[1] += 1
                 build_nodes[pos] = node
