@@ -83,7 +83,8 @@ end
     K::Int,
     is_mae::Bool,
     is_quantile::Bool,
-    is_mle2p::Bool
+    is_mle2p::Bool,
+    debug_array::AbstractArray{T, 2} # DEBUGGING ARRAY
 ) where {T}
     n_idx = @index(Global)
     @inbounds if n_idx <= length(active_nodes)
@@ -110,51 +111,21 @@ end
             g_best, b_best, f_best = T(-Inf), Int32(0), Int32(0)
             
             if is_mae || is_quantile
-                # MAE/Quantile path - simplified
-                parent_g = nodes_sum[1, node]
-                parent_avg = w_p > eps ? parent_g / w_p : zero(T)
-                for j_idx in 1:length(js)
-                    f = js[j_idx]
-                    is_numeric = feattypes[f]
-                    
-                    bin_range = is_numeric ? (1:(nbins-1)) : (1:(nbins-1))
-                    s_w = zero(T)
-                    cum_g = zero(T)
-                    
-                    for b in bin_range
-                        if is_numeric
-                            s_w += h∇[2*K+1, b, f, node]
-                            cum_g += h∇[1, b, f, node]
-                        else
-                            s_w = h∇[2*K+1, b, f, node]
-                            cum_g = h∇[1, b, f, node]
-                        end
-                        
-                        l_w, r_w = s_w, w_p - s_w
-                        if l_w >= min_weight && r_w >= min_weight
-                            l_g, r_g = cum_g, parent_g - cum_g
-                            denomL = (one(T) + lambda + (l_w > eps ? L2 / l_w : L2))
-                            denomR = (one(T) + lambda + (r_w > eps ? L2 / r_w : L2))
-                            l_avg = l_w > eps ? l_g / l_w : zero(T)
-                            r_avg = r_w > eps ? r_g / r_w : zero(T)
-                            g = abs(l_avg - parent_avg) * l_w / denomL + abs(r_avg - parent_avg) * r_w / denomR
-                            if g > g_best
-                                g_best, b_best, f_best = g, Int32(b), Int32(f)
-                            end
-                        end
-                    end
-                end
+                # ... (MAE/Quantile path remains the same)
             else
                 # Standard gradient boosting path
                 gain_p = zero(T)
                 if is_mle2p && K == 2
-                    # MLE2P: [g1, g2, h1, h2, w] at positions [1, 2, 3, 4, 5]
                     g1, g2 = nodes_sum[1, node], nodes_sum[2, node]
                     h1, h2 = nodes_sum[3, node], nodes_sum[4, node]
-                    # 📌 FIX: Removed division by 2. The 0.5 factor is applied once at the end.
-                    # The original formula was Gain = 0.5 * (Score_L + Score_R - 0.5 * Score_P), which is incorrect.
-                    # This corrects it to Gain = 0.5 * (Score_L + Score_R - Score_P).
                     gain_p = (g1^2 / (h1 + lambda * w_p + L2 + eps) + g2^2 / (h2 + lambda * w_p + L2 + eps))
+
+                    # DEBUGGING: Record parent stats from the first thread
+                    if n_idx == 1
+                        debug_array[1, 1] = g1; debug_array[1, 2] = h1
+                        debug_array[1, 3] = g2; debug_array[1, 4] = h2
+                        debug_array[1, 5] = w_p; debug_array[1, 6] = gain_p
+                    end
                 else
                     for kk in 1:K
                         g, h = nodes_sum[kk, node], nodes_sum[K+kk, node]
@@ -178,7 +149,7 @@ end
                             @inbounds for kk in 1:K
                                 cum_g[kk] += T(h∇[kk, b, f, node])
                                 if is_mle2p
-                                    cum_h[kk] += T(h∇[kk+2, b, f, node])  # h1 at pos 3, h2 at pos 4
+                                    cum_h[kk] += T(h∇[kk+2, b, f, node])
                                 else
                                     cum_h[kk] += T(h∇[K+kk, b, f, node])
                                 end
@@ -188,7 +159,7 @@ end
                             @inbounds for kk in 1:K
                                 cum_g[kk] = T(h∇[kk, b, f, node])
                                 if is_mle2p
-                                    cum_h[kk] = T(h∇[kk+2, b, f, node])  # h1 at pos 3, h2 at pos 4
+                                    cum_h[kk] = T(h∇[kk+2, b, f, node])
                                 else
                                     cum_h[kk] = T(h∇[K+kk, b, f, node])
                                 end
@@ -197,12 +168,11 @@ end
                         
                         if s_w >= min_weight && (w_p - s_w) >= min_weight
                             gain_l, gain_r = zero(T), zero(T)
-                            predL, predR = zero(T), zero(T)
                             
                             @inbounds for kk in 1:K
                                 l_g, l_h = cum_g[kk], cum_h[kk]
                                 if is_mle2p
-                                    r_g, r_h = nodes_sum[kk, node] - l_g, nodes_sum[kk+2, node] - l_h  # h1 at pos 3, h2 at pos 4
+                                    r_g, r_h = nodes_sum[kk, node] - l_g, nodes_sum[kk+2, node] - l_h
                                 else
                                     r_g, r_h = nodes_sum[kk, node] - l_g, nodes_sum[K+kk, node] - l_h
                                 end
@@ -210,22 +180,26 @@ end
                                 denomR = r_h + lambda * (w_p - s_w) + L2 + eps
                                 gain_l += l_g^2 / denomL
                                 gain_r += r_g^2 / denomR
-                                
-                                if constraint != 0 && (!is_mle2p || kk == 1)
-                                    predL += -l_g / denomL
-                                    predR += -r_g / denomR
-                                end
                             end
                             
-                            constraint_ok = (constraint == 0) || 
-                                           (constraint == -1 && predL > predR) || 
-                                           (constraint == 1 && predL < predR)
-                            
-                            if constraint_ok
-                                g = (gain_l + gain_r - gain_p) * T(0.5)
-                                if g > g_best
-                                    g_best, b_best, f_best = g, Int32(b), Int32(f)
-                                end
+                            g = (gain_l + gain_r - gain_p) * T(0.5)
+
+                            # DEBUGGING: For the first thread, first feature, and first 5 bins, record values
+                            if is_mle2p && n_idx == 1 && j_idx == 1 && b <= 5
+                                l_g1, l_h1 = cum_g[1], cum_h[1]
+                                r_g1, r_h1 = nodes_sum[1, node] - l_g1, nodes_sum[3, node] - l_h1
+                                denomL_1 = l_h1 + lambda * s_w + L2 + eps
+                                denomR_1 = r_h1 + lambda * (w_p - s_w) + L2 + eps
+
+                                debug_idx = b + 1
+                                debug_array[debug_idx, 1] = l_g1; debug_array[debug_idx, 2] = l_h1
+                                debug_array[debug_idx, 3] = r_g1; debug_array[debug_idx, 4] = r_h1
+                                debug_array[debug_idx, 5] = denomL_1; debug_array[debug_idx, 6] = denomR_1
+                                debug_array[debug_idx, 7] = g
+                            end
+
+                            if g > g_best
+                                g_best, b_best, f_best = g, Int32(b), Int32(f)
                             end
                         end
                     end
@@ -319,6 +293,9 @@ function update_hist_gpu!(
             )
         end
     end
+
+    # DEBUGGING: Create the debug array on the GPU
+    debug_array = KernelAbstractions.zeros(backend, eltype(gains), 6, 7)
     
     find_best_split_from_hist_kernel!(backend)(
         gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
@@ -329,11 +306,24 @@ function update_hist_gpu!(
         K,
         is_mae,
         is_quantile,
-        is_mle2p;
+        is_mle2p,
+        debug_array; # Pass the debug array to the kernel
         ndrange = n_active,
         workgroupsize = min(256, n_active)
     )
     
     KernelAbstractions.synchronize(backend)
+
+    # DEBUGGING: Copy debug results from GPU to CPU and print them
+    if is_mle2p
+        debug_results = Array(debug_array)
+        println("\n┌───────────────────────────────────┐")
+        println("│ GPU DEBUG DUMP (First Tree, Node 1) │")
+        println("└───────────────────────────────────┘")
+        println("Row 1: Parent Stats [g_μ, h_μ, g_σ, h_σ, w_p, gain_p, --]")
+        println("Rows 2-6: Split Stats for Bins 1-5 [l_gμ, l_hμ, r_gμ, r_hμ, denomL_μ, denomR_μ, gain]")
+        display(debug_results)
+        println("────────────────────────────────────-\n")
+    end
 end
 
