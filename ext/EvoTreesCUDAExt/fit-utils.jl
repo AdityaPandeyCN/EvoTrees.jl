@@ -151,7 +151,6 @@ end
                 if is_mle2p && K == 2
                     g1, g2 = nodes_sum[1, node], nodes_sum[2, node]
                     h1, h2 = nodes_sum[3, node], nodes_sum[4, node]
-                    # Consistent formula from get_gain_gpu!
                     gain_p = (g1^2 / (h1 + lambda * w_p + L2 + eps) + g2^2 / (h2 + lambda * w_p + L2 + eps)) / 2
                 else
                     w = nodes_sum[2*K+1, node]
@@ -214,7 +213,7 @@ end
 
                                 denomL = l_h + lambda * s_w + L2 + eps
                                 denomR = r_h + lambda * r_w + L2 + eps
-
+                                
                                 gain_l_unscaled += l_g^2 / denomL
                                 gain_r_unscaled += r_g^2 / denomR
 
@@ -229,7 +228,6 @@ end
                                            (constraint == 1 && predL < predR)
 
                             if constraint_ok
-                                # Consistent scaling and final gain formula
                                 gain_l = gain_l_unscaled / 2
                                 gain_r = gain_r_unscaled / 2
                                 g = gain_l + gain_r - gain_p
