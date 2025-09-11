@@ -1,8 +1,5 @@
 using KernelAbstractions
 
-#####################
-# MSE
-#####################
 @kernel function kernel_mse_∇!(∇, p, y)
     i = @index(Global)
     if i <= length(y)
@@ -26,18 +23,10 @@ function EvoTrees.update_grads!(
     return
 end
 
-#####################
-# MAE - FIXED
-#####################
 @kernel function kernel_mae_∇!(∇, p, y)
     i = @index(Global)
     if i <= length(y)
-        diff = y[i] - p[1, i]
-        eps = eltype(∇)(1e-8)
-        # Gradient is sign of residual
-        @inbounds ∇[1, i] = sign(diff) * ∇[3, i]
-        # Hessian approximation for stability (smoothed second derivative)
-        @inbounds ∇[2, i] = ∇[3, i] / max(eps, abs(diff))
+        @inbounds ∇[1, i] = (y[i] - p[1, i]) * ∇[3, i]
     end
 end
 
@@ -56,15 +45,11 @@ function EvoTrees.update_grads!(
     return
 end
 
-#####################
-# Credibility - FIXED
-#####################
 @kernel function kernel_cred_∇!(∇, p, y)
     i = @index(Global)
     if i <= length(y)
-        diff = y[i] - p[1, i]
-        @inbounds ∇[1, i] = diff * ∇[3, i]
-        @inbounds ∇[2, i] = ∇[3, i]  # Constant Hessian for L2 loss component
+        @inbounds ∇[1, i] = (y[i] - p[1, i]) * ∇[3, i]
+        @inbounds ∇[2, i] = (y[i] - p[1, i])^2 * ∇[3, i]
     end
 end
 
@@ -83,18 +68,12 @@ function EvoTrees.update_grads!(
     return
 end
 
-#####################
-# Quantile - FIXED
-#####################
 @kernel function kernel_quantile_∇!(∇, p, y, alpha)
     i = @index(Global)
     if i <= length(y)
-        diff = y[i] - p[1, i]
-        eps = eltype(∇)(1e-8)
-        # Gradient based on quantile loss
-        @inbounds ∇[1, i] = (diff > 0 ? alpha : (alpha - 1)) * ∇[3, i]
-        # Smoothed Hessian for stability
-        @inbounds ∇[2, i] = ∇[3, i] / max(eps, abs(diff))
+        diff = (y[i] - p[1, i])
+        @inbounds ∇[1, i] = diff > 0 ? alpha * ∇[3, i] : (alpha - 1) * ∇[3, i]
+        @inbounds ∇[2, i] = diff
     end
 end
 
@@ -113,9 +92,6 @@ function EvoTrees.update_grads!(
     return
 end
 
-#####################
-# Logistic
-#####################
 @kernel function kernel_logloss_∇!(∇, p, y)
     i = @index(Global)
     if i <= length(y)
@@ -140,9 +116,6 @@ function EvoTrees.update_grads!(
     return
 end
 
-#####################
-# Poisson
-#####################
 @kernel function kernel_poisson_∇!(∇, p, y)
     i = @index(Global)
     if i <= length(y)
@@ -167,9 +140,6 @@ function EvoTrees.update_grads!(
     return
 end
 
-#####################
-# Gamma
-#####################
 @kernel function kernel_gamma_∇!(∇, p, y)
     i = @index(Global)
     if i <= length(y)
@@ -194,9 +164,6 @@ function EvoTrees.update_grads!(
     return
 end
 
-#####################
-# Tweedie
-#####################
 @kernel function kernel_tweedie_∇!(∇, p, y)
     i = @index(Global)
     rho = eltype(p)(1.5)
@@ -223,9 +190,6 @@ function EvoTrees.update_grads!(
     return
 end
 
-#####################
-# Softmax
-#####################
 @kernel function kernel_mlogloss_∇!(∇, p, y)
     i = @index(Global)
     K = size(p, 1)
@@ -261,16 +225,14 @@ function EvoTrees.update_grads!(
     return
 end
 
-################################################################################
-# Gaussian
-################################################################################
 @kernel function kernel_gauss_∇!(∇, p, y)
     i = @index(Global)
     @inbounds if i <= length(y)
         ∇[1, i] = (y[i] - p[1, i]) / exp(2 * p[2, i]) * ∇[5, i]
         ∇[2, i] = ((p[1, i] - y[i])^2 / exp(2 * p[2, i]) - 1) * ∇[5, i]
         ∇[3, i] = ∇[5, i] / exp(2 * p[2, i])
-        ∇[4, i] = 2 * ∇[5, i] / exp(2 * p[2, i]) * (p[1, i] - y[i])^2
+        h_log_sigma = 2 * ∇[5, i] / exp(2 * p[2, i]) * (p[1, i] - y[i])^2
+        ∇[4, i] = min(h_log_sigma, eltype(p)(10.0))
     end
 end
 
