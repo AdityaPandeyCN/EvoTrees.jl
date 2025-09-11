@@ -261,12 +261,14 @@ end
 @kernel function kernel_gauss_∇!(∇, p, y)
     i = @index(Global)
     @inbounds if i <= length(y)
-        # 📌 FINAL FIX: Corrected the sign of the gradient for the mean (μ).
-        # It should be (y - μ), not (μ - y).
-        # first order gradients
+        # first order gradients (negative of the derivative of the loss)
+        # ∇[1,i] is for μ, ∇[2,i] is for log(σ)
         ∇[1, i] = (y[i] - p[1, i]) / exp(2 * p[2, i]) * ∇[5, i]
-        ∇[2, i] = (1 - (p[1, i] - y[i])^2 / exp(2 * p[2, i])) * ∇[5, i]
-        # second order gradients
+        # 📌 FINAL FIX: Corrected the sign of the gradient for log(σ).
+        # It should be (residual²/σ² - 1), not (1 - residual²/σ²).
+        ∇[2, i] = ((p[1, i] - y[i])^2 / exp(2 * p[2, i]) - 1) * ∇[5, i]
+        
+        # second order gradients (fisher information)
         ∇[3, i] = ∇[5, i] / exp(2 * p[2, i])
         ∇[4, i] = 2 * ∇[5, i] / exp(2 * p[2, i]) * (p[1, i] - y[i])^2
     end
