@@ -83,8 +83,7 @@ end
     K::Int,
     is_mae::Bool,
     is_quantile::Bool,
-    is_mle2p::Bool,
-    debug_array::AbstractArray{T, 2} # DEBUGGING ARRAY
+    is_mle2p::Bool
 ) where {T}
     n_idx = @index(Global)
     @inbounds if n_idx <= length(active_nodes)
@@ -151,18 +150,13 @@ end
                 if is_mle2p && K == 2
                     g1, g2 = nodes_sum[1, node], nodes_sum[2, node]
                     h1, h2 = nodes_sum[3, node], nodes_sum[4, node]
-                    gain_p = (g1^2 / (h1 + lambda * w_p + L2 + eps) + g2^2 / (h2 + lambda * w_p + L2 + eps))
-
-                    # DEBUGGING: Record parent stats from the first thread
-                    if n_idx == 1
-                        debug_array[1, 1] = g1; debug_array[1, 2] = h1
-                        debug_array[1, 3] = g2; debug_array[1, 4] = h2
-                        debug_array[1, 5] = w_p; debug_array[1, 6] = gain_p
-                    end
+                    # 📌 FINAL FIX: Added the parent weight `w_p` to the parent gain's denominators
+                    # to correctly regularize it, matching the child node regularization.
+                    gain_p = (g1^2 / (h1 + lambda * w_p + L2 * w_p + eps) + g2^2 / (h2 + lambda * w_p + L2 * w_p + eps))
                 else
                     for kk in 1:K
                         g, h = nodes_sum[kk, node], nodes_sum[K+kk, node]
-                        gain_p += g^2 / (h + lambda * w_p + L2 + eps)
+                        gain_p += g^2 / (h + lambda * w_p + L2 * w_p + eps)
                     end
                 end
                 
@@ -201,7 +195,6 @@ end
                         
                         if s_w >= min_weight && (w_p - s_w) >= min_weight
                             gain_l, gain_r = zero(T), zero(T)
-                            # 📌 FIX: Corrected the typo on this line
                             predL, predR = zero(T), zero(T)
                             
                             @inbounds for kk in 1:K
@@ -211,8 +204,8 @@ end
                                 else
                                     r_g, r_h = nodes_sum[kk, node] - l_g, nodes_sum[K+kk, node] - l_h
                                 end
-                                denomL = l_h + lambda * s_w + L2 + eps
-                                denomR = r_h + lambda * (w_p - s_w) + L2 + eps
+                                denomL = l_h + lambda * s_w + L2 * s_w + eps
+                                denomR = r_h + lambda * (w_p - s_w) + L2 * (w_p-s_w) + eps
                                 gain_l += l_g^2 / denomL
                                 gain_r += r_g^2 / denomR
                                 
@@ -228,21 +221,6 @@ end
 
                             if constraint_ok
                                 g = (gain_l + gain_r - gain_p) * T(0.5)
-
-                                # DEBUGGING: For the first thread, first feature, and first 5 bins, record values
-                                if is_mle2p && n_idx == 1 && j_idx == 1 && b <= 5
-                                    l_g1, l_h1 = cum_g[1], cum_h[1]
-                                    r_g1, r_h1 = nodes_sum[1, node] - l_g1, nodes_sum[3, node] - l_h1
-                                    denomL_1 = l_h1 + lambda * s_w + L2 + eps
-                                    denomR_1 = r_h1 + lambda * (w_p - s_w) + L2 + eps
-
-                                    debug_idx = b + 1
-                                    debug_array[debug_idx, 1] = l_g1; debug_array[debug_idx, 2] = l_h1
-                                    debug_array[debug_idx, 3] = r_g1; debug_array[debug_idx, 4] = r_h1
-                                    debug_array[debug_idx, 5] = denomL_1; debug_array[debug_idx, 6] = denomR_1
-                                    debug_array[debug_idx, 7] = g
-                                end
-
                                 if g > g_best
                                     g_best, b_best, f_best = g, Int32(b), Int32(f)
                                 end
@@ -339,9 +317,6 @@ function update_hist_gpu!(
             )
         end
     end
-
-    # DEBUGGING: Create the debug array on the GPU
-    debug_array = KernelAbstractions.zeros(backend, eltype(gains), 6, 7)
     
     find_best_split_from_hist_kernel!(backend)(
         gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
@@ -352,24 +327,11 @@ function update_hist_gpu!(
         K,
         is_mae,
         is_quantile,
-        is_mle2p,
-        debug_array; # Pass the debug array to the kernel
+        is_mle2p;
         ndrange = n_active,
         workgroupsize = min(256, n_active)
     )
     
     KernelAbstractions.synchronize(backend)
-
-    # DEBUGGING: Copy debug results from GPU to CPU and print them if is_mle2p is true
-    if is_mle2p
-        debug_results = Array(debug_array)
-        println("\n┌───────────────────────────────────┐")
-        println("│ GPU DEBUG DUMP (First Tree, Node 1) │")
-        println("└───────────────────────────────────┘")
-        println("Row 1: Parent Stats [g_μ, h_μ, g_σ, h_σ, w_p, gain_p, --]")
-        println("Rows 2-6: Split Stats for Bins 1-5 [l_gμ, l_hμ, r_gμ, r_hμ, denomL_μ, denomR_μ, gain]")
-        display(debug_results)
-        println("────────────────────────────────────-\n")
-    end
 end
 
