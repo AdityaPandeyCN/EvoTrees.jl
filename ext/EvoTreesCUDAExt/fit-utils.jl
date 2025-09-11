@@ -145,18 +145,16 @@ end
                     end
                 end
             else
-                # Standard gradient boosting path
+                # Standard gradient boosting path with standard L2 regularization
                 gain_p = zero(T)
                 if is_mle2p && K == 2
                     g1, g2 = nodes_sum[1, node], nodes_sum[2, node]
                     h1, h2 = nodes_sum[3, node], nodes_sum[4, node]
-                    # 📌 FINAL FIX: Added the parent weight `w_p` to the parent gain's denominators
-                    # to correctly regularize it, matching the child node regularization.
-                    gain_p = (g1^2 / (h1 + lambda * w_p + L2 * w_p + eps) + g2^2 / (h2 + lambda * w_p + L2 * w_p + eps))
+                    gain_p = (g1^2 / (h1 + L2 + eps) + g2^2 / (h2 + L2 + eps))
                 else
                     for kk in 1:K
                         g, h = nodes_sum[kk, node], nodes_sum[K+kk, node]
-                        gain_p += g^2 / (h + lambda * w_p + L2 * w_p + eps)
+                        gain_p += g^2 / (h + L2 + eps)
                     end
                 end
                 
@@ -204,8 +202,8 @@ end
                                 else
                                     r_g, r_h = nodes_sum[kk, node] - l_g, nodes_sum[K+kk, node] - l_h
                                 end
-                                denomL = l_h + lambda * s_w + L2 * s_w + eps
-                                denomR = r_h + lambda * (w_p - s_w) + L2 * (w_p-s_w) + eps
+                                denomL = l_h + L2 + eps
+                                denomR = r_h + L2 + eps
                                 gain_l += l_g^2 / denomL
                                 gain_r += r_g^2 / denomR
                                 
