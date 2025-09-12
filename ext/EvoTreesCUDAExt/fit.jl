@@ -64,7 +64,7 @@ function grow_tree!(
         is_mae=(L <: EvoTrees.MAE), is_quantile=(L <: EvoTrees.Quantile), is_cred=(L <: EvoTrees.Cred), is_mle2p=(L <: EvoTrees.MLE2P)
     )
     
-    get_gain_gpu!(backend)(cache.nodes_gain_gpu, cache.nodes_sum_gpu, view(cache.anodes_gpu, 1:1), Float32(params.lambda), Float32(params.L2), cache.K, (L <: EvoTrees.MLE2P); ndrange=1, workgroupsize=1)
+    get_gain_gpu!(backend)(cache.nodes_gain_gpu, cache.nodes_sum_gpu, view(cache.anodes_gpu, 1:1), Float64(params.lambda), Float64(params.L2), cache.K, (L <: EvoTrees.MLE2P); ndrange=1, workgroupsize=1)
     KernelAbstractions.synchronize(backend)
 
     n_active = 1
