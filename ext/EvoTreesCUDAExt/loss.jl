@@ -259,3 +259,43 @@ function EvoTrees.update_grads!(
     return
 end
 
+@kernel function kernel_logistic_mle_∇!(∇, p, y)
+    i = @index(Global)
+    if i <= length(y)
+        @inbounds begin
+            # first order
+            ∇[1, i] = -tanh((y[i] - p[1, i]) / (2 * exp(p[2, i]))) * exp(-p[2, i]) * ∇[5, i]
+            ∇[2, i] = -(
+                exp(-p[2, i]) *
+                (y[i] - p[1, i]) *
+                tanh((y[i] - p[1, i]) / (2 * exp(p[2, i]))) - 1
+            ) * ∇[5, i]
+            # second order
+            half_z = (y[i] - p[1, i]) / (2 * exp(p[2, i]))
+            inv_s2_half = 1 / (2 * exp(2 * p[2, i]))
+            cosh_half = cosh(half_z)
+            sech2_half = 1 / (cosh_half * cosh_half)
+            ∇[3, i] = sech2_half * inv_s2_half * ∇[5, i]
+            arg = exp(-p[2, i]) * (p[1, i] - y[i])
+            num = exp(-2 * p[2, i]) * (p[1, i] - y[i]) * (p[1, i] - y[i] + exp(p[2, i]) * sinh(arg))
+            den = 1 + cosh(arg)
+            ∇[4, i] = (num / den) * ∇[5, i]
+        end
+    end
+end
+
+function EvoTrees.update_grads!(
+    ∇::CuMatrix,
+    p::CuMatrix,
+    y::CuVector,
+    ::Type{EvoTrees.LogisticMLE},
+    params::EvoTrees.EvoTypes;
+    MAX_THREADS=1024
+)
+    backend = get_backend(p)
+    threads = min(MAX_THREADS, length(y))
+    kernel_logistic_mle_∇!(backend)(∇, p, y; ndrange=length(y), workgroupsize=threads)
+    KernelAbstractions.synchronize(backend)
+    return
+end
+
