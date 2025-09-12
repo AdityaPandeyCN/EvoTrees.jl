@@ -199,10 +199,10 @@ end
     @inbounds if idx <= length(active_nodes)
         node = active_nodes[idx]
         if node > 0
-            if (node % 2) == 0 # Even node ID is a left child to be built
+            if (node % 2) == 0
                 pos = Atomix.@atomic build_count[1] += 1
                 build_nodes[pos] = node
-            else # Odd node ID is a right child to be subtracted
+            else
                 pos = Atomix.@atomic subtract_count[1] += 1
                 subtract_nodes[pos] = node
             end
@@ -222,10 +222,10 @@ end
     node_idx = (gidx - 1) ÷ n_elements_per_node + 1
 
     @inbounds if node_idx <= length(subtract_nodes)
-        node = subtract_nodes[node_idx] # This is the right child
+        node = subtract_nodes[node_idx]
         if node > 0
             parent = node >> 1
-            sibling = node - 1 # The left child sibling
+            sibling = node - 1
             
             element_idx_in_node = (gidx - 1) % n_elements_per_node + 1
             
@@ -234,12 +234,6 @@ end
     end
 end
 
-#=
-ARCHITECTURAL NOTE: The calling function `grow_tree!` is responsible for managing two histogram buffers.
-Before calling this function in a loop for each depth > 1, you MUST save the parent histograms:
-`copyto!(h∇_parent, h∇)`
-This is essential for the subtraction trick to work correctly.
-=#
 function update_hist_gpu!(
     h∇, h∇_parent,
     gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes,
@@ -252,7 +246,7 @@ function update_hist_gpu!(
     
     if depth == 1
         h∇ .= 0
-        build_mask .= 1 # Build for all nodes (in this case, just the root)
+        build_mask .= 1
         hist_kernel!(backend)(
             h∇, ∇, x_bin, nidx, js, is, build_mask, K, is_mle2p;
             ndrange = cld(length(is), 64) * length(js),
@@ -270,9 +264,8 @@ function update_hist_gpu!(
         n_build = Array(build_count)[1]
         n_subtract = Array(subtract_count)[1]
 
-        # Build histograms for left children from scratch
         if n_build > 0
-            h∇ .= 0 # Zero out current buffer before building into it
+            h∇ .= 0
             build_mask .= 0
             build_nodes_view = view(left_nodes_buf, 1:n_build)
             create_mask_kernel!(backend)(build_mask, build_nodes_view; ndrange=n_build, workgroupsize=min(256, n_build))
@@ -283,12 +276,9 @@ function update_hist_gpu!(
                 workgroupsize = 256
             )
         else
-            # If there are no left children, the buffer still needs to be cleared
-            # for the subtraction step to work on a clean slate.
             h∇ .= 0
         end
 
-        # Calculate histograms for right children using the parent and new left histograms
         if n_subtract > 0
             subtract_nodes_view = view(right_nodes_buf, 1:n_subtract)
             n_elems_per_node = size(h∇, 1) * size(h∇, 2) * size(h∇, 3)
