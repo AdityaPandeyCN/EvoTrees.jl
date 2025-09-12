@@ -67,6 +67,32 @@ end
     end
 end
 
+# New: zero only histogram slices for active nodes and sampled features
+@kernel function zero_hist_nodes_kernel!(
+    h∇::AbstractArray{T,4},
+    @Const(active_nodes),
+    @Const(js),
+    n_k::Int,
+    n_b::Int,
+) where {T}
+    gidx = @index(Global)
+    n_j = length(js)
+    n_nodes = length(active_nodes)
+    total = n_k * n_b * n_j * n_nodes
+    if gidx <= total
+        elem = gidx - 1
+        node_idx = elem ÷ (n_k * n_b * n_j) + 1
+        rem1 = elem % (n_k * n_b * n_j)
+        j_idx = rem1 ÷ (n_k * n_b) + 1
+        rem2 = rem1 % (n_k * n_b)
+        b = rem2 ÷ n_k + 1
+        k = rem2 % n_k + 1
+        node = active_nodes[node_idx]
+        f = js[j_idx]
+        @inbounds h∇[k, b, f, node] = zero(T)
+    end
+end
+
 @kernel function find_best_split_from_hist_kernel!(
     gains::AbstractVector{T},
     bins::AbstractVector{Int32},
@@ -268,8 +294,10 @@ end
     end
 end
 
-@kernel function subtract_hist_kernel!(h∇::AbstractArray{T,4}, @Const(subtract_nodes), n_k, n_b, n_j) where {T}
+# Refactored: subtract only across sampled features
+@kernel function subtract_hist_kernel!(h∇::AbstractArray{T,4}, @Const(subtract_nodes), @Const(js), n_k, n_b) where {T}
     gidx = @index(Global)
+    n_j = length(js)
     n_elements = n_k * n_b * n_j
     
     node_idx = (gidx - 1) ÷ n_elements + 1
@@ -280,12 +308,13 @@ end
             sibling = node ⊻ 1
             
             elem_idx = (gidx - 1) % n_elements
-            j = elem_idx ÷ (n_k * n_b) + 1
+            j_idx = elem_idx ÷ (n_k * n_b) + 1
             remainder = elem_idx % (n_k * n_b)
             b = remainder ÷ n_k + 1
             k = remainder % n_k + 1
+            f = js[j_idx]
             
-            h∇[k, b, j, node] = h∇[k, b, j, parent] - h∇[k, b, j, sibling]
+            h∇[k, b, f, node] = h∇[k, b, f, parent] - h∇[k, b, f, sibling]
         end
     end
 end
@@ -299,7 +328,17 @@ function update_hist_gpu!(
     backend = KernelAbstractions.get_backend(h∇)
     n_active = length(active_nodes)
     
-    h∇ .= 0
+    # Zero only relevant histogram slices for current active nodes and sampled features
+    if n_active > 0
+        n_k, n_b = size(h∇, 1), size(h∇, 2)
+        n_j = length(js)
+        ndr = n_active * n_k * n_b * n_j
+        zero_hist_nodes_kernel!(backend)(
+            h∇, active_nodes, js, n_k, n_b;
+            ndrange = ndr,
+            workgroupsize = min(256, ndr)
+        )
+    end
     
     n_work = cld(length(is), 64) * length(js)
     workgroup_size = min(256, n_work)
@@ -322,10 +361,10 @@ function update_hist_gpu!(
         
         n_subtract = Array(subtract_count)[1]
         if n_subtract > 0
-            n_k, n_b, n_j = size(h∇, 1), size(h∇, 2), size(h∇, 3)
+            n_k, n_b = size(h∇, 1), size(h∇, 2)
             subtract_hist_kernel!(backend)(
-                h∇, view(right_nodes_buf, 1:n_subtract), n_k, n_b, n_j;
-                ndrange = n_subtract * n_k * n_b * n_j,
+                h∇, view(right_nodes_buf, 1:n_subtract), js, n_k, n_b;
+                ndrange = n_subtract * n_k * n_b * length(js),
                 workgroupsize = 256
             )
         end
