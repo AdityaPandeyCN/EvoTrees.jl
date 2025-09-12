@@ -256,6 +256,26 @@ end
     end
 end
 
+@kernel function mark_build_and_collect_subtract_kernel!(
+    mask::AbstractVector{UInt8},
+    subtract_nodes,
+    subtract_count,
+    @Const(active_nodes)
+)
+    idx = @index(Global)
+    @inbounds if idx <= length(active_nodes)
+        node = active_nodes[idx]
+        if node > 0
+            if node == 1 || (node % 2) == 0
+                mask[node] = UInt8(1)  # build (root and left) nodes
+            else
+                pos = Atomix.@atomic subtract_count[1] += 1
+                subtract_nodes[pos] = node  # subtract (right) nodes
+            end
+        end
+    end
+end
+
 #=
 NOTE: The calling function `grow_tree!` is now responsible for managing two histogram buffers.
 Before calling this function in a loop for each depth, you must save the current histograms:
@@ -263,7 +283,7 @@ Before calling this function in a loop for each depth, you must save the current
 =#
 function update_hist_gpu!(
     h∇, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes,
-    nodes_sum_gpu, params, right_nodes_buf,
+    nodes_sum_gpu, params, right_nodes_buf, subtract_count,
     feattypes, monotone_constraints, K;
     is_mae::Bool=false, is_quantile::Bool=false, is_cred::Bool=false, is_mle2p::Bool=false
 )
@@ -281,12 +301,17 @@ function update_hist_gpu!(
             workgroupsize = min(256, ndr)
         )
     end
-    
-    # Build mask for active nodes
+ 
+    # Build mask for build (left) nodes and collect subtract (right) nodes
     mask = KernelAbstractions.zeros(backend, UInt8, size(nodes_sum_gpu, 2))
-    create_mask_kernel!(backend)(mask, active_nodes; ndrange=length(active_nodes), workgroupsize=min(256, length(active_nodes)))
+    subtract_count .= 0
+    mark_build_and_collect_subtract_kernel!(backend)(
+        mask, right_nodes_buf, subtract_count, active_nodes;
+        ndrange= n_active, workgroupsize=min(256, n_active)
+    )
     KernelAbstractions.synchronize(backend)
 
+    # Build histograms only for build nodes
     n_work = cld(length(is), 64) * length(js)
     workgroup_size = min(256, n_work)
     hist_kernel!(backend)(
@@ -294,22 +319,16 @@ function update_hist_gpu!(
         ndrange = n_work,
         workgroupsize = workgroup_size
     )
-    
-    if n_active > 16 && depth > 2
-        subtract_count = KernelAbstractions.zeros(backend, Int32, 1)
-        separate_nodes_kernel!(backend)(right_nodes_buf, subtract_count, active_nodes; ndrange = n_active, workgroupsize = min(256, n_active))
-        
-        KernelAbstractions.synchronize(backend)
-        
-        n_subtract = Array(subtract_count)[1]
-        if n_subtract > 0
-            n_k, n_b = size(h∇, 1), size(h∇, 2)
-            subtract_hist_kernel!(backend)(
-                h∇, view(right_nodes_buf, 1:n_subtract), js, n_k, n_b;
-                ndrange = n_subtract * n_k * n_b * length(js),
-                workgroupsize = 256
-            )
-        end
+
+    # Compute histograms for subtract nodes using the subtraction trick
+    n_subtract = Array(subtract_count)[1]
+    if n_subtract > 0
+        n_k, n_b = size(h∇, 1), size(h∇, 2)
+        subtract_hist_kernel!(backend)(
+            h∇, view(right_nodes_buf, 1:n_subtract), js, n_k, n_b;
+            ndrange = n_subtract * n_k * n_b * length(js),
+            workgroupsize = 256
+        )
     end
     
     find_best_split_from_hist_kernel!(backend)(
@@ -336,9 +355,10 @@ function update_hist_gpu!(
     feattypes, monotone_constraints, K;
     is_mae::Bool=false, is_quantile::Bool=false, is_cred::Bool=false, is_mle2p::Bool=false
 )
+    subtract_count = KernelAbstractions.zeros(KernelAbstractions.get_backend(h∇), Int32, 1)
     return update_hist_gpu!(
         h∇, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes,
-        nodes_sum_gpu, params, right_nodes_buf, feattypes, monotone_constraints, K;
+        nodes_sum_gpu, params, right_nodes_buf, subtract_count, feattypes, monotone_constraints, K;
         is_mae=is_mae, is_quantile=is_quantile, is_cred=is_cred, is_mle2p=is_mle2p
     )
 end
