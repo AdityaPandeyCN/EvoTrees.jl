@@ -67,6 +67,81 @@ end
     end
 end
 
+@kernel function hist_kernel_targeted!(
+    h∇::AbstractArray{T,4},
+    @Const(∇),
+    @Const(x_bin),
+    @Const(nidx),
+    @Const(js),
+    @Const(is),
+    @Const(target_nodes),
+    K::Int
+) where {T}
+    gidx = @index(Global, Linear)
+    n_feats = length(js)
+    n_obs = length(is)
+    n_targets = length(target_nodes)
+    obs_per_thread = 64
+    
+    total_work = cld(n_obs, obs_per_thread) * n_feats
+    if gidx <= total_work
+        feat_idx = (gidx - 1) % n_feats + 1
+        obs_chunk = (gidx - 1) ÷ n_feats
+        feat = js[feat_idx]
+        
+        start_idx = obs_chunk * obs_per_thread + 1
+        end_idx = min(start_idx + obs_per_thread - 1, n_obs)
+        
+        @inbounds for obs_idx in start_idx:end_idx
+            obs = is[obs_idx]
+            node = nidx[obs]
+            
+            is_target = false
+            for t_idx in 1:n_targets
+                if node == target_nodes[t_idx]
+                    is_target = true
+                    break
+                end
+            end
+            
+            if is_target && node > 0 && node <= size(h∇, 4)
+                bin = x_bin[obs, feat]
+                if bin > 0 && bin <= size(h∇, 2)
+                    for k in 1:(2*K+1)
+                        Atomix.@atomic h∇[k, bin, feat, node] += ∇[k, obs]
+                    end
+                end
+            end
+        end
+    end
+end
+
+@kernel function clear_hist_kernel!(
+    h∇::AbstractArray{T,4},
+    @Const(nodes_to_clear)
+) where {T}
+    gidx = @index(Global)
+    n_nodes = length(nodes_to_clear)
+    n_bins = size(h∇, 2)
+    n_feats = size(h∇, 3)
+    n_k = size(h∇, 1)
+    
+    elements_per_node = n_k * n_bins * n_feats
+    node_idx = (gidx - 1) ÷ elements_per_node + 1
+    
+    if node_idx <= n_nodes
+        node = nodes_to_clear[node_idx]
+        if node > 0 && node <= size(h∇, 4)
+            elem_idx = (gidx - 1) % elements_per_node
+            k = elem_idx % n_k + 1
+            b = (elem_idx ÷ n_k) % n_bins + 1
+            j = elem_idx ÷ (n_k * n_bins) + 1
+            
+            @inbounds h∇[k, b, j, node] = zero(T)
+        end
+    end
+end
+
 @kernel function find_best_split_from_hist_kernel!(
     gains::AbstractVector{T},
     bins::AbstractVector{Int32},
@@ -151,7 +226,6 @@ end
                     end
                 end
             else
-                # Standard gradient boosting path
                 gain_p = zero(T)
                 if is_mle2p && K == 2
                     g1, g2 = nodes_sum[1, node], nodes_sum[2, node]
@@ -321,7 +395,7 @@ function update_hist_gpu!(
         
         n_subtract = Array(subtract_count)[1]
         n_build = Array(build_count)[1]
-
+        
         if n_subtract > 0
             n_k, n_b, n_j = size(h∇, 1), size(h∇, 2), size(h∇, 3)
             subtract_hist_kernel!(backend)(
@@ -330,38 +404,26 @@ function update_hist_gpu!(
                 workgroupsize = 256
             )
         end
+        
         if n_build > 0
-            # active_nodes is a view into a buffer, so we need to create a new view for the build nodes
             build_nodes_view = view(left_nodes_buf, 1:n_build)
-            # We need to build the histograms only for the build_nodes_view
-            # A simple approach is to create a temporary histogram for the build nodes
-            h∇_build = similar(h∇, size(h∇,1), size(h∇,2), size(h∇,3), n_build)
-            h∇_build .= 0
             
-            # This needs a modified hist_kernel or a way to map nodes to a compact index
-            # For now, let's just rebuild the necessary part of the main histogram
-            # This is inefficient but will work. A better solution would adapt the hist_kernel.
-            temp_nidx = similar(nidx)
-            copyto!(temp_nidx, nidx) # A copy to modify
-            
-            # A kernel to zero out histograms for nodes not in the build list might be needed
-            # Or modify hist_kernel to accept the list of nodes to build for
-            
-            # Simplified (but inefficient) approach for now:
-            # We assume h∇ might contain stale data for nodes we are about to build.
-            # A kernel to zero out specific node histograms in h∇ would be ideal.
-            # For now, this implementation might rely on overwriting. Let's assume hist_kernel handles this.
+            n_k, n_b, n_j = size(h∇, 1), size(h∇, 2), size(h∇, 3)
+            clear_hist_kernel!(backend)(
+                h∇, build_nodes_view;
+                ndrange = n_build * n_k * n_b * n_j,
+                workgroupsize = 256
+            )
+            KernelAbstractions.synchronize(backend)
             
             n_work = cld(length(is), 64) * length(js)
             workgroup_size = min(256, n_work)
-            hist_kernel!(backend)(
-                h∇, ∇, x_bin, nidx, js, is, K;
+            hist_kernel_targeted!(backend)(
+                h∇, ∇, x_bin, nidx, js, is, build_nodes_view, K;
                 ndrange = n_work,
                 workgroupsize = workgroup_size
-            ) # This rebuilds for all, which is inefficient but safe.
-              # A proper implementation would need a more targeted hist_kernel.
+            )
         end
-        # The logic for find_best_split needs to run on all active_nodes, not just the built ones.
     end
     
     find_best_split_from_hist_kernel!(backend)(
