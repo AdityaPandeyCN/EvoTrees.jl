@@ -59,7 +59,7 @@ function grow_tree!(
         cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
         cache.∇, cache.x_bin, cache.nidx, cache.js, is,
         1, view(cache.anodes_gpu, 1:1), cache.nodes_sum_gpu, params,
-        cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf, 
+        cache.right_nodes_buf, 
         cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K;
         is_mae=(L <: EvoTrees.MAE), is_quantile=(L <: EvoTrees.Quantile), is_cred=(L <: EvoTrees.Cred), is_mle2p=(L <: EvoTrees.MLE2P)
     )
@@ -80,7 +80,7 @@ function grow_tree!(
                 cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
                 cache.∇, cache.x_bin, cache.nidx, cache.js, is,
                 depth, active_nodes_act, cache.nodes_sum_gpu, params,
-                cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf, 
+                cache.right_nodes_buf, 
                 cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K;
                 is_mae=(L <: EvoTrees.MAE), is_quantile=(L <: EvoTrees.Quantile), is_cred=(L <: EvoTrees.Cred), is_mle2p=(L <: EvoTrees.MLE2P)
             )
