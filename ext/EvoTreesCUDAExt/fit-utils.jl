@@ -103,94 +103,90 @@ end
         node = active_nodes[n_idx]
         if node == 0
             gains[n_idx], bins[n_idx], feats[n_idx] = T(-Inf), Int32(0), Int32(0)
-            return
-        end
-
-        nbins = size(h∇, 2)
-        eps = T(1e-8)
-
-        @inbounds begin
-            local_f = js[1]
-            n_grad_hess = is_mle2p ? 5 : (2 * K + 1)
-            for k in 1:n_grad_hess
-                total = zero(T)
-                for b in 1:nbins
-                    total += T(h∇[k, b, local_f, node])
-                end
-                nodes_sum[k, node] = total
-            end
-        end
-
-        w_p = is_mle2p ? nodes_sum[5, node] : nodes_sum[2*K+1, node]
-        g_best, b_best, f_best = T(-Inf), Int32(0), Int32(0)
-
-        if w_p < 2 * min_weight
-            gains[n_idx], bins[n_idx], feats[n_idx] = g_best, b_best, f_best
-            return
-        end
-
-        parent_gain = zero(T)
-        if is_mle2p && K == 2
-            g1, g2 = nodes_sum[1, node], nodes_sum[2, node]
-            h1, h2 = nodes_sum[3, node], nodes_sum[4, node]
-            parent_gain = g1^2 / (h1 + lambda * w_p + L2 + eps) + g2^2 / (h2 + lambda * w_p + L2 + eps)
         else
-            for kk in 1:K
-                g = nodes_sum[kk, node]
-                h = nodes_sum[K+kk, node]
-                parent_gain += g^2 / (h + lambda * w_p + L2 + eps)
-            end
-        end
+            nbins = size(h∇, 2)
+            eps = T(1e-8)
 
-        for j_idx in 1:length(js)
-            f = js[j_idx]
-            constraint = monotone_constraints[f]
-            s_w = zero(T)
-            cum_g = MVector{MAX_K,T}(ntuple(_ -> zero(T), MAX_K))
-            cum_h = MVector{MAX_K,T}(ntuple(_ -> zero(T), MAX_K))
-
-            for b in 1:(nbins-1)
-                s_w += is_mle2p ? T(h∇[5, b, f, node]) : T(h∇[2*K+1, b, f, node])
-                for kk in 1:K
-                    cum_g[kk] += T(h∇[kk, b, f, node])
-                    cum_h[kk] += is_mle2p ? T(h∇[kk+2, b, f, node]) : T(h∇[K+kk, b, f, node])
+            @inbounds begin
+                local_f = js[1]
+                n_grad_hess = is_mle2p ? 5 : (2 * K + 1)
+                for k in 1:n_grad_hess
+                    total = zero(T)
+                    for b in 1:nbins
+                        total += T(h∇[k, b, local_f, node])
+                    end
+                    nodes_sum[k, node] = total
                 end
+            end
 
-                if s_w >= min_weight && (w_p - s_w) >= min_weight
-                    left_gain, right_gain = zero(T), zero(T)
-                    predL, predR = zero(T), zero(T)
-                    
+            w_p = is_mle2p ? nodes_sum[5, node] : nodes_sum[2*K+1, node]
+            g_best, b_best, f_best = T(-Inf), Int32(0), Int32(0)
+
+            if w_p >= 2 * min_weight
+                parent_gain = zero(T)
+                if is_mle2p && K == 2
+                    g1, g2 = nodes_sum[1, node], nodes_sum[2, node]
+                    h1, h2 = nodes_sum[3, node], nodes_sum[4, node]
+                    parent_gain = g1^2 / (h1 + lambda * w_p + L2 + eps) + g2^2 / (h2 + lambda * w_p + L2 + eps)
+                else
                     for kk in 1:K
-                        l_g, l_h = cum_g[kk], cum_h[kk]
-                        r_w = w_p - s_w
-                        r_g = nodes_sum[kk, node] - l_g
-                        r_h = (is_mle2p ? nodes_sum[kk+2, node] : nodes_sum[K+kk, node]) - l_h
-                        
-                        denomL = l_h + lambda * s_w + L2 + eps
-                        denomR = r_h + lambda * r_w + L2 + eps
-                        
-                        left_gain += l_g^2 / denomL
-                        right_gain += r_g^2 / denomR
-
-                        if constraint != 0 && (!is_mle2p || kk == 1)
-                            predL += -l_g / denomL
-                            predR += -r_g / denomR
-                        end
+                        g = nodes_sum[kk, node]
+                        h = nodes_sum[K+kk, node]
+                        parent_gain += g^2 / (h + lambda * w_p + L2 + eps)
                     end
-                    
-                    constraint_ok = (constraint == 0) || (constraint == -1 && predL > predR) || (constraint == 1 && predL < predR)
-                    
-                    if constraint_ok
-                        g = left_gain + right_gain - parent_gain
-                        if g > g_best
-                            g_best, b_best, f_best = g, Int32(b), Int32(f)
+                end
+
+                for j_idx in 1:length(js)
+                    f = js[j_idx]
+                    constraint = monotone_constraints[f]
+                    s_w = zero(T)
+                    cum_g = MVector{MAX_K,T}(ntuple(_ -> zero(T), MAX_K))
+                    cum_h = MVector{MAX_K,T}(ntuple(_ -> zero(T), MAX_K))
+
+                    for b in 1:(nbins-1)
+                        s_w += is_mle2p ? T(h∇[5, b, f, node]) : T(h∇[2*K+1, b, f, node])
+                        for kk in 1:K
+                            cum_g[kk] += T(h∇[kk, b, f, node])
+                            cum_h[kk] += is_mle2p ? T(h∇[kk+2, b, f, node]) : T(h∇[K+kk, b, f, node])
+                        end
+
+                        if s_w >= min_weight && (w_p - s_w) >= min_weight
+                            left_gain, right_gain = zero(T), zero(T)
+                            predL, predR = zero(T), zero(T)
+                            
+                            for kk in 1:K
+                                l_g, l_h = cum_g[kk], cum_h[kk]
+                                r_w = w_p - s_w
+                                r_g = nodes_sum[kk, node] - l_g
+                                r_h = (is_mle2p ? nodes_sum[kk+2, node] : nodes_sum[K+kk, node]) - l_h
+                                
+                                denomL = l_h + lambda * s_w + L2 + eps
+                                denomR = r_h + lambda * r_w + L2 + eps
+                                
+                                left_gain += l_g^2 / denomL
+                                right_gain += r_g^2 / denomR
+
+                                if constraint != 0 && (!is_mle2p || kk == 1)
+                                    predL += -l_g / denomL
+                                    predR += -r_g / denomR
+                                end
+                            end
+                            
+                            constraint_ok = (constraint == 0) || (constraint == -1 && predL > predR) || (constraint == 1 && predL < predR)
+                            
+                            if constraint_ok
+                                g = left_gain + right_gain - parent_gain
+                                if g > g_best
+                                    g_best, b_best, f_best = g, Int32(b), Int32(f)
+                                end
+                            end
                         end
                     end
                 end
+                g_best /= 2
             end
+            gains[n_idx], bins[n_idx], feats[n_idx] = g_best, b_best, f_best
         end
-        g_best /= 2
-        gains[n_idx], bins[n_idx], feats[n_idx] = g_best, b_best, f_best
     end
 end
 
