@@ -190,8 +190,7 @@ end
             w = nodes_sum[2*K+1, node]
             if w > epsv
                 g = nodes_sum[1, node]
-                h = nodes_sum[2, node]
-                tree_pred[1, node] = -g / (h + lambda * w + L2 + epsv) / bagging_size
+                tree_pred[1, node] = g / (w + L2 + epsv) / bagging_size
             end
         elseif is_mle2p
             w = nodes_sum[5, node]
