@@ -80,6 +80,32 @@ end
     end
 end
 
+# Zero only histogram slices for active nodes and sampled features
+@kernel function zero_hist_nodes_kernel!(
+    h∇::AbstractArray{T,4},
+    @Const(active_nodes),
+    @Const(js),
+    n_k::Int,
+    n_b::Int,
+) where {T}
+    gidx = @index(Global)
+    n_j = length(js)
+    n_nodes = length(active_nodes)
+    total = n_k * n_b * n_j * n_nodes
+    if gidx <= total
+        elem = gidx - 1
+        node_idx = elem ÷ (n_k * n_b * n_j) + 1
+        rem1 = elem % (n_k * n_b * n_j)
+        j_idx = rem1 ÷ (n_k * n_b) + 1
+        rem2 = rem1 % (n_k * n_b)
+        b = rem2 ÷ n_k + 1
+        k = rem2 % n_k + 1
+        node = active_nodes[node_idx]
+        f = js[j_idx]
+        @inbounds h∇[k, b, f, node] = zero(T)
+    end
+end
+
 @kernel function find_best_split_from_hist_kernel!(
     gains::AbstractVector{T},
     bins::AbstractVector{Int32},
@@ -191,7 +217,6 @@ end
 end
 
 @kernel function separate_nodes_kernel!(
-    build_nodes, build_count,
     subtract_nodes, subtract_count,
     @Const(active_nodes)
 )
@@ -199,10 +224,7 @@ end
     @inbounds if idx <= length(active_nodes)
         node = active_nodes[idx]
         if node > 0
-            if (node % 2) == 0 # Even node ID is a left child
-                pos = Atomix.@atomic build_count[1] += 1
-                build_nodes[pos] = node
-            else # Odd node ID is a right child
+            if (node % 2) != 0 # right child only
                 pos = Atomix.@atomic subtract_count[1] += 1
                 subtract_nodes[pos] = node
             end
@@ -210,26 +232,26 @@ end
     end
 end
 
-@kernel function subtract_hist_kernel!(
-    h∇::AbstractArray{T,4},
-    @Const(h∇_parent),
-    @Const(subtract_nodes)
-) where {T}
-    gidx = @index(Global, Linear)
-    n_k, n_b, n_j = size(h∇, 1), size(h∇, 2), size(h∇, 3)
-    n_elements_per_node = n_k * n_b * n_j
+@kernel function subtract_hist_kernel!(h∇::AbstractArray{T,4}, @Const(subtract_nodes), @Const(js), n_k, n_b) where {T}
+    gidx = @index(Global)
+    n_j = length(js)
+    n_elements = n_k * n_b * n_j
     
-    node_idx = (gidx - 1) ÷ n_elements_per_node + 1
-
-    @inbounds if node_idx <= length(subtract_nodes)
-        node = subtract_nodes[node_idx] # This is the right child
+    node_idx = (gidx - 1) ÷ n_elements + 1
+    if node_idx <= length(subtract_nodes)
+        @inbounds node = subtract_nodes[node_idx]
         if node > 0
             parent = node >> 1
-            sibling = node - 1 # The left child sibling
+            sibling = node ⊻ 1
             
-            element_idx_in_node = (gidx - 1) % n_elements_per_node + 1
+            elem_idx = (gidx - 1) % n_elements
+            j_idx = elem_idx ÷ (n_k * n_b) + 1
+            remainder = elem_idx % (n_k * n_b)
+            b = remainder ÷ n_k + 1
+            k = remainder % n_k + 1
+            f = js[j_idx]
             
-            h∇[element_idx_in_node, node] = h∇_parent[element_idx_in_node, parent] - h∇[element_idx_in_node, sibling]
+            h∇[k, b, f, node] = h∇[k, b, f, parent] - h∇[k, b, f, sibling]
         end
     end
 end
@@ -240,56 +262,51 @@ Before calling this function in a loop for each depth, you must save the current
 `copyto!(h∇_parent, h∇)`
 =#
 function update_hist_gpu!(
-    h∇, h∇_parent,
-    gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes,
-    nodes_sum_gpu, params, left_nodes_buf, right_nodes_buf, build_mask,
+    h∇, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes,
+    nodes_sum_gpu, params, right_nodes_buf,
     feattypes, monotone_constraints, K;
     is_mae::Bool=false, is_quantile::Bool=false, is_cred::Bool=false, is_mle2p::Bool=false
 )
     backend = KernelAbstractions.get_backend(h∇)
     n_active = length(active_nodes)
     
-    if depth == 1
-        h∇ .= 0
-        build_mask .= 1
-        hist_kernel!(backend)(
-            h∇, ∇, x_bin, nidx, js, is, build_mask, K, is_mle2p;
-            ndrange = cld(length(is), 64) * length(js),
-            workgroupsize = 256
+    # Zero only relevant histogram slices for current active nodes and sampled features
+    if n_active > 0
+        n_k, n_b = size(h∇, 1), size(h∇, 2)
+        n_j = length(js)
+        ndr = n_active * n_k * n_b * n_j
+        zero_hist_nodes_kernel!(backend)(
+            h∇, active_nodes, js, n_k, n_b;
+            ndrange = ndr,
+            workgroupsize = min(256, ndr)
         )
-    else
-        build_count = KernelAbstractions.zeros(backend, Int32, 1)
+    end
+    
+    # Build mask for active nodes
+    mask = KernelAbstractions.zeros(backend, UInt8, size(nodes_sum_gpu, 2))
+    create_mask_kernel!(backend)(mask, active_nodes; ndrange=length(active_nodes), workgroupsize=min(256, length(active_nodes)))
+    KernelAbstractions.synchronize(backend)
+
+    n_work = cld(length(is), 64) * length(js)
+    workgroup_size = min(256, n_work)
+    hist_kernel!(backend)(
+        h∇, ∇, x_bin, nidx, js, is, mask, K, is_mle2p;
+        ndrange = n_work,
+        workgroupsize = workgroup_size
+    )
+    
+    if n_active > 16 && depth > 2
         subtract_count = KernelAbstractions.zeros(backend, Int32, 1)
+        separate_nodes_kernel!(backend)(right_nodes_buf, subtract_count, active_nodes; ndrange = n_active, workgroupsize = min(256, n_active))
         
-        separate_nodes_kernel!(backend)(
-            left_nodes_buf, build_count, right_nodes_buf, subtract_count, active_nodes;
-            ndrange = n_active, workgroupsize = min(256, n_active)
-        )
         KernelAbstractions.synchronize(backend)
-        n_build = Array(build_count)[1]
+        
         n_subtract = Array(subtract_count)[1]
-
-        if n_build > 0
-            h∇ .= 0 # Zero out current buffer before building into it
-            build_mask .= 0
-            build_nodes_view = view(left_nodes_buf, 1:n_build)
-            create_mask_kernel!(backend)(build_mask, build_nodes_view; ndrange=n_build, workgroupsize=min(256, n_build))
-
-            hist_kernel!(backend)(
-                h∇, ∇, x_bin, nidx, js, is, build_mask, K, is_mle2p;
-                ndrange = cld(length(is), 64) * length(js),
-                workgroupsize = 256
-            )
-        else
-            h∇ .= 0 # If there's nothing to build, still need to clear for the subtract step
-        end
-
         if n_subtract > 0
-            subtract_nodes_view = view(right_nodes_buf, 1:n_subtract)
-            n_elems_per_node = size(h∇, 1) * size(h∇, 2) * size(h∇, 3)
+            n_k, n_b = size(h∇, 1), size(h∇, 2)
             subtract_hist_kernel!(backend)(
-                h∇, h∇_parent, subtract_nodes_view;
-                ndrange = n_subtract * n_elems_per_node,
+                h∇, view(right_nodes_buf, 1:n_subtract), js, n_k, n_b;
+                ndrange = n_subtract * n_k * n_b * length(js),
                 workgroupsize = 256
             )
         end
@@ -298,12 +315,31 @@ function update_hist_gpu!(
     find_best_split_from_hist_kernel!(backend)(
         gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
         feattypes, monotone_constraints,
-        eltype(gains)(params.lambda), eltype(gains)(params.min_weight), eltype(gains)(params.L2),
-        K, is_mae, is_quantile, is_mle2p;
+        eltype(gains)(params.lambda),
+        eltype(gains)(params.min_weight),
+        eltype(gains)(params.L2),
+        K,
+        is_mae,
+        is_quantile,
+        is_mle2p;
         ndrange = n_active,
         workgroupsize = min(256, n_active)
     )
     
     KernelAbstractions.synchronize(backend)
+end
+
+# Compatibility wrapper for older call sites (with left_nodes_buf and target_mask_buf)
+function update_hist_gpu!(
+    h∇, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes,
+    nodes_sum_gpu, params, left_nodes_buf, right_nodes_buf, target_mask_buf,
+    feattypes, monotone_constraints, K;
+    is_mae::Bool=false, is_quantile::Bool=false, is_cred::Bool=false, is_mle2p::Bool=false
+)
+    return update_hist_gpu!(
+        h∇, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes,
+        nodes_sum_gpu, params, right_nodes_buf, feattypes, monotone_constraints, K;
+        is_mae=is_mae, is_quantile=is_quantile, is_cred=is_cred, is_mle2p=is_mle2p
+    )
 end
 
