@@ -3,7 +3,8 @@ using Atomix
 using StaticArrays
 
 const MAX_K = 8
-const OBS_PER_THREAD = 16
+const OBS_PER_THREAD = 16  # balanced workload per thread
+const THREADS_PER_BLOCK = 128  # 4 warps, good occupancy
 
 @kernel function update_nodes_idx_kernel!(
     nidx::AbstractVector{T},
@@ -257,7 +258,7 @@ function update_hist_gpu!(
         hist_kernel!(backend)(
             h∇, ∇, x_bin, nidx, js, is, build_mask, K, is_mle2p;
             ndrange = cld(length(is), OBS_PER_THREAD) * length(js),
-            workgroupsize = 256
+            workgroupsize = THREADS_PER_BLOCK
         )
     else
         build_count = KernelAbstractions.zeros(backend, Int32, 1)
@@ -265,7 +266,7 @@ function update_hist_gpu!(
         
         separate_nodes_kernel!(backend)(
             left_nodes_buf, build_count, right_nodes_buf, subtract_count, active_nodes;
-            ndrange = n_active, workgroupsize = min(256, n_active)
+            ndrange = n_active, workgroupsize = THREADS_PER_BLOCK
         )
         KernelAbstractions.synchronize(backend)
         n_build = Array(build_count)[1]
@@ -276,12 +277,12 @@ function update_hist_gpu!(
             h∇ .= 0 # Zero out current buffer before building into it
             build_mask .= 0
             build_nodes_view = view(left_nodes_buf, 1:n_build)
-            create_mask_kernel!(backend)(build_mask, build_nodes_view; ndrange=n_build, workgroupsize=min(256, n_build))
+            create_mask_kernel!(backend)(build_mask, build_nodes_view; ndrange=n_build, workgroupsize=THREADS_PER_BLOCK)
 
             hist_kernel!(backend)(
                 h∇, ∇, x_bin, nidx, js, is, build_mask, K, is_mle2p;
                 ndrange = cld(length(is), OBS_PER_THREAD) * length(js),
-                workgroupsize = 256
+                workgroupsize = THREADS_PER_BLOCK
             )
         else
             # If there are no left children, the buffer still needs to be cleared for the subtraction step.
@@ -295,7 +296,7 @@ function update_hist_gpu!(
             subtract_hist_kernel!(backend)(
                 h∇, h∇_parent, subtract_nodes_view;
                 ndrange = n_subtract * n_elems_per_node,
-                workgroupsize = 256
+                workgroupsize = THREADS_PER_BLOCK
             )
         end
     end
@@ -306,7 +307,7 @@ function update_hist_gpu!(
         eltype(gains)(params.lambda), eltype(gains)(params.min_weight), eltype(gains)(params.L2),
         K, is_mae, is_quantile, is_mle2p;
         ndrange = n_active,
-        workgroupsize = min(256, n_active)
+        workgroupsize = THREADS_PER_BLOCK
     )
     
     KernelAbstractions.synchronize(backend)
