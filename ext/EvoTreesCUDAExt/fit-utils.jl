@@ -3,6 +3,7 @@ using Atomix
 using StaticArrays
 
 const MAX_K = 8
+const OBS_PER_THREAD = 16
 
 @kernel function update_nodes_idx_kernel!(
     nidx::AbstractVector{T},
@@ -53,7 +54,7 @@ end
     gidx = @index(Global, Linear)
     n_feats = length(js)
     n_obs = length(is)
-    obs_per_thread = 64
+    obs_per_thread = OBS_PER_THREAD
 
     total_work = cld(n_obs, obs_per_thread) * n_feats
     if gidx <= total_work
@@ -255,7 +256,7 @@ function update_hist_gpu!(
         build_mask .= 1 # Build for all nodes (in this case, just the root)
         hist_kernel!(backend)(
             h∇, ∇, x_bin, nidx, js, is, build_mask, K, is_mle2p;
-            ndrange = cld(length(is), 64) * length(js),
+            ndrange = cld(length(is), OBS_PER_THREAD) * length(js),
             workgroupsize = 256
         )
     else
@@ -279,7 +280,7 @@ function update_hist_gpu!(
 
             hist_kernel!(backend)(
                 h∇, ∇, x_bin, nidx, js, is, build_mask, K, is_mle2p;
-                ndrange = cld(length(is), 64) * length(js),
+                ndrange = cld(length(is), OBS_PER_THREAD) * length(js),
                 workgroupsize = 256
             )
         else
