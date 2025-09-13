@@ -14,6 +14,7 @@ struct CacheGPU
     js::CuVector{UInt32}
     ∇::CuMatrix
     h∇::CuArray
+    h∇_parent::CuArray
     fnames::Vector{Symbol}  
     edges::Vector
     featbins::Vector

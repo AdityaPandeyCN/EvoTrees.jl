@@ -66,6 +66,7 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, ::Type{<:EvoTrees.GPU}, d
 
     ∇ = KernelAbstractions.zeros(backend, T, 2 * K + 1, nobs)
     h∇ = KernelAbstractions.zeros(backend, Float64, 2 * K + 1, params.nbins, nfeats, 2^params.max_depth - 1)
+    h∇_parent = similar(h∇)
     
     @assert (length(y) == length(w) && minimum(w) > 0)
     ∇[end, :] .= w
@@ -123,7 +124,7 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, ::Type{<:EvoTrees.GPU}, d
 
     cache = CacheGPU(
         info, x_bin, y, CuArray(w), K, nothing, pred, nidx, is_in, is_out, mask,
-        js_, js, ∇, h∇, fnames, edges, featbins, feattypes_gpu,
+        js_, js, ∇, h∇, h∇_parent, fnames, edges, featbins, feattypes_gpu,
         monotone_constraints_gpu,
         left_nodes_buf, right_nodes_buf, target_mask_buf,
         tree_split_gpu,

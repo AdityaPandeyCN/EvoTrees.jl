@@ -56,7 +56,7 @@ function grow_tree!(
     view(cache.anodes_gpu, 1:1) .= 1
 
     update_hist_gpu!(
-        cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
+        cache.h∇, cache.h∇_parent, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
         cache.∇, cache.x_bin, cache.nidx, cache.js, is,
         1, view(cache.anodes_gpu, 1:1), cache.nodes_sum_gpu, params,
         cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf,
@@ -75,9 +75,10 @@ function grow_tree!(
         n_nodes_level = 2^(depth - 1)
         
         if depth > 1
+            copyto!(cache.h∇_parent, cache.h∇)
             active_nodes_act = view(cache.anodes_gpu, 1:n_active)
             update_hist_gpu!(
-                cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
+                cache.h∇, cache.h∇_parent, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
                 cache.∇, cache.x_bin, cache.nidx, cache.js, is,
                 depth, active_nodes_act, cache.nodes_sum_gpu, params,
                 cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf,
