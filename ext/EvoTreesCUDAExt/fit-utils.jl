@@ -199,10 +199,10 @@ end
     @inbounds if idx <= length(active_nodes)
         node = active_nodes[idx]
         if node > 0
-            if (node % 2) == 0
+            if (node % 2) == 0 # Even node ID is a left child to be built
                 pos = Atomix.@atomic build_count[1] += 1
                 build_nodes[pos] = node
-            else
+            else # Odd node ID is a right child to be subtracted
                 pos = Atomix.@atomic subtract_count[1] += 1
                 subtract_nodes[pos] = node
             end
@@ -222,10 +222,10 @@ end
     node_idx = (gidx - 1) ÷ n_elements_per_node + 1
 
     @inbounds if node_idx <= length(subtract_nodes)
-        node = subtract_nodes[node_idx]
+        node = subtract_nodes[node_idx] # This is the right child
         if node > 0
             parent = node >> 1
-            sibling = node - 1
+            sibling = node - 1 # The left child sibling
             
             element_idx_in_node = (gidx - 1) % n_elements_per_node + 1
             
@@ -234,49 +234,80 @@ end
     end
 end
 
+#=
+ARCHITECTURAL NOTE: The calling function `grow_tree!` is responsible for managing two histogram buffers.
+Before calling this function in a loop for each depth > 1, you MUST save the parent histograms:
+`copyto!(h∇_parent, h∇)`
+This is essential for the subtraction trick to work correctly.
+=#
 function update_hist_gpu!(
-    h∇,
-    gains, bins, feats,
-    ∇, x_bin, nidx, js, is, depth, active_nodes,
+    h∇, h∇_parent,
+    gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes,
     nodes_sum_gpu, params, left_nodes_buf, right_nodes_buf, build_mask,
     feattypes, monotone_constraints, K;
     is_mae::Bool=false, is_quantile::Bool=false, is_cred::Bool=false, is_mle2p::Bool=false
 )
     backend = KernelAbstractions.get_backend(h∇)
     n_active = length(active_nodes)
-
-    # Zero histograms and build mask for current active nodes
-    h∇ .= 0
-    build_mask .= 0
-    if n_active > 0
-        create_mask_kernel!(backend)(build_mask, active_nodes; ndrange=n_active, workgroupsize=min(256, n_active))
+    
+    if depth == 1
+        h∇ .= 0
+        build_mask .= 1 # Build for all nodes (in this case, just the root)
+        hist_kernel!(backend)(
+            h∇, ∇, x_bin, nidx, js, is, build_mask, K, is_mle2p;
+            ndrange = cld(length(is), 64) * length(js),
+            workgroupsize = 256
+        )
+    else
+        build_count = KernelAbstractions.zeros(backend, Int32, 1)
+        subtract_count = KernelAbstractions.zeros(backend, Int32, 1)
+        
+        separate_nodes_kernel!(backend)(
+            left_nodes_buf, build_count, right_nodes_buf, subtract_count, active_nodes;
+            ndrange = n_active, workgroupsize = min(256, n_active)
+        )
         KernelAbstractions.synchronize(backend)
+        n_build = Array(build_count)[1]
+        n_subtract = Array(subtract_count)[1]
+
+        # Build histograms for left children from scratch
+        if n_build > 0
+            h∇ .= 0 # Zero out current buffer before building into it
+            build_mask .= 0
+            build_nodes_view = view(left_nodes_buf, 1:n_build)
+            create_mask_kernel!(backend)(build_mask, build_nodes_view; ndrange=n_build, workgroupsize=min(256, n_build))
+
+            hist_kernel!(backend)(
+                h∇, ∇, x_bin, nidx, js, is, build_mask, K, is_mle2p;
+                ndrange = cld(length(is), 64) * length(js),
+                workgroupsize = 256
+            )
+        else
+            # If there are no left children, the buffer still needs to be cleared for the subtraction step.
+            h∇ .= 0
+        end
+
+        # Calculate histograms for right children using the parent and new left histograms
+        if n_subtract > 0
+            subtract_nodes_view = view(right_nodes_buf, 1:n_subtract)
+            n_elems_per_node = size(h∇, 1) * size(h∇, 2) * size(h∇, 3)
+            subtract_hist_kernel!(backend)(
+                h∇, h∇_parent, subtract_nodes_view;
+                ndrange = n_subtract * n_elems_per_node,
+                workgroupsize = 256
+            )
+        end
     end
-
-    # Build histograms for all masked nodes
-    n_work = cld(length(is), 64) * length(js)
-    workgroup_size = min(256, n_work)
-    hist_kernel!(backend)(
-        h∇, ∇, x_bin, nidx, js, is, build_mask, K, is_mle2p;
-        ndrange = n_work,
-        workgroupsize = workgroup_size
-    )
-
-    # Find best splits
+    
     find_best_split_from_hist_kernel!(backend)(
         gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
         feattypes, monotone_constraints,
-        eltype(gains)(params.lambda),
-        eltype(gains)(params.min_weight),
-        eltype(gains)(params.L2),
-        K,
-        is_mae,
-        is_quantile,
-        is_mle2p;
+        eltype(gains)(params.lambda), eltype(gains)(params.min_weight), eltype(gains)(params.L2),
+        K, is_mae, is_quantile, is_mle2p;
         ndrange = n_active,
         workgroupsize = min(256, n_active)
     )
-
+    
     KernelAbstractions.synchronize(backend)
 end
 
