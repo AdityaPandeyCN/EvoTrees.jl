@@ -253,7 +253,7 @@ function update_hist_gpu!(
         KernelAbstractions.synchronize(backend)
     end
 
-    # Build histograms for all active nodes
+    # Build histograms for all masked nodes
     n_work = cld(length(is), 64) * length(js)
     workgroup_size = min(256, n_work)
     hist_kernel!(backend)(
@@ -262,7 +262,7 @@ function update_hist_gpu!(
         workgroupsize = workgroup_size
     )
 
-    # Find best splits from histograms
+    # Find best splits
     find_best_split_from_hist_kernel!(backend)(
         gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
         feattypes, monotone_constraints,
