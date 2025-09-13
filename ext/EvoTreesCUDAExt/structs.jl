@@ -36,7 +36,5 @@ struct CacheGPU
     best_gain_gpu::CuVector{Float64}
     best_bin_gpu::CuVector{Int32}
     best_feat_gpu::CuVector{Int32}
-    subtract_nodes_gpu::CuVector{Int32}
-    subtract_count::CuVector{Int32}
 end
 
