@@ -98,7 +98,9 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, ::Type{<:EvoTrees.GPU}, d
     monotone_constraints_gpu = CuArray(monotone_constraints)
 
     max_nodes_level = 2^params.max_depth
+    left_nodes_buf = KernelAbstractions.zeros(backend, Int32, max_nodes_level)
     right_nodes_buf = KernelAbstractions.zeros(backend, Int32, max_nodes_level)
+    target_mask_buf = KernelAbstractions.zeros(backend, UInt8, 2^(params.max_depth + 1))
 
     max_tree_nodes = 2^params.max_depth - 1
     tree_split_gpu = KernelAbstractions.zeros(backend, Bool, max_tree_nodes)
@@ -118,19 +120,16 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, ::Type{<:EvoTrees.GPU}, d
     best_gain_gpu = KernelAbstractions.zeros(backend, Float64, max_nodes_level)
     best_bin_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level)
     best_feat_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level)
-    subtract_nodes_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level)
-    subtract_count = KernelAbstractions.zeros(backend, Int32, 1)
 
     cache = CacheGPU(
         info, x_bin, y, CuArray(w), K, nothing, pred, nidx, is_in, is_out, mask,
         js_, js, ∇, h∇, fnames, edges, featbins, feattypes_gpu,
         monotone_constraints_gpu,
-        right_nodes_buf,
+        left_nodes_buf, right_nodes_buf, target_mask_buf,
         tree_split_gpu,
         tree_cond_bin_gpu, tree_feat_gpu, tree_gain_gpu, tree_pred_gpu,
         nodes_sum_gpu, nodes_gain_gpu, anodes_gpu, n_next_gpu,
         n_next_active_gpu, best_gain_gpu, best_bin_gpu, best_feat_gpu,
-        subtract_nodes_gpu, subtract_count
     )
     
     return m, cache

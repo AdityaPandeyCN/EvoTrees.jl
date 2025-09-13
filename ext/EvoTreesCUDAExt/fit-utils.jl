@@ -235,70 +235,48 @@ end
 end
 
 function update_hist_gpu!(
-    h∇, h∇_parent,
-    gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes,
+    h∇,
+    gains, bins, feats,
+    ∇, x_bin, nidx, js, is, depth, active_nodes,
     nodes_sum_gpu, params, left_nodes_buf, right_nodes_buf, build_mask,
     feattypes, monotone_constraints, K;
     is_mae::Bool=false, is_quantile::Bool=false, is_cred::Bool=false, is_mle2p::Bool=false
 )
     backend = KernelAbstractions.get_backend(h∇)
     n_active = length(active_nodes)
-    
-    if depth == 1
-        h∇ .= 0
-        build_mask .= 1
-        hist_kernel!(backend)(
-            h∇, ∇, x_bin, nidx, js, is, build_mask, K, is_mle2p;
-            ndrange = cld(length(is), 64) * length(js),
-            workgroupsize = 256
-        )
-    else
-        build_count = KernelAbstractions.zeros(backend, Int32, 1)
-        subtract_count = KernelAbstractions.zeros(backend, Int32, 1)
-        
-        separate_nodes_kernel!(backend)(
-            left_nodes_buf, build_count, right_nodes_buf, subtract_count, active_nodes;
-            ndrange = n_active, workgroupsize = min(256, n_active)
-        )
+
+    # Zero histograms and build mask for current active nodes
+    h∇ .= 0
+    build_mask .= 0
+    if n_active > 0
+        create_mask_kernel!(backend)(build_mask, active_nodes; ndrange=n_active, workgroupsize=min(256, n_active))
         KernelAbstractions.synchronize(backend)
-        n_build = Array(build_count)[1]
-        n_subtract = Array(subtract_count)[1]
-
-        if n_build > 0
-            h∇ .= 0
-            build_mask .= 0
-            build_nodes_view = view(left_nodes_buf, 1:n_build)
-            create_mask_kernel!(backend)(build_mask, build_nodes_view; ndrange=n_build, workgroupsize=min(256, n_build))
-
-            hist_kernel!(backend)(
-                h∇, ∇, x_bin, nidx, js, is, build_mask, K, is_mle2p;
-                ndrange = cld(length(is), 64) * length(js),
-                workgroupsize = 256
-            )
-        else
-            h∇ .= 0
-        end
-
-        if n_subtract > 0
-            subtract_nodes_view = view(right_nodes_buf, 1:n_subtract)
-            n_elems_per_node = size(h∇, 1) * size(h∇, 2) * size(h∇, 3)
-            subtract_hist_kernel!(backend)(
-                h∇, h∇_parent, subtract_nodes_view;
-                ndrange = n_subtract * n_elems_per_node,
-                workgroupsize = 256
-            )
-        end
     end
-    
+
+    # Build histograms for all active nodes
+    n_work = cld(length(is), 64) * length(js)
+    workgroup_size = min(256, n_work)
+    hist_kernel!(backend)(
+        h∇, ∇, x_bin, nidx, js, is, build_mask, K, is_mle2p;
+        ndrange = n_work,
+        workgroupsize = workgroup_size
+    )
+
+    # Find best splits from histograms
     find_best_split_from_hist_kernel!(backend)(
         gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js,
         feattypes, monotone_constraints,
-        eltype(gains)(params.lambda), eltype(gains)(params.min_weight), eltype(gains)(params.L2),
-        K, is_mae, is_quantile, is_mle2p;
+        eltype(gains)(params.lambda),
+        eltype(gains)(params.min_weight),
+        eltype(gains)(params.L2),
+        K,
+        is_mae,
+        is_quantile,
+        is_mle2p;
         ndrange = n_active,
         workgroupsize = min(256, n_active)
     )
-    
+
     KernelAbstractions.synchronize(backend)
 end
 

@@ -19,7 +19,9 @@ struct CacheGPU
     featbins::Vector
     feattypes_gpu::CuVector{Bool}
     monotone_constraints_gpu::CuVector{Int32}
+    left_nodes_buf::CuVector{Int32}
     right_nodes_buf::CuVector{Int32}
+    target_mask_buf::CuVector{UInt8}
     
     tree_split_gpu::CuVector{Bool}
     tree_cond_bin_gpu::CuVector{UInt8}
