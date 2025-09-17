@@ -132,7 +132,7 @@ function grow_tree!(
             view_gain, view_bin, view_feat,
             cache.h∇,
             active_nodes_full,
-            depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), cache.K;
+            depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), Float32(params.L2), cache.K;
             ndrange = n_active, workgroupsize=256
         )
         KernelAbstractions.synchronize(backend)
@@ -167,7 +167,7 @@ end
     best_gain, best_bin, best_feat,
     h∇,
     active_nodes,
-    depth, max_depth, lambda, gamma,
+    depth, max_depth, lambda, gamma, L2,
     K
 )
     n_idx = @index(Global)
@@ -200,22 +200,47 @@ end
         nodes_sum[2*K+1, child_r] = nodes_sum[2*K+1, node] - nodes_sum[2*K+1, child_l]
 
         p1_l, p2_l, w_l = nodes_sum[1, child_l], nodes_sum[2, child_l], nodes_sum[2*K+1, child_l]
-        nodes_gain[child_l] = p1_l^2 / (p2_l + lambda * w_l + epsv)
+        nodes_gain[child_l] = p1_l^2 / (p2_l + lambda * w_l + L2 + epsv)
         p1_r, p2_r, w_r = nodes_sum[1, child_r], nodes_sum[2, child_r], nodes_sum[2*K+1, child_r]
-        nodes_gain[child_r] = p1_r^2 / (p2_r + lambda * w_r + epsv)
+        nodes_gain[child_r] = p1_r^2 / (p2_r + lambda * w_r + L2 + epsv)
         
         idx_base = Atomix.@atomic n_next_active[1] += 2
         n_next[idx_base - 1] = child_l
         n_next[idx_base] = child_r
 
-        tree_pred[1, child_l] = - (nodes_sum[1, child_l]) / (nodes_sum[2, child_l] + lambda * nodes_sum[2*K+1, child_l] + epsv)
-        tree_pred[1, child_r] = - (nodes_sum[1, child_r]) / (nodes_sum[2, child_r] + lambda * nodes_sum[2*K+1, child_r] + epsv)
+        if K == 1
+            tree_pred[1, child_l] = - (nodes_sum[1, child_l]) / (nodes_sum[2, child_l] + lambda * nodes_sum[2*K+1, child_l] + L2 + epsv)
+            tree_pred[1, child_r] = - (nodes_sum[1, child_r]) / (nodes_sum[2, child_r] + lambda * nodes_sum[2*K+1, child_r] + L2 + epsv)
+        else
+            @inbounds for k in 1:K
+                gL = nodes_sum[k, child_l]
+                hL = nodes_sum[K + k, child_l]
+                wL = nodes_sum[2*K+1, child_l]
+                tree_pred[k, child_l] = - gL / (hL + lambda * wL + L2 + epsv)
+                gR = nodes_sum[k, child_r]
+                hR = nodes_sum[K + k, child_r]
+                wR = nodes_sum[2*K+1, child_r]
+                tree_pred[k, child_r] = - gR / (hR + lambda * wR + L2 + epsv)
+            end
+        end
     else
         g, h, w = nodes_sum[1, node], nodes_sum[2, node], nodes_sum[2*K+1, node]
-        if w <= zero(w) || h + lambda * w <= zero(h)
-            tree_pred[1, node] = 0.0f0
+        if K == 1
+            if w <= zero(w) || h + lambda * w + L2 <= zero(h)
+                tree_pred[1, node] = 0.0f0
+            else
+                tree_pred[1, node] = -g / (h + lambda * w + L2 + epsv)
+            end
         else
-            tree_pred[1, node] = -g / (h + lambda * w + epsv)
+            @inbounds for k in 1:K
+                gk = nodes_sum[k, node]
+                hk = nodes_sum[K + k, node]
+                if w <= zero(w) || hk + lambda * w + L2 <= zero(hk)
+                    tree_pred[k, node] = 0.0f0
+                else
+                    tree_pred[k, node] = - gk / (hk + lambda * w + L2 + epsv)
+                end
+            end
         end
     end
 end

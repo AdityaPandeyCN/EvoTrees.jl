@@ -206,3 +206,83 @@ function EvoTrees.update_grads!(
     return
 end
 
+#####################
+# MAE
+#####################
+function kernel_mae_∇!(∇::CuDeviceMatrix, p::CuDeviceMatrix, y::CuDeviceVector)
+    i = threadIdx().x + (blockIdx().x - 1) * blockDim().x
+    if i <= length(y)
+        @inbounds ∇[1, i] = (y[i] - p[1, i]) * ∇[3, i]
+    end
+    return
+end
+function EvoTrees.update_grads!(
+    ∇::CuMatrix,
+    p::CuMatrix,
+    y::CuVector,
+    ::Type{EvoTrees.MAE},
+    params::EvoTrees.EvoTypes;
+    MAX_THREADS=1024
+)
+    threads = min(MAX_THREADS, length(y))
+    blocks = cld(length(y), threads)
+    @cuda blocks = blocks threads = threads kernel_mae_∇!(∇, p, y)
+    CUDA.synchronize()
+    return
+end
+
+#####################
+# Quantile
+#####################
+function kernel_quantile_∇!(∇::CuDeviceMatrix{T}, p::CuDeviceMatrix{T}, y::CuDeviceVector{T}, alpha::T) where {T}
+    i = threadIdx().x + (blockIdx().x - 1) * blockDim().x
+    if i <= length(y)
+        diff = y[i] - p[1, i]
+        @inbounds ∇[1, i] = (diff > 0 ? alpha : (alpha - one(T))) * ∇[3, i]
+        @inbounds ∇[2, i] = diff
+    end
+    return
+end
+function EvoTrees.update_grads!(
+    ∇::CuMatrix,
+    p::CuMatrix,
+    y::CuVector,
+    ::Type{EvoTrees.Quantile},
+    params::EvoTrees.EvoTypes;
+    MAX_THREADS=1024
+)
+    threads = min(MAX_THREADS, length(y))
+    blocks = cld(length(y), threads)
+    alphaT = eltype(p)(params.alpha)
+    @cuda blocks = blocks threads = threads kernel_quantile_∇!(∇, p, y, alphaT)
+    CUDA.synchronize()
+    return
+end
+
+#####################
+# Credibility-based (CredVar, CredStd)
+#####################
+function kernel_cred_∇!(∇::CuDeviceMatrix, p::CuDeviceMatrix, y::CuDeviceVector)
+    i = threadIdx().x + (blockIdx().x - 1) * blockDim().x
+    if i <= length(y)
+        diff = y[i] - p[1, i]
+        @inbounds ∇[1, i] = diff * ∇[3, i]
+        @inbounds ∇[2, i] = diff * diff * ∇[3, i]
+    end
+    return
+end
+function EvoTrees.update_grads!(
+    ∇::CuMatrix,
+    p::CuMatrix,
+    y::CuVector,
+    ::Type{<:EvoTrees.Cred},
+    params::EvoTrees.EvoTypes;
+    MAX_THREADS=1024
+)
+    threads = min(MAX_THREADS, length(y))
+    blocks = cld(length(y), threads)
+    @cuda blocks = blocks threads = threads kernel_cred_∇!(∇, p, y)
+    CUDA.synchronize()
+    return
+end
+

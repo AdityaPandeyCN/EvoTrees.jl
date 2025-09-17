@@ -108,7 +108,7 @@ end
                 for j_idx in 1:length(js)
                     f = js[j_idx]
                     for b in 1:nbins
-                        sum_val += h∇[k, b, j_idx, node]
+                        sum_val += h∇[k, b, f, node]
                     end
                 end
                 nodes_sum[k, node] = sum_val
@@ -138,9 +138,9 @@ end
                 if is_numeric  
                     s1, s2, s3 = zero(T), zero(T), zero(T)
                     for b in 1:(nbins - 1)
-                        s1 += h∇[1, b, j_idx, node]
-                        s2 += h∇[2, b, j_idx, node]  
-                        s3 += h∇[2*K+1, b, j_idx, node]
+                        s1 += h∇[1, b, f, node]
+                        s2 += h∇[2, b, f, node]  
+                        s3 += h∇[2*K+1, b, f, node]
                         
                         if s3 >= min_weight && (w_p - s3) >= min_weight
                             l_g1, l_g2 = s1, s2
@@ -168,9 +168,9 @@ end
                     end
                 else  
                     for b in 1:(nbins - 1)
-                        l_g1 = h∇[1, b, j_idx, node]
-                        l_g2 = h∇[2, b, j_idx, node]
-                        l_w = h∇[2*K+1, b, j_idx, node]
+                        l_g1 = h∇[1, b, f, node]
+                        l_g2 = h∇[2, b, f, node]
+                        l_w = h∇[2*K+1, b, f, node]
                         
                         r_g1 = nodes_sum[1, node] - l_g1
                         r_g2 = nodes_sum[2, node] - l_g2
