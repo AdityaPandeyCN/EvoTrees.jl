@@ -132,7 +132,9 @@ function grow_tree!(
             view_gain, view_bin, view_feat,
             cache.h∇,
             active_nodes_full,
-            depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), Float32(params.L2), cache.K;
+            depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), Float32(params.L2), cache.K,
+            Int32(params.bagging_size),
+            Int32(params.loss == :cred_var || params.loss == :cred_std ? 3 : (params.loss == :mlogloss ? 2 : (params.loss == :gaussian_mle || params.loss == :logistic_mle ? 1 : 0)));
             ndrange = n_active, workgroupsize=256
         )
         KernelAbstractions.synchronize(backend)
@@ -155,7 +157,7 @@ function grow_tree!(
     copyto!(tree.cond_bin, Array(cache.tree_cond_bin_gpu))
     copyto!(tree.feat, Array(cache.tree_feat_gpu))
     copyto!(tree.gain, Array(cache.tree_gain_gpu))
-    copyto!(tree.pred, Array(cache.tree_pred_gpu .* Float32(params.eta)))
+    copyto!(tree.pred, Array(cache.tree_pred_gpu .* Float32(params.eta / params.bagging_size)))
     
     return nothing
 end
@@ -168,7 +170,9 @@ end
     h∇,
     active_nodes,
     depth, max_depth, lambda, gamma, L2,
-    K
+    K,
+    bagging_size::Int32,
+    loss_group::Int32,
 )
     n_idx = @index(Global)
     node = active_nodes[n_idx]
@@ -209,8 +213,13 @@ end
         n_next[idx_base] = child_r
 
         if K == 1
-            tree_pred[1, child_l] = - (nodes_sum[1, child_l]) / (nodes_sum[2, child_l] + lambda * nodes_sum[2*K+1, child_l] + L2 + epsv)
-            tree_pred[1, child_r] = - (nodes_sum[1, child_r]) / (nodes_sum[2, child_r] + lambda * nodes_sum[2*K+1, child_r] + L2 + epsv)
+            if loss_group == 3
+                tree_pred[1, child_l] = (nodes_sum[1, child_l]) / (nodes_sum[2*K+1, child_l] + L2 + epsv)
+                tree_pred[1, child_r] = (nodes_sum[1, child_r]) / (nodes_sum[2*K+1, child_r] + L2 + epsv)
+            else
+                tree_pred[1, child_l] = - (nodes_sum[1, child_l]) / (nodes_sum[2, child_l] + lambda * nodes_sum[2*K+1, child_l] + L2 + epsv)
+                tree_pred[1, child_r] = - (nodes_sum[1, child_r]) / (nodes_sum[2, child_r] + lambda * nodes_sum[2*K+1, child_r] + L2 + epsv)
+            end
         else
             @inbounds for k in 1:K
                 gL = nodes_sum[k, child_l]
@@ -223,13 +232,23 @@ end
                 tree_pred[k, child_r] = - gR / (hR + lambda * wR + L2 + epsv)
             end
         end
+        
+        # scale by bagging size
+        @inbounds for k in 1:K
+            tree_pred[k, child_l] /= bagging_size
+            tree_pred[k, child_r] /= bagging_size
+        end
     else
         g, h, w = nodes_sum[1, node], nodes_sum[2, node], nodes_sum[2*K+1, node]
         if K == 1
-            if w <= zero(w) || h + lambda * w + L2 <= zero(h)
-                tree_pred[1, node] = 0.0f0
+            if loss_group == 3
+                tree_pred[1, node] = (w <= zero(w)) ? 0.0f0 : (g / (w + L2 + epsv))
             else
-                tree_pred[1, node] = -g / (h + lambda * w + L2 + epsv)
+                if w <= zero(w) || h + lambda * w + L2 <= zero(h)
+                    tree_pred[1, node] = 0.0f0
+                else
+                    tree_pred[1, node] = -g / (h + lambda * w + L2 + epsv)
+                end
             end
         else
             @inbounds for k in 1:K
@@ -241,6 +260,9 @@ end
                     tree_pred[k, node] = - gk / (hk + lambda * w + L2 + epsv)
                 end
             end
+        end
+        @inbounds for k in 1:K
+            tree_pred[k, node] /= bagging_size
         end
     end
 end
