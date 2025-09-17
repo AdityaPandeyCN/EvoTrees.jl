@@ -142,3 +142,4 @@ function update_logger!(logger, iter, metric)
         end
     end
 end
+
