@@ -153,6 +153,13 @@ function grow_tree!(
         end
     end
 
+    # Ensure observation-to-node indices reflect final splits at max_depth
+    update_nodes_idx_kernel!(backend)(
+        cache.nidx, is, cache.x_bin, cache.tree_feat_gpu, cache.tree_cond_bin_gpu, cache.feattypes_gpu;
+        ndrange = length(is), workgroupsize=256
+    )
+    KernelAbstractions.synchronize(backend)
+
     # Finalize leaves like older extension for Quantile: compute leaf preds on CPU via residual quantiles
     if params.loss == :quantile
         split_cpu = Array(cache.tree_split_gpu)
