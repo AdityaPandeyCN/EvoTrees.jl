@@ -158,9 +158,9 @@ function grow_tree!(
         split_cpu = Array(cache.tree_split_gpu)
         nidx_cpu = Array(cache.nidx)
         grads_cpu = Array(cache.∇)
-        K = cache.K
+        nclasses = cache.K
         n_nodes = size(cache.tree_pred_gpu, 2)
-        leaf_pred_cpu = zeros(Float32, K, n_nodes)
+        leaf_pred_cpu = zeros(Float32, nclasses, n_nodes)
         for node in 1:n_nodes
             if !split_cpu[node]
                 # collect obs indices assigned to this node
