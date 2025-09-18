@@ -153,30 +153,21 @@ function grow_tree!(
         end
     end
 
-    # Finalize leaves like older extension for Quantile: compute leaf preds on CPU via residual quantiles
-    if params.loss == :quantile
+    # Finalize leaves like older extension for MAE: compute leaf preds on CPU via pred_leaf_cpu!
+    if params.loss == :mae
         split_cpu = Array(cache.tree_split_gpu)
-        nidx_cpu = Array(cache.nidx)
-        grads_cpu = Array(cache.∇)
-        nclasses = cache.K
         n_nodes = size(cache.tree_pred_gpu, 2)
+        nclasses = cache.K
         leaf_pred_cpu = zeros(Float32, nclasses, n_nodes)
+        nodes_sum_cpu = Array(cache.nodes_sum_gpu)
         for node in 1:n_nodes
             if !split_cpu[node]
-                # collect obs indices assigned to this node
-                is_node = Int[]
-                for i in eachindex(nidx_cpu)
-                    if nidx_cpu[i] == node
-                        push!(is_node, i)
-                    end
-                end
-                if !isempty(is_node)
-                    # build minimal summary: only weight sum needed at index 3 for Quantile pred
-                    s3 = sum(@view grads_cpu[3, is_node])
-                    sumvec = zeros(Float32, 3)
-                    sumvec[3] = Float32(s3)
-                    EvoTrees.pred_leaf_cpu!(leaf_pred_cpu, node, sumvec, EvoTrees.Quantile, params, grads_cpu, is_node)
-                end
+                g1 = nodes_sum_cpu[1, node]
+                w  = nodes_sum_cpu[2*nclasses+1, node]
+                sumvec = zeros(Float32, 3)
+                sumvec[1] = Float32(g1)
+                sumvec[3] = Float32(w)
+                EvoTrees.pred_leaf_cpu!(leaf_pred_cpu, node, sumvec, EvoTrees.MAE, params)
             end
         end
         cache.tree_pred_gpu .= CuArray(leaf_pred_cpu)
