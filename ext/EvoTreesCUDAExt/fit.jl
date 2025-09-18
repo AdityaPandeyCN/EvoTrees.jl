@@ -134,7 +134,7 @@ function grow_tree!(
             active_nodes_full,
             depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), Float32(params.L2), cache.K,
             Int32(params.bagging_size),
-            Int32(params.loss == :cred_var || params.loss == :cred_std ? 3 : (params.loss == :mlogloss ? 2 : (params.loss == :gaussian_mle || params.loss == :logistic_mle ? 1 : 0)));
+            Int32(params.loss == :cred_var || params.loss == :cred_std ? 3 : (params.loss == :mae ? 4 : 0));
             ndrange = n_active, workgroupsize=256
         )
         KernelAbstractions.synchronize(backend)
@@ -214,9 +214,15 @@ end
 
         if K == 1
             if loss_group == 3
+                # Credibility: +g / (w + L2)
                 tree_pred[1, child_l] = (nodes_sum[1, child_l]) / (nodes_sum[2*K+1, child_l] + L2 + epsv)
                 tree_pred[1, child_r] = (nodes_sum[1, child_r]) / (nodes_sum[2*K+1, child_r] + L2 + epsv)
+            elseif loss_group == 4
+                # MAE: g / ((1+lambda)*w + L2)
+                tree_pred[1, child_l] = (nodes_sum[1, child_l]) / ((1 + lambda) * nodes_sum[2*K+1, child_l] + L2 + epsv)
+                tree_pred[1, child_r] = (nodes_sum[1, child_r]) / ((1 + lambda) * nodes_sum[2*K+1, child_r] + L2 + epsv)
             else
+                # Standard gradient regression
                 tree_pred[1, child_l] = - (nodes_sum[1, child_l]) / (nodes_sum[2, child_l] + lambda * nodes_sum[2*K+1, child_l] + L2 + epsv)
                 tree_pred[1, child_r] = - (nodes_sum[1, child_r]) / (nodes_sum[2, child_r] + lambda * nodes_sum[2*K+1, child_r] + L2 + epsv)
             end
@@ -232,17 +238,13 @@ end
                 tree_pred[k, child_r] = - gR / (hR + lambda * wR + L2 + epsv)
             end
         end
-        
-        # scale by bagging size
-        @inbounds for k in 1:K
-            tree_pred[k, child_l] /= bagging_size
-            tree_pred[k, child_r] /= bagging_size
-        end
     else
         g, h, w = nodes_sum[1, node], nodes_sum[2, node], nodes_sum[2*K+1, node]
         if K == 1
             if loss_group == 3
                 tree_pred[1, node] = (w <= zero(w)) ? 0.0f0 : (g / (w + L2 + epsv))
+            elseif loss_group == 4
+                tree_pred[1, node] = (w <= zero(w)) ? 0.0f0 : (g / ((1 + lambda) * w + L2 + epsv))
             else
                 if w <= zero(w) || h + lambda * w + L2 <= zero(h)
                     tree_pred[1, node] = 0.0f0
@@ -260,9 +262,6 @@ end
                     tree_pred[k, node] = - gk / (hk + lambda * w + L2 + epsv)
                 end
             end
-        end
-        @inbounds for k in 1:K
-            tree_pred[k, node] /= bagging_size
         end
     end
 end

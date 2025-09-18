@@ -89,8 +89,10 @@ end
     @Const(feattypes),
     @Const(monotone_constraints),
     lambda::T,
+    L2::T,
     min_weight::T,
-    K::Int
+    K::Int,
+    loss_group::Int32,
 ) where {T}
     n_idx = @index(Global)
     
@@ -114,17 +116,24 @@ end
                 nodes_sum[k, node] = sum_val
             end
             
+            # parent gain
             gain_p = zero(T)
             w_p = nodes_sum[2*K+1, node]
             if K == 1
                 g_p = nodes_sum[1, node]
                 h_p = nodes_sum[2, node]
-                gain_p = g_p^2 / (h_p + lambda * w_p + T(1e-8))
+                if loss_group == 3
+                    gain_p = g_p^2 / (w_p + L2 + T(1e-8))
+                elseif loss_group == 4
+                    gain_p = g_p^2 / ((1 + lambda) * w_p + L2 + T(1e-8))
+                else
+                    gain_p = g_p^2 / (h_p + lambda * w_p + L2 + T(1e-8))
+                end
             else
                 for k in 1:K
                     g_p = nodes_sum[k, node]
                     h_p = nodes_sum[K+k, node]
-                    gain_p += g_p^2 / (h_p + lambda * w_p / K + T(1e-8))
+                    gain_p += g_p^2 / (h_p + lambda * w_p + L2 + T(1e-8))
                 end
             end
             
@@ -147,22 +156,39 @@ end
                             r_g1, r_g2 = nodes_sum[1, node] - l_g1, nodes_sum[2, node] - l_g2
                             
                             if constraint != 0
-                                predL = -l_g1 / (l_g2 + lambda * s3 + T(1e-8))
-                                predR = -r_g1 / (r_g2 + lambda * (w_p - s3) + T(1e-8))
-                                
+                                predL = -l_g1 / (l_g2 + lambda * s3 + L2 + T(1e-8))
+                                predR = -r_g1 / (r_g2 + lambda * (w_p - s3) + L2 + T(1e-8))
                                 if !((constraint == 0) || (constraint == -1 && predL > predR) || (constraint == 1 && predL < predR))
                                     continue
                                 end
                             end
                             
-                            gain_l = l_g1^2 / (s3 * lambda + l_g2 + T(1e-8))
-                            gain_r = r_g1^2 / ((w_p - s3) * lambda + r_g2 + T(1e-8))
-                            
+                            gain_l = zero(T); gain_r = zero(T)
+                            if K == 1
+                                if loss_group == 3
+                                    gain_l = l_g1^2 / (s3 + L2 + T(1e-8))
+                                    gain_r = r_g1^2 / ((w_p - s3) + L2 + T(1e-8))
+                                elseif loss_group == 4
+                                    gain_l = l_g1^2 / ((1 + lambda) * s3 + L2 + T(1e-8))
+                                    gain_r = r_g1^2 / ((1 + lambda) * (w_p - s3) + L2 + T(1e-8))
+                                else
+                                    gain_l = l_g1^2 / (l_g2 + lambda * s3 + L2 + T(1e-8))
+                                    gain_r = r_g1^2 / (r_g2 + lambda * (w_p - s3) + L2 + T(1e-8))
+                                end
+                            else
+                                # sum per-class gains
+                                for k in 1:K
+                                    l_gk = h∇[k, b, f, node]
+                                    l_hk = h∇[K+k, b, f, node]
+                                    r_gk = nodes_sum[k, node] - l_gk
+                                    r_hk = nodes_sum[K+k, node] - l_hk
+                                    gain_l += l_gk^2 / (l_hk + lambda * s3 + L2 + T(1e-8))
+                                    gain_r += r_gk^2 / (r_hk + lambda * (w_p - s3) + L2 + T(1e-8))
+                                end
+                            end
                             g = gain_l + gain_r - gain_p
                             if g > g_best
-                                g_best = g
-                                b_best = Int32(b)
-                                f_best = Int32(f)
+                                g_best = g; b_best = Int32(b); f_best = Int32(f)
                             end
                         end
                     end
@@ -178,22 +204,38 @@ end
                         
                         if l_w >= min_weight && r_w >= min_weight
                             if constraint != 0
-                                predL = -l_g1 / (l_g2 + lambda * l_w + T(1e-8))
-                                predR = -r_g1 / (r_g2 + lambda * r_w + T(1e-8))
-                                
+                                predL = -l_g1 / (l_g2 + lambda * l_w + L2 + T(1e-8))
+                                predR = -r_g1 / (r_g2 + lambda * r_w + L2 + T(1e-8))
                                 if !((constraint == 0) || (constraint == -1 && predL > predR) || (constraint == 1 && predL < predR))
                                     continue
                                 end
                             end
                             
-                            gain_l = l_g1^2 / (l_w * lambda + l_g2 + T(1e-8))
-                            gain_r = r_g1^2 / (r_w * lambda + r_g2 + T(1e-8))
-                            
+                            gain_l = zero(T); gain_r = zero(T)
+                            if K == 1
+                                if loss_group == 3
+                                    gain_l = l_g1^2 / (l_w + L2 + T(1e-8))
+                                    gain_r = r_g1^2 / (r_w + L2 + T(1e-8))
+                                elseif loss_group == 4
+                                    gain_l = l_g1^2 / ((1 + lambda) * l_w + L2 + T(1e-8))
+                                    gain_r = r_g1^2 / ((1 + lambda) * r_w + L2 + T(1e-8))
+                                else
+                                    gain_l = l_g1^2 / (l_g2 + lambda * l_w + L2 + T(1e-8))
+                                    gain_r = r_g1^2 / (r_g2 + lambda * r_w + L2 + T(1e-8))
+                                end
+                            else
+                                for k in 1:K
+                                    l_gk = h∇[k, b, f, node]
+                                    l_hk = h∇[K+k, b, f, node]
+                                    r_gk = nodes_sum[k, node] - l_gk
+                                    r_hk = nodes_sum[K+k, node] - l_hk
+                                    gain_l += l_gk^2 / (l_hk + lambda * l_w + L2 + T(1e-8))
+                                    gain_r += r_gk^2 / (r_hk + lambda * r_w + L2 + T(1e-8))
+                                end
+                            end
                             g = gain_l + gain_r - gain_p
                             if g > g_best
-                                g_best = g
-                                b_best = Int32(b)
-                                f_best = Int32(f)
+                                g_best = g; b_best = Int32(b); f_best = Int32(f)
                             end
                         end
                     end
@@ -277,7 +319,8 @@ function update_hist_gpu!(
     
     find_split! = find_best_split_from_hist_kernel!(backend)
     find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js, feattypes, monotone_constraints,
-                eltype(gains)(params.lambda), eltype(gains)(params.min_weight), K;
+                eltype(gains)(params.lambda), eltype(gains)(params.L2), eltype(gains)(params.min_weight), K,
+                Int32(params.loss == :cred_var || params.loss == :cred_std ? 3 : (params.loss == :mae ? 4 : 0));
                 ndrange = max(n_active, 1), workgroupsize = 256)
     KernelAbstractions.synchronize(backend)
 end
