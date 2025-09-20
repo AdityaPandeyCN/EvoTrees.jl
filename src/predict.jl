@@ -74,7 +74,6 @@ function predict!(pred::Matrix{T}, tree::Tree{L,K}, x_bin::Matrix{UInt8}, featty
     return nothing
 end
 
-
 """
     predict(m::EvoTree, data; ntree_limit=length(m.trees), device=:cpu)
 
@@ -179,3 +178,4 @@ function pred_leaf_cpu!(p::Matrix, n, ∑::AbstractVector{T}, ::Type{L}, params:
     ϵ = eps(T)
     p[1, n] = params.eta / params.bagging_size * quantile(view(∇, 2, is), params.alpha) / (1 + params.lambda + params.L2 / ∑[3])
 end
+

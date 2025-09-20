@@ -73,7 +73,9 @@ function grow_tree!(
         cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf,
         cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K, L
     )
-    get_gain_gpu!(backend)(cache.nodes_gain_gpu, cache.nodes_sum_gpu, view(cache.anodes_gpu, 1:1), Float32(params.lambda), cache.K, get_loss_group(params.loss); ndrange=1, workgroupsize=1)
+    
+    loss_group = get_loss_group(params.loss)
+    get_gain_gpu!(backend)(cache.nodes_gain_gpu, cache.nodes_sum_gpu, view(cache.anodes_gpu, 1:1), Float32(params.lambda), Float32(params.L2), cache.K, loss_group; ndrange=1, workgroupsize=1)
     KernelAbstractions.synchronize(backend)
 
     n_active = 1
@@ -139,8 +141,7 @@ function grow_tree!(
             cache.h∇,
             active_nodes_full,
             depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), Float32(params.L2), cache.K,
-            Int32(params.bagging_size),
-            get_loss_group(params.loss);
+            loss_group;
             ndrange = n_active, workgroupsize=256
         )
         KernelAbstractions.synchronize(backend)
@@ -210,6 +211,7 @@ function grow_tree!(
         cache.tree_pred_gpu .= CuArray(leaf_pred_cpu)
     end
 
+    # Copy to tree with eta/bagging_size scaling (like Document 1)
     copyto!(tree.split, Array(cache.tree_split_gpu))
     copyto!(tree.cond_bin, Array(cache.tree_cond_bin_gpu))
     copyto!(tree.feat, Array(cache.tree_feat_gpu))
@@ -224,7 +226,7 @@ function get_loss_group(loss::Symbol)
     return Int32(
         loss in [:cred_var, :cred_std] ? 3 :
         loss == :mae ? 4 :
-        0  # Standard gradient regression (MSE, Gaussian, LogLoss, etc.)
+        0  # Standard gradient regression
     )
 end
 
@@ -237,7 +239,6 @@ end
     active_nodes,
     depth, max_depth, lambda, gamma, L2,
     K,
-    bagging_size::Int32,
     loss_group::Int32,
 )
     n_idx = @index(Global)
@@ -272,7 +273,7 @@ end
         p1_l, p2_l, w_l = nodes_sum[1, child_l], nodes_sum[2, child_l], nodes_sum[2*K+1, child_l]
         p1_r, p2_r, w_r = nodes_sum[1, child_r], nodes_sum[2, child_r], nodes_sum[2*K+1, child_r]
         
-        # Compute gains based on loss type
+        # Compute gains (no eta scaling here)
         if loss_group == 3  # Credibility
             nodes_gain[child_l] = p1_l^2 / (w_l + L2 + epsv)
             nodes_gain[child_r] = p1_r^2 / (w_r + L2 + epsv)
@@ -288,7 +289,7 @@ end
         n_next[idx_base - 1] = child_l
         n_next[idx_base] = child_r
 
-        # Compute predictions based on loss type
+        # Compute predictions (NO eta scaling - done at copy time)
         if K == 1
             if loss_group == 3  # Credibility
                 tree_pred[1, child_l] = (nodes_sum[1, child_l]) / (nodes_sum[2*K+1, child_l] + L2 + epsv)
@@ -296,7 +297,7 @@ end
             elseif loss_group == 4  # MAE
                 tree_pred[1, child_l] = (nodes_sum[1, child_l]) / ((1 + lambda) * nodes_sum[2*K+1, child_l] + L2 + epsv)
                 tree_pred[1, child_r] = (nodes_sum[1, child_r]) / ((1 + lambda) * nodes_sum[2*K+1, child_r] + L2 + epsv)
-            else  # Standard
+            else  # Standard gradient regression
                 tree_pred[1, child_l] = - (nodes_sum[1, child_l]) / (nodes_sum[2, child_l] + lambda * nodes_sum[2*K+1, child_l] + L2 + epsv)
                 tree_pred[1, child_r] = - (nodes_sum[1, child_r]) / (nodes_sum[2, child_r] + lambda * nodes_sum[2*K+1, child_r] + L2 + epsv)
             end
@@ -313,7 +314,7 @@ end
             end
         end
     else
-        # Leaf node predictions
+        # Leaf node predictions (NO eta scaling)
         g, h, w = nodes_sum[1, node], nodes_sum[2, node], nodes_sum[2*K+1, node]
         if K == 1
             if loss_group == 3  # Credibility
@@ -341,7 +342,7 @@ end
     end
 end
 
-@kernel function get_gain_gpu!(nodes_gain::AbstractVector{T}, nodes_sum::AbstractArray{T,2}, nodes, lambda::T, K::Int, loss_group::Int32) where {T}
+@kernel function get_gain_gpu!(nodes_gain::AbstractVector{T}, nodes_sum::AbstractArray{T,2}, nodes, lambda::T, L2::T, K::Int, loss_group::Int32) where {T}
     n_idx = @index(Global)
     node = nodes[n_idx]
     @inbounds p1 = nodes_sum[1, node]
@@ -349,9 +350,9 @@ end
     @inbounds w = nodes_sum[2*K+1, node]
     
     if loss_group == 3  # Credibility
-        @inbounds nodes_gain[node] = p1^2 / (w + T(1e-8))
+        @inbounds nodes_gain[node] = p1^2 / (w + L2 + T(1e-8))
     elseif loss_group == 4  # MAE
-        @inbounds nodes_gain[node] = p1^2 / ((1 + lambda) * w + T(1e-8))
+        @inbounds nodes_gain[node] = p1^2 / ((1 + lambda) * w + L2 + T(1e-8))
     else  # Standard
         @inbounds nodes_gain[node] = p1^2 / (p2 + lambda * w + T(1e-8))
     end

@@ -106,7 +106,7 @@ end
                 nodes_sum[k, node] = sum_val
             end
             
-            # Parent gain computation
+            # Parent gain
             w_p = nodes_sum[2*K+1, node]
             gain_p = zero(T)
             if K == 1
@@ -336,5 +336,14 @@ function update_hist_gpu!(
                 loss_group;
                 ndrange = max(n_active, 1), workgroupsize = 256)
     KernelAbstractions.synchronize(backend)
+end
+
+# Helper function defined here too for consistency
+function get_loss_group(loss::Symbol)
+    return Int32(
+        loss in [:cred_var, :cred_std] ? 3 :
+        loss == :mae ? 4 :
+        0
+    )
 end
 
