@@ -8,7 +8,7 @@ using BenchmarkTools
 using Random: seed!
 
 run_evo = true
-run_xgb = true
+run_xgb = false
 nrounds = 200
 
 loss = :mse
@@ -134,4 +134,3 @@ for _device in device_list
     path = joinpath(@__DIR__, "results", "regressor-$_device.csv")
     CSV.write(path, df)
 end
-
