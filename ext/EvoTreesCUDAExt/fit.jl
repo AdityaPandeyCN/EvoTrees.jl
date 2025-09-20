@@ -15,6 +15,7 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache::CacheGPU, params::
             params,
             cache,
             is,
+            L,
         )
         push!(evotree.trees, tree)
         EvoTrees.predict!(cache.pred, tree, cache.x_bin, cache.feattypes_gpu)
@@ -28,21 +29,24 @@ function grow_otree!(
     tree::EvoTrees.Tree{L,K},
     params::EvoTrees.EvoTypes,
     cache::CacheGPU,
-    is::CuVector
+    is::CuVector,
+    ::Type{L}
 ) where {L,K}
     @warn "Oblivious tree GPU implementation not yet available, using standard tree" maxlog=1
-    grow_tree!(tree, params, cache, is)
+    grow_tree!(tree, params, cache, is, L)
 end
 
 function grow_tree!(
     tree::EvoTrees.Tree{L,K},
     params::EvoTrees.EvoTypes,
     cache::CacheGPU,
-    is::CuVector
+    is::CuVector,
+    ::Type{L}
 ) where {L,K}
 
     backend = KernelAbstractions.get_backend(cache.x_bin)
 
+    # Initialize tree arrays
     cache.tree_split_gpu .= false
     cache.tree_cond_bin_gpu .= 0
     cache.tree_feat_gpu .= 0
@@ -60,14 +64,16 @@ function grow_tree!(
     cache.nidx .= 1
     
     view(cache.anodes_gpu, 1:1) .= 1
+    
+    # Root node histogram and gain
     update_hist_gpu!(
         cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
         cache.∇, cache.x_bin, cache.nidx, cache.js, is,
         1, view(cache.anodes_gpu, 1:1), cache.nodes_sum_gpu, params,
         cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf,
-        cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
+        cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K, L
     )
-    get_gain_gpu!(backend)(cache.nodes_gain_gpu, cache.nodes_sum_gpu, view(cache.anodes_gpu, 1:1), Float32(params.lambda), cache.K; ndrange=1, workgroupsize=1)
+    get_gain_gpu!(backend)(cache.nodes_gain_gpu, cache.nodes_sum_gpu, view(cache.anodes_gpu, 1:1), Float32(params.lambda), cache.K, get_loss_group(params.loss); ndrange=1, workgroupsize=1)
     KernelAbstractions.synchronize(backend)
 
     n_active = 1
@@ -120,7 +126,7 @@ function grow_tree!(
                     cache.∇, cache.x_bin, cache.nidx, cache.js, is,
                     depth, view(cache.build_nodes_gpu, 1:build_count_val), cache.nodes_sum_gpu, params,
                     cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf,
-                    cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
+                    cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K, L
                 )
             end
         end
@@ -134,7 +140,7 @@ function grow_tree!(
             active_nodes_full,
             depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), Float32(params.L2), cache.K,
             Int32(params.bagging_size),
-            Int32(params.loss == :cred_var || params.loss == :cred_std ? 3 : (params.loss == :mae ? 4 : 0));
+            get_loss_group(params.loss);
             ndrange = n_active, workgroupsize=256
         )
         KernelAbstractions.synchronize(backend)
@@ -153,15 +159,15 @@ function grow_tree!(
         end
     end
 
-    # Ensure observation-to-node indices reflect final splits at max_depth
+    # Final node assignment
     update_nodes_idx_kernel!(backend)(
         cache.nidx, is, cache.x_bin, cache.tree_feat_gpu, cache.tree_cond_bin_gpu, cache.feattypes_gpu;
         ndrange = length(is), workgroupsize=256
     )
     KernelAbstractions.synchronize(backend)
 
-    # Finalize leaves like older extension for Quantile: compute leaf preds on CPU via residual quantiles
-    if params.loss == :quantile
+    # CPU fallback for complex loss leaf predictions
+    if L <: EvoTrees.Quantile
         split_cpu = Array(cache.tree_split_gpu)
         nidx_cpu = Array(cache.nidx)
         grads_cpu = Array(cache.∇)
@@ -170,7 +176,6 @@ function grow_tree!(
         leaf_pred_cpu = zeros(Float32, nclasses, n_nodes)
         for node in 1:n_nodes
             if !split_cpu[node]
-                # collect obs indices assigned to this node
                 is_node = Int[]
                 for i in eachindex(nidx_cpu)
                     if nidx_cpu[i] == node
@@ -178,19 +183,15 @@ function grow_tree!(
                     end
                 end
                 if !isempty(is_node)
-                    # minimal summary: weight sum at index 3 for Quantile pred
                     s3 = sum(@view grads_cpu[3, is_node])
                     sumvec = zeros(Float32, 3)
                     sumvec[3] = Float32(s3)
-                    EvoTrees.pred_leaf_cpu!(leaf_pred_cpu, node, sumvec, EvoTrees.Quantile, params, grads_cpu, is_node)
+                    EvoTrees.pred_leaf_cpu!(leaf_pred_cpu, node, sumvec, L, params, grads_cpu, is_node)
                 end
             end
         end
         cache.tree_pred_gpu .= CuArray(leaf_pred_cpu)
-    end
-
-    # Finalize leaves like older extension for MAE: compute leaf preds on CPU via pred_leaf_cpu!
-    if params.loss == :mae
+    elseif L <: EvoTrees.MAE
         split_cpu = Array(cache.tree_split_gpu)
         n_nodes = size(cache.tree_pred_gpu, 2)
         nclasses = cache.K
@@ -203,7 +204,7 @@ function grow_tree!(
                 sumvec = zeros(Float32, 3)
                 sumvec[1] = Float32(g1)
                 sumvec[3] = Float32(w)
-                EvoTrees.pred_leaf_cpu!(leaf_pred_cpu, node, sumvec, EvoTrees.MAE, params)
+                EvoTrees.pred_leaf_cpu!(leaf_pred_cpu, node, sumvec, L, params)
             end
         end
         cache.tree_pred_gpu .= CuArray(leaf_pred_cpu)
@@ -216,6 +217,15 @@ function grow_tree!(
     copyto!(tree.pred, Array(cache.tree_pred_gpu .* Float32(params.eta / params.bagging_size)))
     
     return nothing
+end
+
+# Helper function to map loss types to integer groups
+function get_loss_group(loss::Symbol)
+    return Int32(
+        loss in [:cred_var, :cred_std] ? 3 :
+        loss == :mae ? 4 :
+        0  # Standard gradient regression (MSE, Gaussian, LogLoss, etc.)
+    )
 end
 
 @kernel function apply_splits_kernel!(
@@ -260,25 +270,33 @@ end
         nodes_sum[2*K+1, child_r] = nodes_sum[2*K+1, node] - nodes_sum[2*K+1, child_l]
 
         p1_l, p2_l, w_l = nodes_sum[1, child_l], nodes_sum[2, child_l], nodes_sum[2*K+1, child_l]
-        nodes_gain[child_l] = p1_l^2 / (p2_l + lambda * w_l + L2 + epsv)
         p1_r, p2_r, w_r = nodes_sum[1, child_r], nodes_sum[2, child_r], nodes_sum[2*K+1, child_r]
-        nodes_gain[child_r] = p1_r^2 / (p2_r + lambda * w_r + L2 + epsv)
+        
+        # Compute gains based on loss type
+        if loss_group == 3  # Credibility
+            nodes_gain[child_l] = p1_l^2 / (w_l + L2 + epsv)
+            nodes_gain[child_r] = p1_r^2 / (w_r + L2 + epsv)
+        elseif loss_group == 4  # MAE
+            nodes_gain[child_l] = p1_l^2 / ((1 + lambda) * w_l + L2 + epsv)
+            nodes_gain[child_r] = p1_r^2 / ((1 + lambda) * w_r + L2 + epsv)
+        else  # Standard
+            nodes_gain[child_l] = p1_l^2 / (p2_l + lambda * w_l + L2 + epsv)
+            nodes_gain[child_r] = p1_r^2 / (p2_r + lambda * w_r + L2 + epsv)
+        end
         
         idx_base = Atomix.@atomic n_next_active[1] += 2
         n_next[idx_base - 1] = child_l
         n_next[idx_base] = child_r
 
+        # Compute predictions based on loss type
         if K == 1
-            if loss_group == 3
-                # Credibility: +g / (w + L2)
+            if loss_group == 3  # Credibility
                 tree_pred[1, child_l] = (nodes_sum[1, child_l]) / (nodes_sum[2*K+1, child_l] + L2 + epsv)
                 tree_pred[1, child_r] = (nodes_sum[1, child_r]) / (nodes_sum[2*K+1, child_r] + L2 + epsv)
-            elseif loss_group == 4
-                # MAE: g / ((1+lambda)*w + L2)
+            elseif loss_group == 4  # MAE
                 tree_pred[1, child_l] = (nodes_sum[1, child_l]) / ((1 + lambda) * nodes_sum[2*K+1, child_l] + L2 + epsv)
                 tree_pred[1, child_r] = (nodes_sum[1, child_r]) / ((1 + lambda) * nodes_sum[2*K+1, child_r] + L2 + epsv)
-            else
-                # Standard gradient regression
+            else  # Standard
                 tree_pred[1, child_l] = - (nodes_sum[1, child_l]) / (nodes_sum[2, child_l] + lambda * nodes_sum[2*K+1, child_l] + L2 + epsv)
                 tree_pred[1, child_r] = - (nodes_sum[1, child_r]) / (nodes_sum[2, child_r] + lambda * nodes_sum[2*K+1, child_r] + L2 + epsv)
             end
@@ -295,13 +313,14 @@ end
             end
         end
     else
+        # Leaf node predictions
         g, h, w = nodes_sum[1, node], nodes_sum[2, node], nodes_sum[2*K+1, node]
         if K == 1
-            if loss_group == 3
+            if loss_group == 3  # Credibility
                 tree_pred[1, node] = (w <= zero(w)) ? 0.0f0 : (g / (w + L2 + epsv))
-            elseif loss_group == 4
+            elseif loss_group == 4  # MAE
                 tree_pred[1, node] = (w <= zero(w)) ? 0.0f0 : (g / ((1 + lambda) * w + L2 + epsv))
-            else
+            else  # Standard
                 if w <= zero(w) || h + lambda * w + L2 <= zero(h)
                     tree_pred[1, node] = 0.0f0
                 else
@@ -322,12 +341,19 @@ end
     end
 end
 
-@kernel function get_gain_gpu!(nodes_gain::AbstractVector{T}, nodes_sum::AbstractArray{T,2}, nodes, lambda::T, K::Int) where {T}
+@kernel function get_gain_gpu!(nodes_gain::AbstractVector{T}, nodes_sum::AbstractArray{T,2}, nodes, lambda::T, K::Int, loss_group::Int32) where {T}
     n_idx = @index(Global)
     node = nodes[n_idx]
     @inbounds p1 = nodes_sum[1, node]
     @inbounds p2 = nodes_sum[2, node]
     @inbounds w = nodes_sum[2*K+1, node]
-    @inbounds nodes_gain[node] = p1^2 / (p2 + lambda * w + T(1e-8))
+    
+    if loss_group == 3  # Credibility
+        @inbounds nodes_gain[node] = p1^2 / (w + T(1e-8))
+    elseif loss_group == 4  # MAE
+        @inbounds nodes_gain[node] = p1^2 / ((1 + lambda) * w + T(1e-8))
+    else  # Standard
+        @inbounds nodes_gain[node] = p1^2 / (p2 + lambda * w + T(1e-8))
+    end
 end
 
