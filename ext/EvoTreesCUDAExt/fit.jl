@@ -64,7 +64,7 @@ function grow_tree!(
         cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
         cache.∇, cache.x_bin, cache.nidx, cache.js, is,
         1, view(cache.anodes_gpu, 1:1), cache.nodes_sum_gpu, params,
-        cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf,
+        cache.build_nodes_gpu, cache.subtract_nodes_gpu, cache.build_count, cache.subtract_count,
         cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
     )
     get_gain_gpu!(backend)(cache.nodes_gain_gpu, cache.nodes_sum_gpu, view(cache.anodes_gpu, 1:1), Float32(params.lambda), cache.K; ndrange=1, workgroupsize=1)
@@ -89,40 +89,13 @@ function grow_tree!(
         if depth > 1
             active_nodes_act = view(active_nodes_full, 1:n_active)
 
-            cache.build_nodes_gpu .= 0
-            cache.subtract_nodes_gpu .= 0
-            cache.build_count .= 0
-            cache.subtract_count .= 0
-
-            separate_kernel! = separate_nodes_kernel!(backend)
-            separate_kernel!(
-                cache.build_nodes_gpu, cache.build_count,
-                cache.subtract_nodes_gpu, cache.subtract_count,
-                active_nodes_act;
-                ndrange=n_active, workgroupsize=256
+            update_hist_gpu!(
+                cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
+                cache.∇, cache.x_bin, cache.nidx, cache.js, is,
+                depth, active_nodes_act, cache.nodes_sum_gpu, params,
+                cache.build_nodes_gpu, cache.subtract_nodes_gpu, cache.build_count, cache.subtract_count,
+                cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
             )
-            KernelAbstractions.synchronize(backend)
-            
-            subtract_count_val = Array(cache.subtract_count)[1]
-            build_count_val = Array(cache.build_count)[1]
-            
-            if subtract_count_val > 0
-                subtract_hist_kernel!(backend)(
-                    cache.h∇, cache.subtract_nodes_gpu;
-                    ndrange = subtract_count_val * size(cache.h∇, 1) * size(cache.h∇, 2) * size(cache.h∇, 3), workgroupsize=256
-                )
-                KernelAbstractions.synchronize(backend)
-            end
-            
-            if build_count_val > 0
-                update_hist_gpu!(
-                    cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
-                    cache.∇, cache.x_bin, cache.nidx, cache.js, is,
-                    depth, view(cache.build_nodes_gpu, 1:build_count_val), cache.nodes_sum_gpu, params,
-                    cache.left_nodes_buf, cache.right_nodes_buf, cache.target_mask_buf,
-                    cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
-                )
-            end
         end
 
         apply_splits_kernel!(backend)(
