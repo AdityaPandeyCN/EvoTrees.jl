@@ -68,7 +68,7 @@ function grow_tree!(
         cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
         cache.∇, cache.x_bin, cache.nidx, cache.js, is,
         1, view(cache.anodes_gpu, 1:1), cache.nodes_sum_gpu, params,
-        cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K, cache.sums_temp
+        cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
     )
     get_gain_gpu!(backend)(cache.nodes_gain_gpu, cache.nodes_sum_gpu, view(cache.anodes_gpu, 1:1), Float32(params.lambda), cache.K; ndrange=1, workgroupsize=1)
     KernelAbstractions.synchronize(backend)
@@ -114,7 +114,7 @@ function grow_tree!(
                     cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
                     cache.∇, cache.x_bin, cache.nidx, cache.js, is,
                     depth, view(cache.build_nodes_gpu, 1:build_count_val), cache.nodes_sum_gpu, params,
-                    cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K, cache.sums_temp
+                    cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
                 )
             end
             
