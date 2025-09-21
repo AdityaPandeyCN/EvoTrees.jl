@@ -156,7 +156,7 @@ function grow_tree!(
 
     leaf_nodes = findall(x -> !tree.split[x] && x > 0, 1:length(tree.split))
 
-    if L <: Union{EvoTrees.MAE, EvoTrees.Quantile}
+        if L <: Union{EvoTrees.MAE, EvoTrees.Quantile}
         nidx_cpu = Array(cache.nidx)
         is_cpu = Array(is)
         ∇_cpu = Array(cache.∇)
@@ -172,9 +172,13 @@ function grow_tree!(
         end
         
         for n in leaf_nodes
-            node_is = get(leaf_map, n, UInt32[])
             node_sum_cpu = Array(view(cache.nodes_sum_gpu, :, n))
-            EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_cpu, L, params, ∇_cpu, node_is)
+            if L <: EvoTrees.Quantile
+                node_is = get(leaf_map, n, UInt32[])
+                EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_cpu, L, params, ∇_cpu, node_is)
+            else
+                EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_cpu, L, params)
+            end
         end
 
     else
