@@ -41,6 +41,16 @@ function grow_tree!(
     is::CuVector
 ) where {L,K}
 
+    # Add CPU fallback for unsupported loss functions
+    if L <: Union{EvoTrees.MAE, EvoTrees.Quantile, EvoTrees.Cred}
+        error("Loss function $(L) requires CPU implementation. Set device=:cpu in model config.")
+    end
+    
+    # Warn if multi-output with potential issues (except for known working ones)
+    if K > 1 && !(L <: Union{EvoTrees.GaussianMLE, EvoTrees.MLogLoss})
+        @warn "Multi-output (K=$K) GPU implementation may have numerical issues" maxlog=1
+    end
+
     backend = KernelAbstractions.get_backend(cache.x_bin)
 
     cache.tree_split_gpu .= false
@@ -183,51 +193,77 @@ end
         child_l, child_r = node << 1, (node << 1) + 1
         feat, bin = Int(tree_feat[node]), Int(tree_cond_bin[node])
 
-        s1, s2, s3 = zero(eltype(nodes_sum)), zero(eltype(nodes_sum)), zero(eltype(nodes_sum))
-        @inbounds for b in 1:bin
-            s1 += h∇[1, b, feat, node]
-            s2 += h∇[2, b, feat, node]
-            s3 += h∇[2*K+1, b, feat, node]
+        # FIX: Transfer ALL dimensions to children nodes
+        @inbounds for kk in 1:(2*K+1)
+            sum_val = zero(eltype(nodes_sum))
+            for b in 1:bin
+                sum_val += h∇[kk, b, feat, node]
+            end
+            nodes_sum[kk, child_l] = sum_val
+            nodes_sum[kk, child_r] = nodes_sum[kk, node] - sum_val
         end
         
-        nodes_sum[1, child_l] = s1
-        nodes_sum[2, child_l] = s2
-        nodes_sum[2*K+1, child_l] = s3
+        # FIX: Calculate gain correctly for both K=1 and K>1
+        w_l = nodes_sum[2*K+1, child_l]
+        w_r = nodes_sum[2*K+1, child_r]
         
-        nodes_sum[1, child_r] = nodes_sum[1, node] - nodes_sum[1, child_l]
-        nodes_sum[2, child_r] = nodes_sum[2, node] - nodes_sum[2, child_l]
-        nodes_sum[2*K+1, child_r] = nodes_sum[2*K+1, node] - nodes_sum[2*K+1, child_l]
-
-        p1_l, p2_l, w_l = nodes_sum[1, child_l], nodes_sum[2, child_l], nodes_sum[2*K+1, child_l]
-        nodes_gain[child_l] = p1_l^2 / (p2_l + lambda * w_l + epsv)
-        p1_r, p2_r, w_r = nodes_sum[1, child_r], nodes_sum[2, child_r], nodes_sum[2*K+1, child_r]
-        nodes_gain[child_r] = p1_r^2 / (p2_r + lambda * w_r + epsv)
+        if K == 1
+            # Single output - original logic
+            g_l = nodes_sum[1, child_l]
+            h_l = nodes_sum[2, child_l]
+            nodes_gain[child_l] = g_l^2 / (h_l + lambda * w_l + epsv)
+            
+            g_r = nodes_sum[1, child_r]
+            h_r = nodes_sum[2, child_r]
+            nodes_gain[child_r] = g_r^2 / (h_r + lambda * w_r + epsv)
+            
+            tree_pred[1, child_l] = -g_l / (h_l + lambda * w_l + epsv)
+            tree_pred[1, child_r] = -g_r / (h_r + lambda * w_r + epsv)
+        else
+            # Multi-output: sum gains across all K dimensions
+            gain_l = zero(eltype(nodes_gain))
+            gain_r = zero(eltype(nodes_gain))
+            
+            @inbounds for k in 1:K
+                # Left child
+                g_l = nodes_sum[k, child_l]
+                h_l = nodes_sum[K+k, child_l]
+                gain_l += g_l^2 / (h_l + lambda * w_l / K + epsv)
+                tree_pred[k, child_l] = -g_l / (h_l + lambda * w_l / K + epsv)
+                
+                # Right child
+                g_r = nodes_sum[k, child_r]
+                h_r = nodes_sum[K+k, child_r]
+                gain_r += g_r^2 / (h_r + lambda * w_r / K + epsv)
+                tree_pred[k, child_r] = -g_r / (h_r + lambda * w_r / K + epsv)
+            end
+            
+            nodes_gain[child_l] = gain_l
+            nodes_gain[child_r] = gain_r
+        end
         
+        # Update next active nodes
         idx_base = Atomix.@atomic n_next_active[1] += 2
         n_next[idx_base - 1] = child_l
         n_next[idx_base] = child_r
 
-        if K == 1
-            tree_pred[1, child_l] = - (nodes_sum[1, child_l]) / (nodes_sum[2, child_l] + lambda * nodes_sum[2*K+1, child_l] + epsv)
-            tree_pred[1, child_r] = - (nodes_sum[1, child_r]) / (nodes_sum[2, child_r] + lambda * nodes_sum[2*K+1, child_r] + epsv)
-        else
-            for k in 1:K
-                tree_pred[k, child_l] = - (nodes_sum[k, child_l]) / (nodes_sum[K+k, child_l] + lambda * nodes_sum[2*K+1, child_l] / K + epsv)
-                tree_pred[k, child_r] = - (nodes_sum[k, child_r]) / (nodes_sum[K+k, child_r] + lambda * nodes_sum[2*K+1, child_r] / K + epsv)
-            end
-        end
     else
+        # Leaf node - calculate final predictions
         if K == 1
-            g, h, w = nodes_sum[1, node], nodes_sum[2, node], nodes_sum[2*K+1, node]
+            g = nodes_sum[1, node]
+            h = nodes_sum[2, node]
+            w = nodes_sum[2*K+1, node]
             if w <= zero(w) || h + lambda * w <= zero(h)
                 tree_pred[1, node] = 0.0f0
             else
                 tree_pred[1, node] = -g / (h + lambda * w + epsv)
             end
         else
+            # Multi-output leaf predictions
             w = nodes_sum[2*K+1, node]
-            for k in 1:K
-                g, h = nodes_sum[k, node], nodes_sum[K+k, node]
+            @inbounds for k in 1:K
+                g = nodes_sum[k, node]
+                h = nodes_sum[K+k, node]
                 if w <= zero(w) || h + lambda * w / K <= zero(h)
                     tree_pred[k, node] = 0.0f0
                 else
@@ -238,12 +274,38 @@ end
     end
 end
 
-@kernel function get_gain_gpu!(nodes_gain::AbstractVector{T}, nodes_sum::AbstractArray{T,2}, nodes, lambda::T, K::Int) where {T}
+@kernel function get_gain_gpu!(
+    nodes_gain::AbstractVector{T}, 
+    nodes_sum::AbstractArray{T,2}, 
+    nodes, 
+    lambda::T, 
+    K::Int
+) where {T}
     n_idx = @index(Global)
     node = nodes[n_idx]
-    @inbounds p1 = nodes_sum[1, node]
-    @inbounds p2 = nodes_sum[2, node]
-    @inbounds w = nodes_sum[2*K+1, node]
-    @inbounds nodes_gain[node] = p1^2 / (p2 + lambda * w + T(1e-8))
+    
+    @inbounds if node > 0
+        eps = T(1e-8)
+        
+        if K == 1
+            # Single output
+            g = nodes_sum[1, node]
+            h = nodes_sum[2, node]
+            w = nodes_sum[2*K+1, node]
+            nodes_gain[node] = g^2 / (h + lambda * w + eps)
+        else
+            # FIX: Multi-output - sum gains across all K dimensions
+            gain_sum = zero(T)
+            w = nodes_sum[2*K+1, node]
+            
+            @inbounds for k in 1:K
+                g = nodes_sum[k, node]
+                h = nodes_sum[K+k, node]
+                gain_sum += g^2 / (h + lambda * w / K + eps)
+            end
+            
+            nodes_gain[node] = gain_sum
+        end
+    end
 end
 
