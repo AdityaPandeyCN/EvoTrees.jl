@@ -43,12 +43,6 @@ function grow_tree!(
 
     backend = KernelAbstractions.get_backend(cache.x_bin)
 
-    ∇_gpu = copy(cache.∇)
-
-    if L <: Union{EvoTrees.MAE, EvoTrees.Quantile}
-        ∇_gpu[2, :] .= 1.0f0
-    end
-
     cache.tree_split_gpu .= false
     cache.tree_cond_bin_gpu .= 0
     cache.tree_feat_gpu .= 0
@@ -68,7 +62,7 @@ function grow_tree!(
     view(cache.anodes_gpu, 1:1) .= 1
     update_hist_gpu!(
         cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
-        ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
+        cache.∇, cache.x_bin, cache.nidx, cache.js, is,
         1, view(cache.anodes_gpu, 1:1), cache.nodes_sum_gpu, params,
         cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
     )
@@ -114,7 +108,7 @@ function grow_tree!(
             if build_count_val > 0
                 update_hist_gpu!(
                     cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
-                    ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
+                    cache.∇, cache.x_bin, cache.nidx, cache.js, is,
                     depth, view(cache.build_nodes_gpu, 1:build_count_val), cache.nodes_sum_gpu, params,
                     cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
                 )
@@ -166,48 +160,175 @@ function grow_tree!(
         nidx_cpu = Array(cache.nidx)
         is_cpu = Array(is)
         y_cpu = isa(cache.y, CuArray) ? Array(cache.y) : cache.y
-        pred_cpu = isa(cache.pred, CuArray) ? Array(cache.pred) : cache.y
+        pred_cpu = isa(cache.pred, CuArray) ? Array(cache.pred) : cache.pred
         
         residuals = similar(y_cpu, length(is_cpu))
         @inbounds for i in eachindex(is_cpu)
             obs = is_cpu[i]
-            residuals[i] = y_cpu[obs] - (K == 1 ? pred_cpu[obs] : pred_cpu[1, obs])
+            residuals[i] = y_cpu[obs] - pred_cpu[K == 1 ? obs : (obs, 1)]
         end
         
-        leaf_map = Dict{Int, Vector{Int}}()
-        sizehint!(leaf_map, 2^params.max_depth)
-        @inbounds for i in eachindex(is_cpu)
-            node_id = nidx_cpu[is_cpu[i]]
-            if !haskey(leaf_map, node_id)
-                leaf_map[node_id] = Int[]
-            end
-            push!(leaf_map[node_id], i)
-        end
-
-        leaf_nodes = findall(x -> !tree.split[x] && x > 0 && x < length(tree.split), 1:length(tree.split))
+        leaf_nodes = findall(x -> !tree.split[x] && x > 0, 1:length(tree.split))
         
         for node in leaf_nodes
-            if haskey(leaf_map, node)
-                node_obs_indices = leaf_map[node]
-                node_residuals = view(residuals, node_obs_indices)
+            node_obs = findall(x -> nidx_cpu[is_cpu[x]] == node, 1:length(is_cpu))
+            if !isempty(node_obs)
+                node_residuals = view(residuals, node_obs)
                 
                 if L <: EvoTrees.MAE
-                    tree_pred_cpu[1, node] = median(node_residuals)
+                    tree_pred_cpu[1, node] = median(node_residuals) * params.eta
                 elseif L <: EvoTrees.Quantile
-                    tree_pred_cpu[1, node] = quantile(node_residuals, params.alpha)
+                    tree_pred_cpu[1, node] = quantile(node_residuals, params.alpha) * params.eta
                 elseif L <: EvoTrees.Cred
-                    tree_pred_cpu[1, node] = var(node_residuals)
+                    if params.loss == :cred_var
+                        tree_pred_cpu[1, node] = var(node_residuals) * params.eta
+                    else
+                        tree_pred_cpu[1, node] = std(node_residuals) * params.eta
+                    end
                 end
             else
-                tree_pred_cpu[:, node] .= 0.0f0
+                if K == 1
+                    tree_pred_cpu[1, node] = 0.0f0
+                else
+                    tree_pred_cpu[:, node] .= 0.0f0
+                end
             end
         end
         
-        copyto!(tree.pred, tree_pred_cpu .* Float32(params.eta))
+        copyto!(tree.pred, tree_pred_cpu)
     else
         copyto!(tree.pred, Array(cache.tree_pred_gpu .* Float32(params.eta)))
     end
     
     return nothing
+end
+
+@kernel function apply_splits_kernel!(
+    tree_split, tree_cond_bin, tree_feat, tree_gain, tree_pred,
+    nodes_sum, nodes_gain,
+    n_next, n_next_active,
+    best_gain, best_bin, best_feat,
+    h∇,
+    active_nodes,
+    depth, max_depth, lambda, gamma,
+    K
+)
+    n_idx = @index(Global)
+    node = active_nodes[n_idx]
+
+    epsv = eltype(tree_pred)(1e-8)
+
+    @inbounds if depth < max_depth && best_gain[n_idx] > gamma
+        tree_split[node] = true
+        tree_cond_bin[node] = best_bin[n_idx]
+        tree_feat[node] = best_feat[n_idx]
+        tree_gain[node] = best_gain[n_idx]
+
+        child_l, child_r = node << 1, (node << 1) + 1
+        feat, bin = Int(tree_feat[node]), Int(tree_cond_bin[node])
+
+        @inbounds for kk in 1:(2*K+1)
+            sum_val = zero(eltype(nodes_sum))
+            for b in 1:bin
+                sum_val += h∇[kk, b, feat, node]
+            end
+            nodes_sum[kk, child_l] = sum_val
+            nodes_sum[kk, child_r] = nodes_sum[kk, node] - sum_val
+        end
+        
+        w_l = nodes_sum[2*K+1, child_l]
+        w_r = nodes_sum[2*K+1, child_r]
+        
+        if K == 1
+            g_l = nodes_sum[1, child_l]
+            h_l = nodes_sum[2, child_l]
+            nodes_gain[child_l] = g_l^2 / (h_l + lambda * w_l + epsv)
+            
+            g_r = nodes_sum[1, child_r]
+            h_r = nodes_sum[2, child_r]
+            nodes_gain[child_r] = g_r^2 / (h_r + lambda * w_r + epsv)
+            
+            tree_pred[1, child_l] = -g_l / (h_l + lambda * w_l + epsv)
+            tree_pred[1, child_r] = -g_r / (h_r + lambda * w_r + epsv)
+        else
+            gain_l = zero(eltype(nodes_gain))
+            gain_r = zero(eltype(nodes_gain))
+            
+            @inbounds for k in 1:K
+                g_l = nodes_sum[k, child_l]
+                h_l = nodes_sum[K+k, child_l]
+                gain_l += g_l^2 / (h_l + lambda * w_l / K + epsv)
+                tree_pred[k, child_l] = -g_l / (h_l + lambda * w_l / K + epsv)
+                
+                g_r = nodes_sum[k, child_r]
+                h_r = nodes_sum[K+k, child_r]
+                gain_r += g_r^2 / (h_r + lambda * w_r / K + epsv)
+                tree_pred[k, child_r] = -g_r / (h_r + lambda * w_r / K + epsv)
+            end
+            
+            nodes_gain[child_l] = gain_l
+            nodes_gain[child_r] = gain_r
+        end
+        
+        idx_base = Atomix.@atomic n_next_active[1] += 2
+        n_next[idx_base - 1] = child_l
+        n_next[idx_base] = child_r
+
+    else
+        if K == 1
+            g = nodes_sum[1, node]
+            h = nodes_sum[2, node]
+            w = nodes_sum[2*K+1, node]
+            if w <= zero(w) || h + lambda * w <= zero(h)
+                tree_pred[1, node] = 0.0f0
+            else
+                tree_pred[1, node] = -g / (h + lambda * w + epsv)
+            end
+        else
+            w = nodes_sum[2*K+1, node]
+            @inbounds for k in 1:K
+                g = nodes_sum[k, node]
+                h = nodes_sum[K+k, node]
+                if w <= zero(w) || h + lambda * w / K <= zero(h)
+                    tree_pred[k, node] = 0.0f0
+                else
+                    tree_pred[k, node] = -g / (h + lambda * w / K + epsv)
+                end
+            end
+        end
+    end
+end
+
+@kernel function get_gain_gpu!(
+    nodes_gain::AbstractVector{T}, 
+    nodes_sum::AbstractArray{T,2}, 
+    nodes, 
+    lambda::T, 
+    K::Int
+) where {T}
+    n_idx = @index(Global)
+    node = nodes[n_idx]
+    
+    @inbounds if node > 0
+        eps = T(1e-8)
+        
+        if K == 1
+            g = nodes_sum[1, node]
+            h = nodes_sum[2, node]
+            w = nodes_sum[2*K+1, node]
+            nodes_gain[node] = g^2 / (h + lambda * w + eps)
+        else
+            gain_sum = zero(T)
+            w = nodes_sum[2*K+1, node]
+            
+            @inbounds for k in 1:K
+                g = nodes_sum[k, node]
+                h = nodes_sum[K+k, node]
+                gain_sum += g^2 / (h + lambda * w / K + eps)
+            end
+            
+            nodes_gain[node] = gain_sum
+        end
+    end
 end
 
