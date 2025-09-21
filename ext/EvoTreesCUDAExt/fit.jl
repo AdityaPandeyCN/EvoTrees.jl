@@ -174,14 +174,14 @@ function grow_tree!(
         for n in leaf_nodes
             node_is = get(leaf_map, n, UInt32[])
             node_sum_cpu = Array(view(cache.nodes_sum_gpu, :, n))
-            pred_leaf_cpu!(tree.pred, n, node_sum_cpu, L, params, ∇_cpu, node_is)
+            EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_cpu, L, params, ∇_cpu, node_is)
         end
 
     else
         nodes_sum_cpu = Array(cache.nodes_sum_gpu)
         for n in leaf_nodes
             node_sum_cpu_view = view(nodes_sum_cpu, :, n)
-            pred_leaf_cpu!(tree.pred, n, node_sum_cpu_view, L, params)
+            EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_cpu_view, L, params)
         end
     end
     
