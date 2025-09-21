@@ -188,3 +188,134 @@ function grow_tree!(
     return nothing
 end
 
+@kernel function apply_splits_kernel!(
+    tree_split, tree_cond_bin, tree_feat, tree_gain, tree_pred,
+    nodes_sum, nodes_gain,
+    n_next, n_next_active,
+    best_gain, best_bin, best_feat,
+    h∇,
+    active_nodes,
+    depth, max_depth, lambda, gamma,
+    K_val
+)
+    n_idx = @index(Global)
+    node = active_nodes[n_idx]
+
+    epsv = eltype(tree_pred)(1e-8)
+
+    @inbounds if depth < max_depth && best_gain[n_idx] > gamma
+        tree_split[node] = true
+        tree_cond_bin[node] = best_bin[n_idx]
+        tree_feat[node] = best_feat[n_idx]
+        tree_gain[node] = best_gain[n_idx]
+
+        child_l, child_r = node << 1, (node << 1) + 1
+        feat, bin = Int(tree_feat[node]), Int(tree_cond_bin[node])
+
+        @inbounds for kk in 1:(2*K_val+1)
+            sum_val = zero(eltype(nodes_sum))
+            for b in 1:bin
+                sum_val += h∇[kk, b, feat, node]
+            end
+            nodes_sum[kk, child_l] = sum_val
+            nodes_sum[kk, child_r] = nodes_sum[kk, node] - sum_val
+        end
+        
+        w_l = nodes_sum[2*K_val+1, child_l]
+        w_r = nodes_sum[2*K_val+1, child_r]
+        
+        if K_val == 1
+            g_l = nodes_sum[1, child_l]
+            h_l = nodes_sum[2, child_l]
+            nodes_gain[child_l] = g_l^2 / (h_l + lambda * w_l + epsv)
+            
+            g_r = nodes_sum[1, child_r]
+            h_r = nodes_sum[2, child_r]
+            nodes_gain[child_r] = g_r^2 / (h_r + lambda * w_r + epsv)
+            
+            tree_pred[1, child_l] = -g_l / (h_l + lambda * w_l + epsv)
+            tree_pred[1, child_r] = -g_r / (h_r + lambda * w_r + epsv)
+        else
+            gain_l = zero(eltype(nodes_gain))
+            gain_r = zero(eltype(nodes_gain))
+            
+            @inbounds for k in 1:K_val
+                g_l = nodes_sum[k, child_l]
+                h_l = nodes_sum[K_val+k, child_l]
+                gain_l += g_l^2 / (h_l + lambda * w_l / K_val + epsv)
+                tree_pred[k, child_l] = -g_l / (h_l + lambda * w_l / K_val + epsv)
+                
+                g_r = nodes_sum[k, child_r]
+                h_r = nodes_sum[K_val+k, child_r]
+                gain_r += g_r^2 / (h_r + lambda * w_r / K_val + epsv)
+                tree_pred[k, child_r] = -g_r / (h_r + lambda * w_r / K_val + epsv)
+            end
+            
+            nodes_gain[child_l] = gain_l
+            nodes_gain[child_r] = gain_r
+        end
+        
+        idx_base = Atomix.@atomic n_next_active[1] += 2
+        n_next[idx_base - 1] = child_l
+        n_next[idx_base] = child_r
+
+    else
+        if K_val == 1
+            g = nodes_sum[1, node]
+            h = nodes_sum[2, node]
+            w = nodes_sum[2*K_val+1, node]
+            if w <= zero(w) || h + lambda * w <= zero(h)
+                tree_pred[1, node] = 0.0f0
+            else
+                tree_pred[1, node] = -g / (h + lambda * w + epsv)
+            end
+        else
+            w = nodes_sum[2*K_val+1, node]
+            @inbounds for k in 1:K_val
+                g = nodes_sum[k, node]
+                h = nodes_sum[K_val+k, node]
+                if w <= zero(w) || h + lambda * w / K_val <= zero(h)
+                    tree_pred[k, node] = 0.0f0
+                else
+                    tree_pred[k, node] = -g / (h + lambda * w / K_val + epsv)
+                end
+            end
+        end
+    end
+end
+
+@kernel function get_gain_gpu!(
+    nodes_gain::AbstractVector{T}, 
+    nodes_sum::AbstractArray{T,2}, 
+    nodes, 
+    lambda::T, 
+    K_val::Int
+) where {T}
+    n_idx = @index(Global)
+    node = nodes[n_idx]
+    
+    @inbounds if node > 0
+        eps = T(1e-8)
+        
+        if K_val == 1
+            g = nodes_sum[1, node]
+            h = nodes_sum[2, node]
+            w = nodes_sum[2*K_val+1, node]
+            nodes_gain[node] = g^2 / (h + lambda * w + eps)
+        else
+            gain_sum = zero(T)
+            w = nodes_sum[2*K_val+1, node]
+            
+            @inbounds for k in 1:K_val
+                g = nodes_sum[k, node]
+                h = nodes_sum[K_val+k, node]
+                gain_sum += g^2 / (h + lambda * w / K_val + eps)
+            end
+            
+            nodes_gain[node] = gain_sum
+        end
+    end
+end
+
+EvoTrees.device_array_type(::Type{EvoTrees.GPU}) = CuArray
+
