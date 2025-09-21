@@ -156,51 +156,80 @@ function grow_tree!(
     copyto!(tree.gain, Array(cache.tree_gain_gpu))
     
     if L <: Union{EvoTrees.MAE, EvoTrees.Quantile, EvoTrees.Cred}
-        tree_pred_cpu = Array(cache.tree_pred_gpu)
-        nidx_cpu = Array(cache.nidx)
-        is_cpu = Array(is)
-        y_cpu = isa(cache.y, CuArray) ? Array(cache.y) : cache.y
-        pred_cpu = isa(cache.pred, CuArray) ? Array(cache.pred) : cache.pred
-        
-        residuals = similar(y_cpu, length(is_cpu))
-        @inbounds for i in eachindex(is_cpu)
-            obs = is_cpu[i]
-            residuals[i] = y_cpu[obs] - pred_cpu[K == 1 ? obs : (obs, 1)]
-        end
-        
-        leaf_nodes = findall(x -> !tree.split[x] && x > 0, 1:length(tree.split))
-        
-        for node in leaf_nodes
-            node_obs = findall(x -> nidx_cpu[is_cpu[x]] == node, 1:length(is_cpu))
-            if !isempty(node_obs)
-                node_residuals = view(residuals, node_obs)
-                
-                if L <: EvoTrees.MAE
-                    tree_pred_cpu[1, node] = median(node_residuals) * params.eta
-                elseif L <: EvoTrees.Quantile
-                    tree_pred_cpu[1, node] = quantile(node_residuals, params.alpha) * params.eta
-                elseif L <: EvoTrees.Cred
-                    if params.loss == :cred_var
-                        tree_pred_cpu[1, node] = var(node_residuals) * params.eta
-                    else
-                        tree_pred_cpu[1, node] = std(node_residuals) * params.eta
-                    end
-                end
-            else
-                if K == 1
-                    tree_pred_cpu[1, node] = 0.0f0
-                else
-                    tree_pred_cpu[:, node] .= 0.0f0
-                end
-            end
-        end
-        
-        copyto!(tree.pred, tree_pred_cpu)
+        pred_leaf_cpu_all!(tree, cache, params, is, L, K)
     else
         copyto!(tree.pred, Array(cache.tree_pred_gpu .* Float32(params.eta)))
     end
     
     return nothing
+end
+
+function pred_leaf_cpu_all!(
+    tree::EvoTrees.Tree{L,K},
+    cache::CacheGPU,
+    params::EvoTrees.EvoTypes,
+    is::CuVector,
+    ::Type{L},
+    K::Int
+) where {L,K}
+    
+    nidx_cpu = Array(cache.nidx)
+    is_cpu = Array(is)
+    ∇_cpu = Array(cache.∇)
+    nodes_sum_cpu = Array(cache.nodes_sum_gpu)
+    
+    tree_pred = zeros(Float32, K, 2^params.max_depth)
+    
+    leaf_nodes = findall(n -> n > 0 && !tree.split[n], 1:length(tree.split))
+    
+    for node in leaf_nodes
+        node_mask = findall(i -> nidx_cpu[is_cpu[i]] == node, 1:length(is_cpu))
+        
+        if !isempty(node_mask)
+            node_is = is_cpu[node_mask]
+            
+            if L <: EvoTrees.MAE
+                residuals = -view(∇_cpu, 1, node_is)
+                tree_pred[1, node] = params.eta * median(residuals)
+                
+            elseif L <: EvoTrees.Quantile
+                residuals = -view(∇_cpu, 1, node_is)
+                tree_pred[1, node] = params.eta * quantile(residuals, params.alpha)
+                
+            elseif L <: EvoTrees.Cred
+                residuals = view(∇_cpu, 1, node_is)
+                if params.loss == :cred_var
+                    tree_pred[1, node] = params.eta * var(residuals)
+                else
+                    tree_pred[1, node] = params.eta * std(residuals)
+                end
+            end
+        else
+            if K == 1
+                g = nodes_sum_cpu[1, node]
+                h = nodes_sum_cpu[2, node]
+                w = nodes_sum_cpu[2*K+1, node]
+                if w > 0 && h + params.lambda * w > 0
+                    tree_pred[1, node] = -params.eta * g / (h + params.lambda * w)
+                else
+                    tree_pred[1, node] = 0.0f0
+                end
+            else
+                w = nodes_sum_cpu[2*K+1, node]
+                for k in 1:K
+                    g = nodes_sum_cpu[k, node]
+                    h = nodes_sum_cpu[K+k, node]
+                    if w > 0 && h + params.lambda * w / K > 0
+                        tree_pred[k, node] = -params.eta * g / (h + params.lambda * w / K)
+                    else
+                        tree_pred[k, node] = 0.0f0
+                    end
+                end
+            end
+        end
+    end
+    
+    copyto!(tree.pred, tree_pred)
 end
 
 @kernel function apply_splits_kernel!(
