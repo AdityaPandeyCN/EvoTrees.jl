@@ -187,7 +187,11 @@ function grow_tree!(
                     end
                 end
             else
-                tree_pred_cpu[K == 1 ? 1 : (1:K, node)] .= 0
+                if K == 1
+                    tree_pred_cpu[1, node] = 0.0f0
+                else
+                    tree_pred_cpu[:, node] .= 0.0f0
+                end
             end
         end
         
