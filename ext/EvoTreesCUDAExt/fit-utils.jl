@@ -1,39 +1,6 @@
 using KernelAbstractions
 using Atomix
 
-@kernel function get_gain_gpu!(
-    nodes_gain::AbstractVector{T}, 
-    nodes_sum::AbstractArray{T,2}, 
-    nodes, 
-    lambda::T, 
-    K::Int
-) where {T}
-    n_idx = @index(Global)
-    node = nodes[n_idx]
-    
-    @inbounds if node > 0
-        eps = T(1e-8)
-        
-        if K == 1
-            g = nodes_sum[1, node]
-            h = nodes_sum[2, node]
-            w = nodes_sum[3, node]
-            nodes_gain[node] = g^2 / (h + lambda * w + eps)
-        else
-            gain_sum = zero(T)
-            w = nodes_sum[2*K+1, node]
-            
-            @inbounds for k in 1:K
-                g = nodes_sum[k, node]
-                h = nodes_sum[K+k, node]
-                gain_sum += g^2 / (h + lambda * w / K + eps)
-            end
-            
-            nodes_gain[node] = gain_sum
-        end
-    end
-end
-
 @kernel function update_nodes_idx_kernel!(
     nidx::AbstractVector{T},
     @Const(is),
