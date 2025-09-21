@@ -79,7 +79,8 @@ end
     @Const(monotone_constraints),
     lambda::T,
     min_weight::T,
-    K::Int
+    K::Int,
+    sums_temp::AbstractArray{T,2}  # Pre-allocated temporary storage
 ) where {T}
     n_idx = @index(Global)
     
@@ -92,7 +93,7 @@ end
         else
             nbins = size(h∇, 2)
             
-            # Calculate parent node sums - this part is OK
+            # Calculate parent node sums
             for k in 1:(2*K+1)
                 sum_val = zero(T)
                 for j_idx in 1:length(js)
@@ -104,7 +105,7 @@ end
                 nodes_sum[k, node] = sum_val
             end
             
-            # Calculate parent gain - this part is OK
+            # Calculate parent gain
             gain_p = zero(T)
             w_p = nodes_sum[2*K+1, node]
             if K == 1
@@ -127,9 +128,8 @@ end
                 constraint = monotone_constraints[f]
                 
                 if is_numeric  
-                    # FIX: For K>1, we need to accumulate ALL dimensions
                     if K == 1
-                        # Original logic for K=1 (more efficient)
+                        # Original efficient logic for K=1
                         s1, s2, s3 = zero(T), zero(T), zero(T)
                         for b in 1:(nbins - 1)
                             s1 += h∇[1, b, j_idx, node]
@@ -161,17 +161,19 @@ end
                             end
                         end
                     else
-                        # Fixed logic for K>1: accumulate all dimensions
-                        # Use local arrays to store accumulated sums
-                        s_left = @MVector zeros(T, 2*K+1)
+                        # Multi-output logic using pre-allocated temp storage
+                        # Reset temp storage for this feature
+                        @inbounds for kk in 1:(2*K+1)
+                            sums_temp[kk, n_idx] = zero(T)
+                        end
                         
                         for b in 1:(nbins - 1)
                             # Accumulate all dimensions
-                            for kk in 1:(2*K+1)
-                                s_left[kk] += h∇[kk, b, j_idx, node]
+                            @inbounds for kk in 1:(2*K+1)
+                                sums_temp[kk, n_idx] += h∇[kk, b, j_idx, node]
                             end
                             
-                            w_l = s_left[2*K+1]
+                            w_l = sums_temp[2*K+1, n_idx]
                             w_r = w_p - w_l
                             
                             if w_l >= min_weight && w_r >= min_weight
@@ -179,11 +181,11 @@ end
                                 gain_l = zero(T)
                                 gain_r = zero(T)
                                 
-                                # Check monotone constraints (using first dimension as representative)
+                                # Check monotone constraints
                                 if constraint != 0
-                                    pred_l = -s_left[1] / (s_left[K+1] + lambda * w_l / K + T(1e-8))
-                                    pred_r = -(nodes_sum[1, node] - s_left[1]) / 
-                                            (nodes_sum[K+1, node] - s_left[K+1] + lambda * w_r / K + T(1e-8))
+                                    pred_l = -sums_temp[1, n_idx] / (sums_temp[K+1, n_idx] + lambda * w_l / K + T(1e-8))
+                                    pred_r = -(nodes_sum[1, node] - sums_temp[1, n_idx]) / 
+                                            (nodes_sum[K+1, node] - sums_temp[K+1, n_idx] + lambda * w_r / K + T(1e-8))
                                     
                                     if !((constraint == 0) || 
                                          (constraint == -1 && pred_l > pred_r) || 
@@ -193,9 +195,9 @@ end
                                 end
                                 
                                 # Sum gains across all output dimensions
-                                for k in 1:K
-                                    g_l = s_left[k]
-                                    h_l = s_left[K+k]
+                                @inbounds for k in 1:K
+                                    g_l = sums_temp[k, n_idx]
+                                    h_l = sums_temp[K+k, n_idx]
                                     g_r = nodes_sum[k, node] - g_l
                                     h_r = nodes_sum[K+k, node] - h_l
                                     
@@ -247,7 +249,7 @@ end
                             end
                         end
                     else
-                        # Fixed logic for K>1 categorical
+                        # Multi-output categorical
                         for b in 1:(nbins - 1)
                             l_w = h∇[2*K+1, b, j_idx, node]
                             r_w = w_p - l_w
@@ -274,7 +276,7 @@ end
                                 end
                                 
                                 # Calculate gains for all K dimensions
-                                for k in 1:K
+                                @inbounds for k in 1:K
                                     l_g = h∇[k, b, j_idx, node]
                                     l_h = h∇[K+k, b, j_idx, node]
                                     r_g = nodes_sum[k, node] - l_g
@@ -353,10 +355,18 @@ end
 
 function update_hist_gpu!(
     h∇, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
-    feattypes, monotone_constraints, K
+    feattypes, monotone_constraints, K, sums_temp=nothing
 )
     backend = KernelAbstractions.get_backend(h∇)
     n_active = length(active_nodes)
+    
+    # Create temporary storage if not provided and K > 1
+    if sums_temp === nothing && K > 1
+        sums_temp = similar(nodes_sum_gpu, 2*K+1, max(n_active, 1))
+    elseif K == 1
+        # Create a dummy array for K=1 case (won't be used)
+        sums_temp = similar(nodes_sum_gpu, 1, 1)
+    end
     
     h∇ .= 0
     
@@ -371,7 +381,7 @@ function update_hist_gpu!(
     
     find_split! = find_best_split_from_hist_kernel!(backend)
     find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js, feattypes, monotone_constraints,
-                eltype(gains)(params.lambda), eltype(gains)(params.min_weight), K;
+                eltype(gains)(params.lambda), eltype(gains)(params.min_weight), K, sums_temp;
                 ndrange = max(n_active, 1), workgroupsize = 256)
     KernelAbstractions.synchronize(backend)
 end
