@@ -42,7 +42,7 @@ function grow_tree!(
 ) where {L,K}
 
     # Add CPU fallback for unsupported loss functions
-    if L <: Union{EvoTrees.MAE, EvoTrees.Quantile, EvoTrees.Cred}
+    if L <: Union{EvoTrees.Quantile, EvoTrees.Cred}
         error("Loss function $(L) requires CPU implementation. Set device=:cpu in model config.")
     end
     
@@ -116,12 +116,12 @@ function grow_tree!(
             subtract_count_val = Array(cache.subtract_count)[1]
             
             if build_count_val > 0
-                update_hist_gpu!(
-                    cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
-                    cache.∇, cache.x_bin, cache.nidx, cache.js, is,
+            update_hist_gpu!(
+                cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
+                cache.∇, cache.x_bin, cache.nidx, cache.js, is,
                     depth, view(cache.build_nodes_gpu, 1:build_count_val), cache.nodes_sum_gpu, params,
-                    cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
-                )
+                cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K
+            )
             end
             
             if subtract_count_val > 0
@@ -164,7 +164,7 @@ function grow_tree!(
     copyto!(tree.cond_bin, Array(cache.tree_cond_bin_gpu))
     copyto!(tree.feat, Array(cache.tree_feat_gpu))
     copyto!(tree.gain, Array(cache.tree_gain_gpu))
-    copyto!(tree.pred, Array(cache.tree_pred_gpu .* Float32(params.eta)))
+    copyto!(tree.pred, Array(cache.tree_pred_gpu .* Float32(params.eta / params.bagging_size)))
     
     return nothing
 end
