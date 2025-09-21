@@ -246,7 +246,6 @@ end
 
 function update_hist_gpu!(
     h∇, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
-    build_nodes_gpu, subtract_nodes_gpu, build_count, subtract_count,
     feattypes, monotone_constraints, K
 )
     backend = KernelAbstractions.get_backend(h∇)
@@ -254,44 +253,13 @@ function update_hist_gpu!(
     
     h∇ .= 0
     
-    if depth == 1
-        n_feats = length(js)
-        n_obs_chunks = cld(length(is), 12)
-        num_threads = n_feats * n_obs_chunks
-        
-        hist_kernel_f! = hist_kernel!(backend)
-        workgroup_size = min(256, max(32, num_threads))
-        hist_kernel_f!(h∇, ∇, x_bin, nidx, js, is, K; ndrange = num_threads, workgroupsize = workgroup_size)
-    else
-        build_count .= 0
-        subtract_count .= 0
-        
-        separate_kernel! = separate_nodes_kernel!(backend)
-        separate_kernel!(build_nodes_gpu, build_count, subtract_nodes_gpu, subtract_count, active_nodes;
-                        ndrange=n_active, workgroupsize=256)
-        KernelAbstractions.synchronize(backend)
-        
-        build_count_val = Array(build_count)[1]
-        subtract_count_val = Array(subtract_count)[1]
-        
-        if build_count_val > 0
-            n_feats = length(js)
-            n_obs_chunks = cld(length(is), 12)
-            num_threads = n_feats * n_obs_chunks
-            
-            hist_kernel_f! = hist_kernel!(backend)
-            workgroup_size = min(256, max(32, num_threads))
-            hist_kernel_f!(h∇, ∇, x_bin, nidx, js, is, K; ndrange = num_threads, workgroupsize = workgroup_size)
-            KernelAbstractions.synchronize(backend)
-        end
-        
-        if subtract_count_val > 0
-            subtract_hist_kernel!(backend)(h∇, view(subtract_nodes_gpu, 1:subtract_count_val);
-                                          ndrange = subtract_count_val * size(h∇, 1) * size(h∇, 2) * size(h∇, 3),
-                                          workgroupsize=256)
-        end
-    end
+    n_feats = length(js)
+    n_obs_chunks = cld(length(is), 12)
+    num_threads = n_feats * n_obs_chunks
     
+    hist_kernel_f! = hist_kernel!(backend)
+    workgroup_size = min(256, max(32, num_threads))
+    hist_kernel_f!(h∇, ∇, x_bin, nidx, js, is, K; ndrange = num_threads, workgroupsize = workgroup_size)
     KernelAbstractions.synchronize(backend)
     
     find_split! = find_best_split_from_hist_kernel!(backend)
