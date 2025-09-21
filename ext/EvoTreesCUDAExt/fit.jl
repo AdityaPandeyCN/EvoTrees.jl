@@ -41,10 +41,6 @@ function grow_tree!(
     is::CuVector
 ) where {L,K}
 
-    if L <: Union{EvoTrees.MAE, EvoTrees.Quantile, EvoTrees.Cred}
-        error("Loss function $(L) requires CPU implementation. Set device=:cpu in model config.")
-    end
-
     backend = KernelAbstractions.get_backend(cache.x_bin)
 
     cache.tree_split_gpu .= false
@@ -158,7 +154,47 @@ function grow_tree!(
     copyto!(tree.cond_bin, Array(cache.tree_cond_bin_gpu))
     copyto!(tree.feat, Array(cache.tree_feat_gpu))
     copyto!(tree.gain, Array(cache.tree_gain_gpu))
-    copyto!(tree.pred, Array(cache.tree_pred_gpu .* Float32(params.eta)))
+    
+    if L <: Union{EvoTrees.MAE, EvoTrees.Quantile, EvoTrees.Cred}
+        tree_pred_cpu = Array(cache.tree_pred_gpu)
+        nidx_cpu = Array(cache.nidx)
+        is_cpu = Array(is)
+        y_cpu = isa(cache.y, CuArray) ? Array(cache.y) : cache.y
+        pred_cpu = isa(cache.pred, CuArray) ? Array(cache.pred) : cache.pred
+        
+        residuals = similar(y_cpu, length(is_cpu))
+        @inbounds for i in eachindex(is_cpu)
+            obs = is_cpu[i]
+            residuals[i] = y_cpu[obs] - pred_cpu[K == 1 ? obs : (obs, 1)]
+        end
+        
+        leaf_nodes = findall(x -> !tree.split[x] && x > 0, 1:length(tree.split))
+        
+        for node in leaf_nodes
+            node_obs = findall(x -> nidx_cpu[is_cpu[x]] == node, 1:length(is_cpu))
+            if !isempty(node_obs)
+                node_residuals = view(residuals, node_obs)
+                
+                if L <: EvoTrees.MAE
+                    tree_pred_cpu[1, node] = median(node_residuals) * params.eta
+                elseif L <: EvoTrees.Quantile
+                    tree_pred_cpu[1, node] = quantile(node_residuals, params.alpha) * params.eta
+                elseif L <: EvoTrees.Cred
+                    if params.loss == :cred_var
+                        tree_pred_cpu[1, node] = var(node_residuals) * params.eta
+                    else
+                        tree_pred_cpu[1, node] = std(node_residuals) * params.eta
+                    end
+                end
+            else
+                tree_pred_cpu[K == 1 ? 1 : (1:K, node)] .= 0
+            end
+        end
+        
+        copyto!(tree.pred, tree_pred_cpu)
+    else
+        copyto!(tree.pred, Array(cache.tree_pred_gpu .* Float32(params.eta)))
+    end
     
     return nothing
 end
