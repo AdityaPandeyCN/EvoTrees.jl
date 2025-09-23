@@ -88,202 +88,98 @@ end
     @inbounds if n_idx <= length(active_nodes)
         node = active_nodes[n_idx]
         if node == 0
-            gains[n_idx] = T(-Inf)
-            bins[n_idx] = Int32(0)
-            feats[n_idx] = Int32(0)
-        else
-            nbins = size(h∇, 2)
-            
-            if !isempty(js)
-                first_feat = js[1]
-                for k in 1:(2*K+1)
-                    sum_val = zero(T)
-                    for b in 1:nbins
-                        sum_val += h∇[k, b, first_feat, node]
-                    end
-                    nodes_sum[k, node] = sum_val
-                end
-            end
-            
-            gain_p = zero(T)
-            w_p = nodes_sum[2*K+1, node]
-            if K == 1
-                g_p = nodes_sum[1, node]
-                h_p = nodes_sum[2, node]
-                gain_p = g_p^2 / (h_p + lambda * w_p + T(1e-8))
-            else
-                for k in 1:K
-                    g_p = nodes_sum[k, node]
-                    h_p = nodes_sum[K+k, node]
-                    gain_p += g_p^2 / (h_p + lambda * w_p / K + T(1e-8))
-                end
-            end
-            
-            g_best, b_best, f_best = T(-Inf), Int32(0), Int32(0)
-            
-            for j_idx in 1:length(js)
-                f = js[j_idx]
-                is_numeric = feattypes[f]
-                constraint = monotone_constraints[f]
-                
-                if is_numeric  
-                    if K == 1
-                        s1, s2, s3 = zero(T), zero(T), zero(T)
-                        for b in 1:(nbins - 1)
-                            s1 += h∇[1, b, f, node]
-                            s2 += h∇[2, b, f, node]  
-                            s3 += h∇[3, b, f, node]
-                            
-                            if s3 >= min_weight && (w_p - s3) >= min_weight
-                                l_g1, l_g2 = s1, s2
-                                r_g1, r_g2 = nodes_sum[1, node] - l_g1, nodes_sum[2, node] - l_g2
-                                
-                                if constraint != 0
-                                    predL = -l_g1 / (l_g2 + lambda * s3 + T(1e-8))
-                                    predR = -r_g1 / (r_g2 + lambda * (w_p - s3) + T(1e-8))
-                                    
-                                    if !((constraint == 0) || (constraint == -1 && predL > predR) || (constraint == 1 && predL < predR))
-                                        continue
-                                    end
-                                end
-                                
-                                gain_l = l_g1^2 / (s3 * lambda + l_g2 + T(1e-8))
-                                gain_r = r_g1^2 / ((w_p - s3) * lambda + r_g2 + T(1e-8))
-                                
-                                g = gain_l + gain_r - gain_p
-                                if g > g_best
-                                    g_best = g
-                                    b_best = Int32(b)
-                                    f_best = Int32(f)
-                                end
-                            end
-                        end
-                    else
-                        @inbounds for kk in 1:(2*K+1)
-                            sums_temp[kk, n_idx] = zero(T)
-                        end
-                        
-                        for b in 1:(nbins - 1)
-                            @inbounds for kk in 1:(2*K+1)
-                                sums_temp[kk, n_idx] += h∇[kk, b, f, node]
-                            end
-                            
-                            w_l = sums_temp[2*K+1, n_idx]
-                            w_r = w_p - w_l
-                            
-                            if w_l >= min_weight && w_r >= min_weight
-                                gain_l = zero(T)
-                                gain_r = zero(T)
-                                
-                                if constraint != 0
-                                    pred_l = -sums_temp[1, n_idx] / (sums_temp[K+1, n_idx] + lambda * w_l / K + T(1e-8))
-                                    pred_r = -(nodes_sum[1, node] - sums_temp[1, n_idx]) / 
-                                            (nodes_sum[K+1, node] - sums_temp[K+1, n_idx] + lambda * w_r / K + T(1e-8))
-                                    
-                                    if !((constraint == 0) || (constraint == -1 && pred_l > pred_r) || (constraint == 1 && pred_l < pred_r))
-                                        continue
-                                    end
-                                end
-                                
-                                @inbounds for k in 1:K
-                                    g_l = sums_temp[k, n_idx]
-                                    h_l = sums_temp[K+k, n_idx]
-                                    g_r = nodes_sum[k, node] - g_l
-                                    h_r = nodes_sum[K+k, node] - h_l
-                                    
-                                    gain_l += g_l^2 / (h_l + lambda * w_l / K + T(1e-8))
-                                    gain_r += g_r^2 / (h_r + lambda * w_r / K + T(1e-8))
-                                end
-                                
-                                g = gain_l + gain_r - gain_p
-                                if g > g_best
-                                    g_best = g
-                                    b_best = Int32(b)
-                                    f_best = Int32(f)
-                                end
-                            end
-                        end
-                    end
-                else
-                    if K == 1
-                        for b in 1:(nbins - 1)
-                            l_g1 = h∇[1, b, f, node]
-                            l_g2 = h∇[2, b, f, node]
-                            l_w = h∇[3, b, f, node]
-                            
-                            r_g1 = nodes_sum[1, node] - l_g1
-                            r_g2 = nodes_sum[2, node] - l_g2
-                            r_w = w_p - l_w
-                            
-                            if l_w >= min_weight && r_w >= min_weight
-                                if constraint != 0
-                                    predL = -l_g1 / (l_g2 + lambda * l_w + T(1e-8))
-                                    predR = -r_g1 / (r_g2 + lambda * r_w + T(1e-8))
-                                    
-                                    if !((constraint == 0) || (constraint == -1 && predL > predR) || (constraint == 1 && predL < predR))
-                                        continue
-                                    end
-                                end
-                                
-                                gain_l = l_g1^2 / (l_w * lambda + l_g2 + T(1e-8))
-                                gain_r = r_g1^2 / (r_w * lambda + r_g2 + T(1e-8))
-                                
-                                g = gain_l + gain_r - gain_p
-                                if g > g_best
-                                    g_best = g
-                                    b_best = Int32(b)
-                                    f_best = Int32(f)
-                                end
-                            end
-                        end
-                    else
-                        for b in 1:(nbins - 1)
-                            l_w = h∇[2*K+1, b, f, node]
-                            r_w = w_p - l_w
-                            
-                            if l_w >= min_weight && r_w >= min_weight
-                                gain_l = zero(T)
-                                gain_r = zero(T)
-                                
-                                if constraint != 0
-                                    l_g1 = h∇[1, b, f, node]
-                                    l_h1 = h∇[K+1, b, f, node]
-                                    r_g1 = nodes_sum[1, node] - l_g1
-                                    r_h1 = nodes_sum[K+1, node] - l_h1
-                                    
-                                    pred_l = -l_g1 / (l_h1 + lambda * l_w / K + T(1e-8))
-                                    pred_r = -r_g1 / (r_h1 + lambda * r_w / K + T(1e-8))
-                                    
-                                    if !((constraint == 0) || (constraint == -1 && pred_l > pred_r) || (constraint == 1 && pred_l < pred_r))
-                                        continue
-                                    end
-                                end
-                                
-                                @inbounds for k in 1:K
-                                    l_g = h∇[k, b, f, node]
-                                    l_h = h∇[K+k, b, f, node]
-                                    r_g = nodes_sum[k, node] - l_g
-                                    r_h = nodes_sum[K+k, node] - l_h
-                                    
-                                    gain_l += l_g^2 / (l_h + lambda * l_w / K + T(1e-8))
-                                    gain_r += r_g^2 / (r_h + lambda * r_w / K + T(1e-8))
-                                end
-                                
-                                g = gain_l + gain_r - gain_p
-                                if g > g_best
-                                    g_best = g
-                                    b_best = Int32(b)
-                                    f_best = Int32(f)
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-            gains[n_idx] = g_best
-            bins[n_idx] = b_best
-            feats[n_idx] = f_best
+            gains[n_idx], bins[n_idx], feats[n_idx] = T(-Inf), Int32(0), Int32(0)
+            return nothing
         end
+        
+        nbins = size(h∇, 2)
+        eps = T(1e-8)
+        
+        # Initialize node sums from first feature
+        if !isempty(js)
+            for k in 1:(2*K+1)
+                nodes_sum[k, node] = sum(@view h∇[k, :, js[1], node])
+            end
+        end
+        
+        # Pre-calculate parent gain and cache values
+        w_p = nodes_sum[2*K+1, node]
+        λw = lambda * w_p
+        gain_p = K == 1 ? 
+            nodes_sum[1, node]^2 / (nodes_sum[2, node] + λw + eps) :
+            sum(nodes_sum[k, node]^2 / (nodes_sum[K+k, node] + λw/K + eps) for k in 1:K)
+        
+        g_best, b_best, f_best = T(-Inf), Int32(0), Int32(0)
+        
+        # Helper function for gain calculation
+        calc_gain = (g, h, w) -> g^2 / (h + lambda * w + eps)
+        calc_gain_k = (g, h, w, k) -> g^2 / (h + lambda * w / k + eps)
+        
+        for j_idx in 1:length(js)
+            f = js[j_idx]
+            is_numeric = feattypes[f]
+            constraint = monotone_constraints[f]
+            
+            # Initialize accumulators
+            acc = K == 1 ? zeros(T, 3) : (@inbounds sums_temp[:, n_idx] .= 0; sums_temp[:, n_idx])
+            
+            for b in 1:(nbins - 1)
+                # Update accumulator based on feature type
+                if is_numeric
+                    K == 1 ? 
+                        (acc .+= @view h∇[1:3, b, f, node]) :
+                        (@inbounds acc .+= @view h∇[:, b, f, node])
+                else
+                    K == 1 ?
+                        (acc .= @view h∇[1:3, b, f, node]) :
+                        (@inbounds acc .= @view h∇[:, b, f, node])
+                end
+                
+                # Get left/right weights
+                w_l = K == 1 ? acc[3] : acc[2*K+1]
+                w_r = w_p - w_l
+                
+                # Check minimum weight constraint
+                (w_l < min_weight || w_r < min_weight) && continue
+                
+                # Calculate gains based on K
+                if K == 1
+                    g_l, h_l = acc[1], acc[2]
+                    g_r, h_r = nodes_sum[1, node] - g_l, nodes_sum[2, node] - h_l
+                    
+                    # Check monotone constraint
+                    if constraint != 0
+                        pred_l, pred_r = -g_l/(h_l + lambda*w_l + eps), -g_r/(h_r + lambda*w_r + eps)
+                        ((constraint == -1 && pred_l <= pred_r) || 
+                         (constraint == 1 && pred_l >= pred_r)) && continue
+                    end
+                    
+                    g = calc_gain(g_l, h_l, w_l) + calc_gain(g_r, h_r, w_r) - gain_p
+                else
+                    # Multi-class: check constraint on first class
+                    if constraint != 0
+                        g_l1, h_l1 = acc[1], acc[K+1]
+                        g_r1, h_r1 = nodes_sum[1, node] - g_l1, nodes_sum[K+1, node] - h_l1
+                        pred_l, pred_r = -g_l1/(h_l1 + lambda*w_l/K + eps), -g_r1/(h_r1 + lambda*w_r/K + eps)
+                        ((constraint == -1 && pred_l <= pred_r) || 
+                         (constraint == 1 && pred_l >= pred_r)) && continue
+                    end
+                    
+                    # Calculate total gain for all K classes
+                    g = sum(calc_gain_k(acc[k], acc[K+k], w_l, K) + 
+                           calc_gain_k(nodes_sum[k, node] - acc[k], 
+                                      nodes_sum[K+k, node] - acc[K+k], w_r, K) 
+                           for k in 1:K) - gain_p
+                end
+                
+                # Update best split if better
+                if g > g_best
+                    g_best, b_best, f_best = g, Int32(b), Int32(f)
+                end
+            end
+        end
+        
+        gains[n_idx], bins[n_idx], feats[n_idx] = g_best, b_best, f_best
     end
 end
 
