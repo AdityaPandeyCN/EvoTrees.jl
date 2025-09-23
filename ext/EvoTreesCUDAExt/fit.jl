@@ -328,3 +328,4 @@ end
 end
 
 EvoTrees.device_array_type(::Type{EvoTrees.GPU}) = CuArray
+

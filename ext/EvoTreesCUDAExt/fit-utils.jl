@@ -89,97 +89,96 @@ end
         node = active_nodes[n_idx]
         if node == 0
             gains[n_idx], bins[n_idx], feats[n_idx] = T(-Inf), Int32(0), Int32(0)
-            return nothing
-        end
-        
-        nbins = size(h∇, 2)
-        eps = T(1e-8)
-        
-        # Initialize node sums from first feature
-        if !isempty(js)
-            for k in 1:(2*K+1)
-                nodes_sum[k, node] = sum(@view h∇[k, :, js[1], node])
-            end
-        end
-        
-        # Pre-calculate parent gain and cache values
-        w_p = nodes_sum[2*K+1, node]
-        λw = lambda * w_p
-        gain_p = K == 1 ? 
-            nodes_sum[1, node]^2 / (nodes_sum[2, node] + λw + eps) :
-            sum(nodes_sum[k, node]^2 / (nodes_sum[K+k, node] + λw/K + eps) for k in 1:K)
-        
-        g_best, b_best, f_best = T(-Inf), Int32(0), Int32(0)
-        
-        # Helper function for gain calculation
-        calc_gain = (g, h, w) -> g^2 / (h + lambda * w + eps)
-        calc_gain_k = (g, h, w, k) -> g^2 / (h + lambda * w / k + eps)
-        
-        for j_idx in 1:length(js)
-            f = js[j_idx]
-            is_numeric = feattypes[f]
-            constraint = monotone_constraints[f]
+        else
+            nbins = size(h∇, 2)
+            eps = T(1e-8)
             
-            # Initialize accumulators
-            acc = K == 1 ? zeros(T, 3) : (@inbounds sums_temp[:, n_idx] .= 0; sums_temp[:, n_idx])
-            
-            for b in 1:(nbins - 1)
-                # Update accumulator based on feature type
-                if is_numeric
-                    K == 1 ? 
-                        (acc .+= @view h∇[1:3, b, f, node]) :
-                        (@inbounds acc .+= @view h∇[:, b, f, node])
-                else
-                    K == 1 ?
-                        (acc .= @view h∇[1:3, b, f, node]) :
-                        (@inbounds acc .= @view h∇[:, b, f, node])
-                end
-                
-                # Get left/right weights
-                w_l = K == 1 ? acc[3] : acc[2*K+1]
-                w_r = w_p - w_l
-                
-                # Check minimum weight constraint
-                (w_l < min_weight || w_r < min_weight) && continue
-                
-                # Calculate gains based on K
-                if K == 1
-                    g_l, h_l = acc[1], acc[2]
-                    g_r, h_r = nodes_sum[1, node] - g_l, nodes_sum[2, node] - h_l
-                    
-                    # Check monotone constraint
-                    if constraint != 0
-                        pred_l, pred_r = -g_l/(h_l + lambda*w_l + eps), -g_r/(h_r + lambda*w_r + eps)
-                        ((constraint == -1 && pred_l <= pred_r) || 
-                         (constraint == 1 && pred_l >= pred_r)) && continue
-                    end
-                    
-                    g = calc_gain(g_l, h_l, w_l) + calc_gain(g_r, h_r, w_r) - gain_p
-                else
-                    # Multi-class: check constraint on first class
-                    if constraint != 0
-                        g_l1, h_l1 = acc[1], acc[K+1]
-                        g_r1, h_r1 = nodes_sum[1, node] - g_l1, nodes_sum[K+1, node] - h_l1
-                        pred_l, pred_r = -g_l1/(h_l1 + lambda*w_l/K + eps), -g_r1/(h_r1 + lambda*w_r/K + eps)
-                        ((constraint == -1 && pred_l <= pred_r) || 
-                         (constraint == 1 && pred_l >= pred_r)) && continue
-                    end
-                    
-                    # Calculate total gain for all K classes
-                    g = sum(calc_gain_k(acc[k], acc[K+k], w_l, K) + 
-                           calc_gain_k(nodes_sum[k, node] - acc[k], 
-                                      nodes_sum[K+k, node] - acc[K+k], w_r, K) 
-                           for k in 1:K) - gain_p
-                end
-                
-                # Update best split if better
-                if g > g_best
-                    g_best, b_best, f_best = g, Int32(b), Int32(f)
+            # Initialize node sums from first feature
+            if !isempty(js)
+                for k in 1:(2*K+1)
+                    nodes_sum[k, node] = sum(@view h∇[k, :, js[1], node])
                 end
             end
+            
+            # Pre-calculate parent gain and cache values
+            w_p = nodes_sum[2*K+1, node]
+            λw = lambda * w_p
+            gain_p = K == 1 ? 
+                nodes_sum[1, node]^2 / (nodes_sum[2, node] + λw + eps) :
+                sum(nodes_sum[k, node]^2 / (nodes_sum[K+k, node] + λw/K + eps) for k in 1:K)
+            
+            g_best, b_best, f_best = T(-Inf), Int32(0), Int32(0)
+            
+            # Helper function for gain calculation
+            calc_gain = (g, h, w) -> g^2 / (h + lambda * w + eps)
+            calc_gain_k = (g, h, w, k) -> g^2 / (h + lambda * w / k + eps)
+            
+            for j_idx in 1:length(js)
+                f = js[j_idx]
+                is_numeric = feattypes[f]
+                constraint = monotone_constraints[f]
+                
+                # Initialize accumulators
+                acc = K == 1 ? zeros(T, 3) : (@inbounds sums_temp[:, n_idx] .= 0; sums_temp[:, n_idx])
+                
+                for b in 1:(nbins - 1)
+                    # Update accumulator based on feature type
+                    if is_numeric
+                        K == 1 ? 
+                            (acc .+= @view h∇[1:3, b, f, node]) :
+                            (@inbounds acc .+= @view h∇[:, b, f, node])
+                    else
+                        K == 1 ?
+                            (acc .= @view h∇[1:3, b, f, node]) :
+                            (@inbounds acc .= @view h∇[:, b, f, node])
+                    end
+                    
+                    # Get left/right weights
+                    w_l = K == 1 ? acc[3] : acc[2*K+1]
+                    w_r = w_p - w_l
+                    
+                    # Check minimum weight constraint
+                    (w_l < min_weight || w_r < min_weight) && continue
+                    
+                    # Calculate gains based on K
+                    if K == 1
+                        g_l, h_l = acc[1], acc[2]
+                        g_r, h_r = nodes_sum[1, node] - g_l, nodes_sum[2, node] - h_l
+                        
+                        # Check monotone constraint
+                        if constraint != 0
+                            pred_l, pred_r = -g_l/(h_l + lambda*w_l + eps), -g_r/(h_r + lambda*w_r + eps)
+                            ((constraint == -1 && pred_l <= pred_r) || 
+                             (constraint == 1 && pred_l >= pred_r)) && continue
+                        end
+                        
+                        g = calc_gain(g_l, h_l, w_l) + calc_gain(g_r, h_r, w_r) - gain_p
+                    else
+                        # Multi-class: check constraint on first class
+                        if constraint != 0
+                            g_l1, h_l1 = acc[1], acc[K+1]
+                            g_r1, h_r1 = nodes_sum[1, node] - g_l1, nodes_sum[K+1, node] - h_l1
+                            pred_l, pred_r = -g_l1/(h_l1 + lambda*w_l/K + eps), -g_r1/(h_r1 + lambda*w_r/K + eps)
+                            ((constraint == -1 && pred_l <= pred_r) || 
+                             (constraint == 1 && pred_l >= pred_r)) && continue
+                        end
+                        
+                        # Calculate total gain for all K classes
+                        g = sum(calc_gain_k(acc[k], acc[K+k], w_l, K) + 
+                               calc_gain_k(nodes_sum[k, node] - acc[k], 
+                                          nodes_sum[K+k, node] - acc[K+k], w_r, K) 
+                               for k in 1:K) - gain_p
+                    end
+                    
+                    # Update best split if better
+                    if g > g_best
+                        g_best, b_best, f_best = g, Int32(b), Int32(f)
+                    end
+                end
+            end
+            
+            gains[n_idx], bins[n_idx], feats[n_idx] = g_best, b_best, f_best
         end
-        
-        gains[n_idx], bins[n_idx], feats[n_idx] = g_best, b_best, f_best
     end
 end
 
