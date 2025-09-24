@@ -451,26 +451,33 @@ function update_hist_gpu!(
         sums_temp = similar(nodes_sum_gpu, 1, 1)
     end
     
-    # Clear hist only for the nodes being built; copy node ids to CPU to avoid scalar device indexing
+    # Clear hist only for the nodes being built; batch clear using the min..max node range when dense
     if n_active > 0
         anodes_cpu = Array(view(active_nodes, 1:n_active))
-        for node in anodes_cpu
-            if node > 0
-                @views h∇[:, :, :, node] .= zero(eltype(h∇))
+        # filter positive nodes
+        pos_nodes = filter(>(0), anodes_cpu)
+        if !isempty(pos_nodes)
+            mn = minimum(pos_nodes)
+            mx = maximum(pos_nodes)
+            if mx - mn + 1 == length(pos_nodes)
+                @views h∇[:, :, :, mn:mx] .= zero(eltype(h∇))
+            else
+                @inbounds for node in pos_nodes
+                    @views h∇[:, :, :, node] .= zero(eltype(h∇))
+                end
             end
         end
-        KernelAbstractions.synchronize(backend)
     end
     
     n_feats = length(js)
-    chunk_size = 64
-    n_obs_chunks = cld(length(is), chunk_size)
+    # adaptive tiling by problem size to balance occupancy vs launch overhead
+    nobs = length(is)
+    chunk_size = nobs >= 1_000_000 ? 512 : 128
+    n_obs_chunks = cld(nobs, chunk_size)
     num_threads = n_feats * n_obs_chunks
     
     hist_kernel_f! = hist_kernel!(backend)
-    workgroup_size = min(256, max(64, num_threads))
-    hist_kernel_f!(h∇, ∇, x_bin, nidx, js, is, K, chunk_size; ndrange = num_threads, workgroupsize = workgroup_size)
-    KernelAbstractions.synchronize(backend)
+    hist_kernel_f!(h∇, ∇, x_bin, nidx, js, is, K, chunk_size; ndrange = num_threads, workgroupsize = 256)
     
     find_split! = find_best_split_from_hist_kernel!(backend)
     find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js, feattypes, monotone_constraints,
