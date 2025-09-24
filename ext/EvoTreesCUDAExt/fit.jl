@@ -202,18 +202,20 @@ function grow_tree!(
             push!(leaf_map[leaf_id], is_cpu[i])
         end
         
+        # copy all node sums once to CPU for faster leaf processing
+        nodes_sum_cpu = Array(cache.nodes_sum_gpu)
         for n in leaf_nodes
-            node_sum_cpu = Array(view(cache.nodes_sum_gpu, :, n))
+            node_sum_cpu_view = view(nodes_sum_cpu, :, n)
             if L <: EvoTrees.Quantile
                 node_is = get(leaf_map, n, UInt32[])
                 if !isempty(node_is)
-                    EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_cpu, L, params, ∇_cpu, node_is)
+                    EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_cpu_view, L, params, ∇_cpu, node_is)
                 else
                     # fallback: no samples reached this leaf for this bag; use MAE-style scalar to avoid empty quantile
-                    EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_cpu, EvoTrees.MAE, params)
+                    EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_cpu_view, EvoTrees.MAE, params)
                 end
             else
-                EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_cpu, L, params)
+                EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_cpu_view, L, params)
             end
         end
 
