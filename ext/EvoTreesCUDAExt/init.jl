@@ -126,6 +126,7 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, ::Type{<:EvoTrees.GPU}, d
     subtract_nodes_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level)
     build_count = KernelAbstractions.zeros(backend, Int32, 1)
     subtract_count = KernelAbstractions.zeros(backend, Int32, 1)
+    sums_temp_gpu = KernelAbstractions.zeros(backend, Float32, 2*K+1, max_nodes_level)
 
     cache = CacheGPU(
         Dict(:nrounds => 0),
@@ -172,7 +173,8 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, ::Type{<:EvoTrees.GPU}, d
         build_nodes_gpu,
         subtract_nodes_gpu,
         build_count,
-        subtract_count
+        subtract_count,
+        sums_temp_gpu
     )
     
     return m, cache

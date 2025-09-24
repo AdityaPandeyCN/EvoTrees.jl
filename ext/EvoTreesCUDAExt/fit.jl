@@ -90,7 +90,7 @@ function grow_tree!(
             cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
             ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
             1, view(cache.anodes_gpu, 1:1), cache.nodes_sum_gpu, params,
-            cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K, loss_id, Float32(params.L2)
+            cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K, loss_id, Float32(params.L2), view(cache.sums_temp_gpu, 1:(2*cache.K+1), 1:1)
         )
     end
 
@@ -138,7 +138,7 @@ function grow_tree!(
                     cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
                     ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
                     depth, view(cache.build_nodes_gpu, 1:build_count_val), cache.nodes_sum_gpu, params,
-                    cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K, loss_id, Float32(params.L2)
+                    cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K, loss_id, Float32(params.L2), view(cache.sums_temp_gpu, 1:(2*cache.K+1), 1:max(build_count_val,1))
                 )
             end
             
@@ -169,10 +169,6 @@ function grow_tree!(
         n_active = n_active_val
         if n_active > 0
             copyto!(view(cache.anodes_gpu, 1:n_active), view(cache.n_next_gpu, 1:n_active))
-            # sort for stable sibling pairing
-            anodes_cpu = Array(view(cache.anodes_gpu, 1:n_active))
-            sort!(anodes_cpu)
-            copyto!(view(cache.anodes_gpu, 1:n_active), anodes_cpu)
         end
 
         if depth < params.max_depth && n_active > 0
