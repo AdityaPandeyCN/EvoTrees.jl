@@ -475,7 +475,7 @@ function update_hist_gpu!(
     find_split! = find_best_split_from_hist_kernel!(backend)
     find_split!(gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js, feattypes, monotone_constraints,
                 eltype(gains)(params.lambda), L2, eltype(gains)(params.min_weight), K, loss_id, sums_temp;
-                ndrange = max(n_active, 1), workgroupsize = min(256, max(64, n_active)))
+                ndrange = max(n_active, 1), workgroupsize = 256)
     KernelAbstractions.synchronize(backend)
 end
 
