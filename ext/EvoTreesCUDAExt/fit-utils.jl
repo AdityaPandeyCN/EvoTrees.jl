@@ -451,13 +451,16 @@ function update_hist_gpu!(
         sums_temp = similar(nodes_sum_gpu, 1, 1)
     end
     
-    # Clear hist only for the nodes being built using a GPU broadcast (fast contiguous fill)
-    for idx in 1:max(n_active, 1)
-        node = active_nodes[idx]
-        node > 0 || break
-        view(h∇, :, :, :, node) .= zero(eltype(h∇))
+    # Clear hist only for the nodes being built; copy node ids to CPU to avoid scalar device indexing
+    if n_active > 0
+        anodes_cpu = Array(view(active_nodes, 1:n_active))
+        for node in anodes_cpu
+            if node > 0
+                @views h∇[:, :, :, node] .= zero(eltype(h∇))
+            end
+        end
+        KernelAbstractions.synchronize(backend)
     end
-    KernelAbstractions.synchronize(backend)
     
     n_feats = length(js)
     chunk_size = 64
