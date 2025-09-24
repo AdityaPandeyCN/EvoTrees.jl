@@ -99,6 +99,9 @@ function grow_tree!(
     for depth in 1:params.max_depth
         !iszero(n_active) || break
         
+        # reset next-active counter for this depth
+        view(cache.n_next_active_gpu, 1:1) .= 0
+        
         n_nodes_level = 2^(depth - 1)
         active_nodes_full = view(cache.anodes_gpu, 1:n_nodes_level)
         
@@ -161,9 +164,15 @@ function grow_tree!(
         )
         KernelAbstractions.synchronize(backend)
         
-        n_active = min(2 * n_active, 2^depth)
+        # set next active count from device and copy node IDs
+        n_active_val = Array(cache.n_next_active_gpu)[1]
+        n_active = n_active_val
         if n_active > 0
             copyto!(view(cache.anodes_gpu, 1:n_active), view(cache.n_next_gpu, 1:n_active))
+            # sort for stable sibling pairing
+            anodes_cpu = Array(view(cache.anodes_gpu, 1:n_active))
+            sort!(anodes_cpu)
+            copyto!(view(cache.anodes_gpu, 1:n_active), anodes_cpu)
         end
 
         if depth < params.max_depth && n_active > 0
