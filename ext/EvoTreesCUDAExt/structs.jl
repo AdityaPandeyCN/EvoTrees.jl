@@ -35,7 +35,6 @@ struct CacheGPU
     tree_gain_gpu::CuVector{Float64}
     tree_pred_gpu::CuMatrix{Float32}
     nodes_sum_gpu::CuArray{Float32,2}
-    nodes_gain_gpu::CuVector{Float32}
     anodes_gpu::CuVector{Int32}
     n_next_gpu::CuVector{Int32}
     n_next_active_gpu::CuVector{Int32}

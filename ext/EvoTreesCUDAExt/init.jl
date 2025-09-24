@@ -22,6 +22,7 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, ::Type{<:EvoTrees.GPU}, d
     elseif L == EvoTrees.MLogLoss
         if eltype(y_train) <: EvoTrees.CategoricalValue
             target_levels = EvoTrees.CategoricalArrays.levels(y_train)
+            target_isordered = EvoTrees.isordered(y_train)
             y = UInt32.(EvoTrees.CategoricalArrays.levelcode.(y_train))
         elseif eltype(y_train) <: Integer || eltype(y_train) <: Bool || eltype(y_train) <: String || eltype(y_train) <: Char
             target_levels = sort(unique(y_train))
@@ -84,7 +85,7 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, ::Type{<:EvoTrees.GPU}, d
         :nrounds => 0,
         :feature_names => fnames,
         :target_levels => target_levels,
-        :target_isordered => false,
+        :target_isordered => target_isordered,
         :edges => edges,
         :featbins => featbins,
         :feattypes => feattypes,
@@ -114,7 +115,6 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, ::Type{<:EvoTrees.GPU}, d
     tree_pred_gpu = KernelAbstractions.zeros(backend, Float32, K, max_tree_nodes)
     max_nodes_total = 2^(params.max_depth + 1)
     nodes_sum_gpu = KernelAbstractions.zeros(backend, Float32, 2*K+1, max_nodes_total)
-    nodes_gain_gpu = KernelAbstractions.zeros(backend, Float32, 2^(params.max_depth + 1))
     anodes_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level)
     n_next_gpu = KernelAbstractions.zeros(backend, Int32, max_nodes_level * 2)
     n_next_active_gpu = KernelAbstractions.zeros(backend, Int32, 1)
@@ -162,7 +162,6 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, ::Type{<:EvoTrees.GPU}, d
         tree_gain_gpu,
         tree_pred_gpu,
         nodes_sum_gpu,
-        nodes_gain_gpu,
         anodes_gpu,
         n_next_gpu,
         n_next_active_gpu,
