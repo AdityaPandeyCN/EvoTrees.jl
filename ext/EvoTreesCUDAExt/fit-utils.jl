@@ -466,9 +466,9 @@ end
 end
 
 function update_hist_gpu!(
-    h∇, gains, bins, feats, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
-    feattypes, monotone_constraints, K, loss_id::Int32, L2::eltype(gains), sums_temp=nothing
-)
+    h∇, gains::AbstractVector{T}, bins::AbstractVector{Int32}, feats::AbstractVector{Int32}, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
+    feattypes, monotone_constraints, K, loss_id::Int32, L2::T, sums_temp=nothing
+) where {T}
     backend = KernelAbstractions.get_backend(h∇)
     n_active = length(active_nodes)
     
