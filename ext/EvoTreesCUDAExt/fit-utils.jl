@@ -79,33 +79,6 @@ end
     end
 end
 
-# Clear histogram entries for a given set of nodes, preserving other nodes (e.g. parents)
-@kernel function clear_hist_nodes_kernel!(h∇, @Const(nodes))
-    gidx = @index(Global)
-
-    n_k = size(h∇, 1)
-    n_b = size(h∇, 2)
-    n_j = size(h∇, 3)
-    n_elements_per_node = n_k * n_b * n_j
-
-    node_idx = (gidx - 1) ÷ n_elements_per_node + 1
-    
-    if node_idx <= length(nodes)
-        remainder = (gidx - 1) % n_elements_per_node
-        j = remainder ÷ (n_k * n_b) + 1
-        
-        remainder = remainder % (n_k * n_b)
-        b = remainder ÷ n_k + 1
-        
-        k = remainder % n_k + 1
-        
-        @inbounds node = nodes[node_idx]
-        if node > 0
-            @inbounds h∇[k, b, j, node] = zero(eltype(h∇))
-        end
-    end
-end
-
 @kernel function find_best_split_from_hist_kernel!(
     gains::AbstractVector{T},
     bins::AbstractVector{Int32},
@@ -478,15 +451,13 @@ function update_hist_gpu!(
         sums_temp = similar(nodes_sum_gpu, 1, 1)
     end
     
-    # Clear hist only for active nodes to preserve parent hist for subtraction
-    if n_active > 0
-        n_k = size(h∇, 1)
-        n_b = size(h∇, 2)
-        n_j = size(h∇, 3)
-        ndr = n_active * n_k * n_b * n_j
-        clear_hist_nodes_kernel!(backend)(h∇, active_nodes; ndrange=ndr, workgroupsize=min(256, max(64, n_active)))
-        KernelAbstractions.synchronize(backend)
+    # Clear hist only for the nodes being built using a GPU broadcast (fast contiguous fill)
+    for idx in 1:max(n_active, 1)
+        node = active_nodes[idx]
+        node > 0 || break
+        view(h∇, :, :, :, node) .= zero(eltype(h∇))
     end
+    KernelAbstractions.synchronize(backend)
     
     n_feats = length(js)
     chunk_size = 64
