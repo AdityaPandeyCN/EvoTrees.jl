@@ -24,10 +24,6 @@ function grow_otree!(
     cache::CacheGPU,
     is::CuVector
 ) where {L,K}
-    # Note: Oblivious tree (symmetric tree) growth on GPU is not yet implemented due to
-    # scheduling and histogram sharing complexities across levels. The standard binary
-    # tree growth is used as a fallback to keep GPU parity with CPU until a dedicated
-    # oblivious implementation is added.
     @warn "Oblivious tree GPU implementation not yet available, using standard tree" maxlog=1
     grow_tree!(tree, params, cache, is)
 end
@@ -47,13 +43,14 @@ function grow_tree!(
         ∇_gpu[2, :] .= 1.0f0
     end
 
+    # Clear cache arrays
     cache.tree_split_gpu .= false
     cache.tree_cond_bin_gpu .= 0
     cache.tree_feat_gpu .= 0
     cache.tree_gain_gpu .= 0
     cache.tree_pred_gpu .= 0
     cache.nodes_sum_gpu .= 0
-        cache.anodes_gpu .= 0
+    cache.anodes_gpu .= 0
     cache.n_next_gpu .= 0
     cache.n_next_active_gpu .= 0
     cache.best_gain_gpu .= 0
@@ -61,10 +58,8 @@ function grow_tree!(
     cache.best_feat_gpu .= 0
     
     cache.nidx .= 1
-    
     view(cache.anodes_gpu, 1:1) .= 1
 
-    # map loss type to small integer id for GPU kernels
     loss_id::Int32 = if L <: EvoTrees.GradientRegression
         Int32(1)
     elseif L <: EvoTrees.MLE2P
@@ -81,7 +76,6 @@ function grow_tree!(
         Int32(1)
     end
 
-    # If max_depth == 1, no split will be applied (mirror CPU behavior). Avoid building histograms.
     if params.max_depth == 1
         reduce_root_sums_kernel!(backend)(cache.nodes_sum_gpu, ∇_gpu, is; ndrange=length(is), workgroupsize=256)
         KernelAbstractions.synchronize(backend)
@@ -99,7 +93,6 @@ function grow_tree!(
     for depth in 1:params.max_depth
         !iszero(n_active) || break
         
-        # reset next-active counter for this depth
         view(cache.n_next_active_gpu, 1:1) .= 0
         
         n_nodes_level = 2^(depth - 1)
@@ -160,11 +153,10 @@ function grow_tree!(
             cache.h∇,
             active_nodes_full,
             depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), Float32(params.L2), cache.K;
-            ndrange = n_active, workgroupsize=256
+            ndrange = max(n_active, 1), workgroupsize = 256
         )
         KernelAbstractions.synchronize(backend)
         
-        # set next active count from device and copy node IDs
         n_active_val = Array(cache.n_next_active_gpu)[1]
         n_active = n_active_val
         if n_active > 0
@@ -187,7 +179,7 @@ function grow_tree!(
 
     leaf_nodes = findall(!, tree.split)
 
-        if L <: Union{EvoTrees.MAE, EvoTrees.Quantile}
+    if L <: Union{EvoTrees.MAE, EvoTrees.Quantile}
         nidx_cpu = Array(cache.nidx)
         is_cpu = Array(is)
         ∇_cpu = Array(cache.∇)
@@ -202,7 +194,6 @@ function grow_tree!(
             push!(leaf_map[leaf_id], is_cpu[i])
         end
         
-        # copy all node sums once to CPU for faster leaf processing
         nodes_sum_cpu = Array(cache.nodes_sum_gpu)
         for n in leaf_nodes
             node_sum_cpu_view = view(nodes_sum_cpu, :, n)
@@ -211,14 +202,12 @@ function grow_tree!(
                 if !isempty(node_is)
                     EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_cpu_view, L, params, ∇_cpu, node_is)
                 else
-                    # fallback: no samples reached this leaf for this bag; use MAE-style scalar to avoid empty quantile
                     EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_cpu_view, EvoTrees.MAE, params)
                 end
             else
                 EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_cpu_view, L, params)
             end
         end
-
     else
         nodes_sum_cpu = Array(cache.nodes_sum_gpu)
         for n in leaf_nodes
@@ -240,7 +229,6 @@ end
     depth, max_depth, lambda, gamma, L2,
     K_val
 )
-    # Apply chosen splits, update children sums, gains and leaf predictions on device.
     n_idx = @index(Global)
     node = active_nodes[n_idx]
 
@@ -295,7 +283,6 @@ end
         idx_base = Atomix.@atomic n_next_active[1] += 2
         n_next[idx_base - 1] = child_l
         n_next[idx_base] = child_r
-
     else
         if K_val == 1
             g = nodes_sum[1, node]
