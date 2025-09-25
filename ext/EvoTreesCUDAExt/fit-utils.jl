@@ -1,6 +1,7 @@
 using KernelAbstractions
 using Atomix
 
+# Keep all original kernels unchanged
 @kernel function update_nodes_idx_kernel!(
     nidx::AbstractVector{T},
     @Const(is),
@@ -79,6 +80,7 @@ end
     end
 end
 
+# Keep the original find_best_split_from_hist_kernel! unchanged (it's long but works)
 @kernel function find_best_split_from_hist_kernel!(
     gains::AbstractVector{T},
     bins::AbstractVector{Int32},
@@ -390,6 +392,28 @@ end
     end
 end
 
+# MAJOR BOTTLENECK FIX: Add GPU kernel for clearing histograms
+@kernel function clear_hist_kernel!(h∇, @Const(active_nodes), n_active)
+    idx = @index(Global, Linear)
+    
+    n_elements = size(h∇, 1) * size(h∇, 2) * size(h∇, 3)
+    total = n_elements * n_active
+    
+    if idx <= total
+        node_idx = (idx - 1) ÷ n_elements + 1
+        element_idx = (idx - 1) % n_elements
+        
+        @inbounds node = active_nodes[node_idx]
+        if node > 0
+            k = element_idx % size(h∇, 1) + 1
+            b = (element_idx ÷ size(h∇, 1)) % size(h∇, 2) + 1
+            j = element_idx ÷ (size(h∇, 1) * size(h∇, 2)) + 1
+            h∇[k, b, j, node] = zero(eltype(h∇))
+        end
+    end
+end
+
+# MAIN CHANGE: Fix the CPU-GPU sync bottleneck in update_hist_gpu!
 function update_hist_gpu!(
     h∇, gains::AbstractVector{T}, bins::AbstractVector{Int32}, feats::AbstractVector{Int32}, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
     feattypes, monotone_constraints, K, loss_id::Int32, L2::T, sums_temp=nothing
@@ -403,14 +427,13 @@ function update_hist_gpu!(
         sums_temp = similar(nodes_sum_gpu, 1, 1)
     end
     
-    # Clear hist only for the nodes being built
+    # BOTTLENECK FIX: Use GPU kernel instead of CPU loop
     if n_active > 0
-        anodes_cpu = Array(view(active_nodes, 1:n_active))
-        for node in anodes_cpu
-            if node > 0
-                @views h∇[:, :, :, node] .= zero(eltype(h∇))
-            end
-        end
+        clear_hist_kernel!(backend)(
+            h∇, active_nodes, n_active;
+            ndrange = n_active * size(h∇, 1) * size(h∇, 2) * size(h∇, 3),
+            workgroupsize = 256
+        )
         KernelAbstractions.synchronize(backend)
     end
     
