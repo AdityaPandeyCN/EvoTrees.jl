@@ -4,7 +4,7 @@ function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache::CacheGPU, params::
     for _ in 1:params.bagging_size
         is = EvoTrees.subsample(cache.is_in, cache.is_out, cache.mask, params.rowsample, params.rng)
         
-        # OPTIMIZATION 1: Keep feature sampling on GPU if possible
+        # Sample features on CPU, then copy indices to GPU
         js_cpu = Vector{eltype(cache.js)}(undef, length(cache.js))
         EvoTrees.sample!(params.rng, cache.js_, js_cpu, replace=false, ordered=true)
         copyto!(cache.js, js_cpu)
@@ -101,7 +101,7 @@ function grow_tree!(
 
     n_active = params.max_depth == 1 ? 0 : 1
     
-    # OPTIMIZATION 2: Pre-allocate CPU buffer for counts to avoid repeated allocations
+    # Preallocate small CPU buffer for reading build/subtract counters
     count_buffer = zeros(Int32, 2)  # For build_count and subtract_count
 
     for depth in 1:params.max_depth
@@ -137,7 +137,7 @@ function grow_tree!(
             )
             KernelAbstractions.synchronize(backend)
             
-            # OPTIMIZATION 3: Single CPU transfer for both counts
+            # Read both counters with one host transfer
             copyto!(count_buffer, 1, cache.build_count, 1, 1)
             copyto!(count_buffer, 2, cache.subtract_count, 1, 1)
             build_count_val = count_buffer[1]
@@ -176,7 +176,7 @@ function grow_tree!(
         )
         KernelAbstractions.synchronize(backend)
         
-        # OPTIMIZATION 4: Single value transfer
+        # Read next active count from device
         n_active_val = Array(cache.n_next_active_gpu)[1]
         n_active = n_active_val
         if n_active > 0
@@ -200,7 +200,7 @@ function grow_tree!(
 
     leaf_nodes = findall(!, tree.split)
 
-    # OPTIMIZATION 5: Batch CPU transfers for MAE/Quantile
+    # Batch CPU transfers for MAE/Quantile
     if L <: Union{EvoTrees.MAE, EvoTrees.Quantile}
         # Batch all CPU transfers together
         cpu_data = (
@@ -244,7 +244,7 @@ function grow_tree!(
     return nothing
 end
 
-# Optimized histogram update function
+# Histogram update using device-side clear and kernels
 function update_hist_gpu_optimized!(
     h∇, gains::AbstractVector{T}, bins::AbstractVector{Int32}, feats::AbstractVector{Int32}, 
     ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
@@ -287,7 +287,7 @@ function update_hist_gpu_optimized!(
     KernelAbstractions.synchronize(backend)
 end
 
-# Keep apply_splits_kernel unchanged as it works fine
+# Apply splits and write children/leaf predictions
 @kernel function apply_splits_kernel!(
     tree_split, tree_cond_bin, tree_feat, tree_gain, tree_pred,
     nodes_sum,

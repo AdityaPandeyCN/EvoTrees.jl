@@ -1,7 +1,7 @@
 using KernelAbstractions
 using Atomix
 
-# Keep all original kernels unchanged
+# Kernels used by the GPU training path
 @kernel function update_nodes_idx_kernel!(
     nidx::AbstractVector{T},
     @Const(is),
@@ -80,7 +80,7 @@ end
     end
 end
 
-# Keep the original find_best_split_from_hist_kernel! unchanged (it's long but works)
+# Kernel computing best split from histograms
 @kernel function find_best_split_from_hist_kernel!(
     gains::AbstractVector{T},
     bins::AbstractVector{Int32},
@@ -343,6 +343,8 @@ end
     end
 end
 
+# Split active nodes into two lists: odd-indexed nodes go to build (full recompute),
+# even-indexed nodes go to subtract (reuse parent - sibling)
 @kernel function separate_nodes_kernel!(
     build_nodes, build_count,
     subtract_nodes, subtract_count,
@@ -392,7 +394,7 @@ end
     end
 end
 
-# MAJOR BOTTLENECK FIX: Add GPU kernel for clearing histograms
+# Kernel to clear per-node histograms on device
 @kernel function clear_hist_kernel!(h∇, @Const(active_nodes), n_active)
     idx = @index(Global, Linear)
     
@@ -413,7 +415,7 @@ end
     end
 end
 
-# MAIN CHANGE: Fix the CPU-GPU sync bottleneck in update_hist_gpu!
+# Build histograms and find best splits
 function update_hist_gpu!(
     h∇, gains::AbstractVector{T}, bins::AbstractVector{Int32}, feats::AbstractVector{Int32}, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
     feattypes, monotone_constraints, K, loss_id::Int32, L2::T, sums_temp=nothing
