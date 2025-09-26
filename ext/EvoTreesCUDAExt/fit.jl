@@ -29,31 +29,6 @@ function grow_otree!(
     grow_tree!(tree, params, cache, is)
 end
 
-# Add GPU kernel for clearing histograms
-@kernel function clear_hist_kernel!(h∇, @Const(nodes_to_clear), n_nodes)
-    idx = @index(Global, Linear)
-    
-    n_k = size(h∇, 1)
-    n_b = size(h∇, 2) 
-    n_j = size(h∇, 3)
-    total_elements = n_k * n_b * n_j * n_nodes
-    
-    if idx <= total_elements
-        node_offset = (idx - 1) ÷ (n_k * n_b * n_j)
-        node = nodes_to_clear[node_offset + 1]
-        
-        if node > 0
-            element_in_node = (idx - 1) % (n_k * n_b * n_j)
-            j = element_in_node ÷ (n_k * n_b) + 1
-            remainder = element_in_node % (n_k * n_b)
-            b = remainder ÷ n_k + 1
-            k = remainder % n_k + 1
-            
-            @inbounds h∇[k, b, j, node] = zero(eltype(h∇))
-        end
-    end
-end
-
 # Add kernel to check active count without CPU transfer
 @kernel function count_active_kernel!(count, @Const(values), threshold)
     idx = @index(Global, Linear)
@@ -404,5 +379,4 @@ end
     end
 end
 
-EvoTrees.device_array_type(::Type{EvoTrees.GPU}) = CuArray
 
