@@ -129,7 +129,7 @@ end
             
             # Parent gain depends on loss
             gain_p = zero(T)
-            if @static L <: EvoTrees.GradientRegression
+            if L <: EvoTrees.GradientRegression
                 if K == 1
                     g_p = nodes_sum[1, node]
                     h_p = nodes_sum[2, node]
@@ -145,7 +145,7 @@ end
                         gain_p += g_p^2 / denom_p / 2
                     end
                 end
-            elseif @static L <: EvoTrees.MLE2P
+            elseif L <: EvoTrees.MLE2P
                 g1 = nodes_sum[1, node]
                 g2 = nodes_sum[2, node]
                 h1 = nodes_sum[3, node]
@@ -155,7 +155,7 @@ end
                 denom1 = denom1 < eps ? eps : denom1
                 denom2 = denom2 < eps ? eps : denom2
                 gain_p = (g1^2 / denom1 + g2^2 / denom2) / 2
-            elseif @static L == EvoTrees.MLogLoss
+            elseif L == EvoTrees.MLogLoss
                 for k in 1:K
                     gk = nodes_sum[k, node]
                     hk = nodes_sum[K+k, node]
@@ -163,9 +163,9 @@ end
                     denom = denom < eps ? eps : denom
                     gain_p += gk^2 / denom / 2
                 end
-            elseif @static (L == EvoTrees.MAE || L == EvoTrees.Quantile)
+            elseif (L == EvoTrees.MAE || L == EvoTrees.Quantile)
                 gain_p = zero(T)
-            elseif @static L <: EvoTrees.Cred
+            elseif L <: EvoTrees.Cred
                 μp = nodes_sum[1, node] / w_p
                 VHM = μp^2
                 EVPV = nodes_sum[2, node] / w_p - VHM
@@ -211,7 +211,7 @@ end
                         (w_l < min_weight || w_r < min_weight) && continue
                         
                         g_val = zero(T)
-                        if @static L <: EvoTrees.GradientRegression
+                        if L <: EvoTrees.GradientRegression
                             g_l = acc1
                             h_l = acc2
                             g_r = nodes_sum[1, node] - g_l
@@ -229,7 +229,7 @@ end
                                     continue
                                 end
                             end
-                        elseif @static (L == EvoTrees.MAE || L == EvoTrees.Quantile)
+                        elseif (L == EvoTrees.MAE || L == EvoTrees.Quantile)
                             μp = nodes_sum[1, node] / w_p
                             μl = acc1 / w_l
                             μr = (nodes_sum[1, node] - acc1) / w_r
@@ -238,7 +238,7 @@ end
                             d_l = d_l < eps ? eps : d_l
                             d_r = d_r < eps ? eps : d_r
                             g_val = abs(μl - μp) * w_l / d_l + abs(μr - μp) * w_r / d_r
-                        elseif @static L <: EvoTrees.Cred
+                        elseif L <: EvoTrees.Cred
                             μp = nodes_sum[1, node] / w_p
                             VHM_p = μp^2
                             EVPV_p = nodes_sum[2, node] / w_p - VHM_p
@@ -273,7 +273,9 @@ end
                         w_r = w_p - w_l
                         (w_l < min_weight || w_r < min_weight) && continue
                         
-                        if constraint != 0 && !(@static L == EvoTrees.MLogLoss)
+                        if L == EvoTrees.MLogLoss
+                            # no monotone constraint check for softmax
+                        elseif constraint != 0
                             g_l1 = sums_temp[1, n_idx]
                             h_l1 = sums_temp[K+1, n_idx]
                             g_r1 = nodes_sum[1, node] - g_l1
