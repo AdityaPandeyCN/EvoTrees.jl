@@ -240,11 +240,10 @@ end
                             d_r = d_r < eps ? eps : d_r
                             g_val = abs(μl - μp) * w_l / d_l + abs(μr - μp) * w_r / d_r
                         elseif L == EvoTrees.Quantile
-                            # Quantile: acc2 has raw differences, acc1 has weighted gradients
-                            # Use acc2 for calculating means
-                            μp = nodes_sum[2, node] / w_p
-                            μl = acc2 / w_l
-                            μr = (nodes_sum[2, node] - acc2) / w_r
+                            # Quantile: mirror CPU get_gain by using ∑1 accumulators (weighted gradients)
+                            μp = nodes_sum[1, node] / w_p
+                            μl = acc1 / w_l
+                            μr = (nodes_sum[1, node] - acc1) / w_r
                             d_l = 1 + lambda + L2 / w_l
                             d_r = 1 + lambda + L2 / w_r
                             d_l = d_l < eps ? eps : d_l
