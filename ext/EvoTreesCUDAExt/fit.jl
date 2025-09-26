@@ -49,9 +49,11 @@ function grow_tree!(
     backend = KernelAbstractions.get_backend(cache.x_bin)
 
     ∇_gpu = cache.∇
-    if L <: Union{EvoTrees.MAE, EvoTrees.Quantile}
+    if L <: EvoTrees.MAE
         ∇_gpu = copy(cache.∇)
         ∇_gpu[2, :] .= 1.0f0
+    elseif L <: EvoTrees.Quantile
+        ∇_gpu = cache.∇
     end
 
     # Clear cache arrays - keep on GPU
