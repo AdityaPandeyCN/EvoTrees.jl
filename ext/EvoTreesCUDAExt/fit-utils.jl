@@ -81,7 +81,7 @@ end
 end
 
 # Kernel computing best split from histograms
-# Loss-specific logic now uses type-based dispatch via `L`, mirroring CPU get_gain dispatch.
+# Loss-specific logic uses type-based dispatch.
 @kernel function find_best_split_from_hist_kernel!(
     ::Type{L},
     gains::AbstractVector{T},
@@ -229,10 +229,22 @@ end
                                     continue
                                 end
                             end
-                        elseif (L == EvoTrees.MAE || L == EvoTrees.Quantile)
+                        elseif L == EvoTrees.MAE
+                            # MAE uses accumulated residuals (in acc1)
                             μp = nodes_sum[1, node] / w_p
                             μl = acc1 / w_l
                             μr = (nodes_sum[1, node] - acc1) / w_r
+                            d_l = 1 + lambda + L2 / w_l
+                            d_r = 1 + lambda + L2 / w_r
+                            d_l = d_l < eps ? eps : d_l
+                            d_r = d_r < eps ? eps : d_r
+                            g_val = abs(μl - μp) * w_l / d_l + abs(μr - μp) * w_r / d_r
+                        elseif L == EvoTrees.Quantile
+                            # Quantile: acc2 has raw differences, acc1 has weighted gradients
+                            # Use acc2 for calculating means
+                            μp = nodes_sum[2, node] / w_p
+                            μl = acc2 / w_l
+                            μr = (nodes_sum[2, node] - acc2) / w_r
                             d_l = 1 + lambda + L2 / w_l
                             d_r = 1 + lambda + L2 / w_r
                             d_l = d_l < eps ? eps : d_l
