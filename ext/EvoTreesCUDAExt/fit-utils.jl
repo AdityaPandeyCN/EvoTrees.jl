@@ -129,7 +129,7 @@ end
             
             # Parent gain depends on loss
             gain_p = zero(T)
-            if L <: EvoTrees.GradientRegression
+            @static if L <: EvoTrees.GradientRegression
                 if K == 1
                     g_p = nodes_sum[1, node]
                     h_p = nodes_sum[2, node]
@@ -211,7 +211,7 @@ end
                         (w_l < min_weight || w_r < min_weight) && continue
                         
                         g_val = zero(T)
-                        if L <: EvoTrees.GradientRegression
+                        @static if L <: EvoTrees.GradientRegression
                             g_l = acc1
                             h_l = acc2
                             g_r = nodes_sum[1, node] - g_l
@@ -418,7 +418,7 @@ function update_hist_gpu!(
     end
     
     n_feats = length(js)
-    chunk_size = 128
+    chunk_size = 64
     n_obs_chunks = cld(length(is), chunk_size)
     num_threads = n_feats * n_obs_chunks
     
