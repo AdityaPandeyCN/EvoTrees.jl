@@ -194,7 +194,8 @@ end
                     end
                 end
                 
-                for b in 1:(nbins - 1)
+                b_max = is_numeric ? (nbins - 1) : nbins
+                for b in 1:b_max
                     # Update accumulator
                     if K == 1
                         if is_numeric
@@ -442,3 +443,4 @@ function update_hist_gpu!(
                 eltype(gains)(params.lambda), L2, eltype(gains)(params.min_weight), K, sums_temp;
                 ndrange = max(n_active, 1), workgroupsize = min(256, max(64, n_active)))
 end
+
