@@ -200,7 +200,7 @@ function grow_tree!(
             end
         end
 
-        apply_splits_kernel!(backend)(
+        gpu_apply_splits_kernel!(backend)(
             cache.tree_split_gpu, cache.tree_cond_bin_gpu, cache.tree_feat_gpu, cache.tree_gain_gpu, cache.tree_pred_gpu,
             cache.nodes_sum_gpu,
             cache.n_next_gpu, cache.n_next_active_gpu,
@@ -208,7 +208,7 @@ function grow_tree!(
             cache.h∇,
             active_nodes_full,
             cache.feattypes_gpu,
-            depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), Float32(params.gamma), Float32(params.L2), cache.K;
+            depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), Float32(params.L2), cache.K;
             ndrange = max(n_active, 1), workgroupsize = 256
         )
         KernelAbstractions.synchronize(backend)
@@ -335,106 +335,5 @@ function update_hist_gpu_optimized!(
                 eltype(gains)(params.lambda), L2, eltype(gains)(params.min_weight), K, sums_temp;
                 ndrange = max(n_active, 1), workgroupsize = min(256, max(64, n_active)))
     KernelAbstractions.synchronize(backend)
-end
-
-# Apply splits and write children/leaf predictions
-@kernel function apply_splits_kernel!(
-    tree_split, tree_cond_bin, tree_feat, tree_gain, tree_pred,
-    nodes_sum,
-    n_next, n_next_active,
-    best_gain, best_bin, best_feat,
-    h∇,
-    active_nodes,
-    feattypes,
-    depth, max_depth, lambda, gamma, L2,
-    K_val
-)
-    n_idx = @index(Global)
-    
-    if n_idx <= length(active_nodes)
-        node = active_nodes[n_idx]
-
-        eps = eltype(tree_pred)(1e-8)
-
-        @inbounds if depth < max_depth && best_gain[n_idx] > gamma
-            tree_split[node] = true
-            tree_cond_bin[node] = best_bin[n_idx]
-            tree_feat[node] = best_feat[n_idx]
-            tree_gain[node] = best_gain[n_idx]
-
-            child_l, child_r = node << 1, (node << 1) + 1
-            feat, bin = Int(tree_feat[node]), Int(tree_cond_bin[node])
-            is_numeric = feattypes[feat]
-
-            @inbounds for kk in 1:(2*K_val+1)
-                sum_val = zero(eltype(nodes_sum))
-                if is_numeric
-                    for b in 1:bin
-                        sum_val += h∇[kk, b, feat, node]
-                    end
-                else
-                    sum_val = h∇[kk, bin, feat, node]
-                end
-                nodes_sum[kk, child_l] = sum_val
-                nodes_sum[kk, child_r] = nodes_sum[kk, node] - sum_val
-            end
-            
-            w_l = nodes_sum[2*K_val+1, child_l]
-            w_r = nodes_sum[2*K_val+1, child_r]
-            
-            if K_val == 1
-                g_l = nodes_sum[1, child_l]
-                h_l = nodes_sum[2, child_l]
-                d_l = max(eps, h_l + lambda * w_l + L2)
-                
-                g_r = nodes_sum[1, child_r]
-                h_r = nodes_sum[2, child_r]
-                d_r = max(eps, h_r + lambda * w_r + L2)
-                
-                tree_pred[1, child_l] = -g_l / d_l
-                tree_pred[1, child_r] = -g_r / d_r
-            else
-                @inbounds for k in 1:K_val
-                    g_l = nodes_sum[k, child_l]
-                    h_l = nodes_sum[K_val+k, child_l]
-                    d_l = max(eps, h_l + lambda * w_l + L2)
-                    tree_pred[k, child_l] = -g_l / d_l
-                    
-                    g_r = nodes_sum[k, child_r]
-                    h_r = nodes_sum[K_val+k, child_r]
-                    d_r = max(eps, h_r + lambda * w_r + L2)
-                    tree_pred[k, child_r] = -g_r / d_r
-                end
-            end
-            
-            idx_base = Atomix.@atomic n_next_active[1] += 2
-            n_next[idx_base - 1] = child_l
-            n_next[idx_base] = child_r
-        else
-            if K_val == 1
-                g = nodes_sum[1, node]
-                h = nodes_sum[2, node]
-                w = nodes_sum[2*K_val+1, node]
-                d = h + lambda * w + L2
-                if w <= zero(w) || d <= zero(h)
-                    tree_pred[1, node] = 0.0f0
-                else
-                    tree_pred[1, node] = -g / max(eps, d)
-                end
-            else
-                w = nodes_sum[2*K_val+1, node]
-                @inbounds for k in 1:K_val
-                    g = nodes_sum[k, node]
-                    h = nodes_sum[K_val+k, node]
-                    d = h + lambda * w + L2
-                    if w <= zero(w) || d <= zero(h)
-                        tree_pred[k, node] = 0.0f0
-                    else
-                        tree_pred[k, node] = -g / max(eps, d)
-                    end
-                end
-            end
-        end
-    end
 end
 
