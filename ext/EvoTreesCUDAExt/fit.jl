@@ -80,6 +80,10 @@ function grow_tree!(
     
     # Preallocate small CPU buffer for reading build/subtract counters
     count_buffer = zeros(Int32, 2)  # For build_count and subtract_count
+    
+    # Statistics tracking for subtraction usage
+    total_build = 0
+    total_subtract = 0
 
     for depth in 1:params.max_depth
         !iszero(n_active) || break
@@ -120,8 +124,14 @@ function grow_tree!(
             build_count_val = count_buffer[1]
             subtract_count_val = count_buffer[2]
             
+            # Print statement: Show split between build and subtract
+            println("📊 Depth $depth: n_active=$n_active | BUILD=$build_count_val | SUBTRACT=$subtract_count_val")
+            total_build += build_count_val
+            total_subtract += subtract_count_val
+            
             # Build histograms for "build" nodes
             if build_count_val > 0
+                println("  ⚙️  Building histograms for $build_count_val nodes (scanning $(length(is)) observations)")
                 update_hist_gpu_optimized!(
                     L,
                     cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
@@ -131,10 +141,17 @@ function grow_tree!(
                     view(cache.sums_temp_gpu, 1:(2*cache.K+1), 1:max(build_count_val,1)),
                     backend
                 )
+                println("  ✅ Build complete")
             end
             
             # Subtract histograms for "subtract" nodes
             if subtract_count_val > 0
+                println("  ➖ Subtracting histograms for $subtract_count_val nodes (parent - sibling)")
+                
+                # Debug: Check histogram values before subtraction
+                subtract_nodes_cpu = Array(view(cache.subtract_nodes_gpu, 1:subtract_count_val))
+                println("    Subtract nodes: $subtract_nodes_cpu")
+                
                 subtract_hist_kernel!(backend)(
                     cache.h∇, view(cache.subtract_nodes_gpu, 1:subtract_count_val);
                     ndrange = subtract_count_val * size(cache.h∇, 1) * size(cache.h∇, 2) * size(cache.h∇, 3),
@@ -142,7 +159,10 @@ function grow_tree!(
                 )
                 KernelAbstractions.synchronize(backend)
                 
+                println("  ✅ Subtraction complete")
+                
                 # FIX: Find best splits for subtract nodes
+                println("  🔍 Finding best splits for $subtract_count_val subtract nodes")
                 find_split! = find_best_split_from_hist_kernel!(backend)
                 find_split!(
                     L, 
@@ -164,6 +184,19 @@ function grow_tree!(
                     workgroupsize = min(256, max(64, subtract_count_val))
                 )
                 KernelAbstractions.synchronize(backend)
+                println("  ✅ Split finding complete for subtract nodes")
+            end
+            
+            # Verify all nodes have splits computed
+            gains_cpu = Array(view(cache.best_gain_gpu, 1:n_active))
+            bins_cpu = Array(view(cache.best_bin_gpu, 1:n_active))
+            feats_cpu = Array(view(cache.best_feat_gpu, 1:n_active))
+            
+            println("  🔎 Verification: gains range [$(minimum(gains_cpu)), $(maximum(gains_cpu))]")
+            n_zero_gain = count(==(0.0f0), gains_cpu)
+            n_neg_inf = count(==(-Inf32), gains_cpu)
+            if n_zero_gain > 0 && n_neg_inf == 0
+                println("  ⚠️  Warning: $n_zero_gain nodes have zero gain (may be legitimate)")
             end
         end
 
@@ -175,7 +208,7 @@ function grow_tree!(
             cache.h∇,
             active_nodes_full,
             cache.feattypes_gpu,
-            depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), Float32(params.L2), cache.K;
+            depth, params.max_depth, Float32(params.lambda), Float32(params.gamma), Float32(params.gamma), Float32(params.L2), cache.K;
             ndrange = max(n_active, 1), workgroupsize = 256
         )
         KernelAbstractions.synchronize(backend)
@@ -193,6 +226,18 @@ function grow_tree!(
                 ndrange = length(is), workgroupsize=256
             )
             KernelAbstractions.synchronize(backend)
+        end
+    end
+
+    # Print final statistics
+    total_nodes = total_build + total_subtract
+    if total_nodes > 0
+        subtract_pct = round(100 * total_subtract / total_nodes, digits=1)
+        println("🎯 SUBTRACTION STATS: Total nodes=$total_nodes | Build=$total_build | Subtract=$total_subtract ($subtract_pct%)")
+        if total_subtract > 0
+            println("✅ Histogram subtraction IS WORKING - saved $(total_subtract) histogram builds!")
+        else
+            println("⚠️  WARNING: No histogram subtraction occurred - may indicate a bug")
         end
     end
 
