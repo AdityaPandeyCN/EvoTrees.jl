@@ -333,57 +333,6 @@ end
     end
 end
 
-# Split active nodes into two lists: odd-indexed nodes go to build (full recompute),
-# even-indexed nodes go to subtract (reuse parent - sibling)
-@kernel function separate_nodes_kernel!(
-    build_nodes, build_count,
-    subtract_nodes, subtract_count,
-    @Const(active_nodes)
-)
-    idx = @index(Global)
-    @inbounds node = active_nodes[idx]
-    
-    if node > 0
-        if idx % 2 == 1
-            pos = Atomix.@atomic build_count[1] += 1
-            build_nodes[pos] = node
-        else
-            pos = Atomix.@atomic subtract_count[1] += 1
-            subtract_nodes[pos] = node
-        end
-    end
-end
-
-@kernel function subtract_hist_kernel!(h∇, @Const(subtract_nodes))
-    gidx = @index(Global)
-
-    n_k = size(h∇, 1)
-    n_b = size(h∇, 2)
-    n_j = size(h∇, 3)
-    n_elements_per_node = n_k * n_b * n_j
-
-    node_idx = (gidx - 1) ÷ n_elements_per_node + 1
-    
-    if node_idx <= length(subtract_nodes)
-        remainder = (gidx - 1) % n_elements_per_node
-        j = remainder ÷ (n_k * n_b) + 1
-        
-        remainder = remainder % (n_k * n_b)
-        b = remainder ÷ n_k + 1
-        
-        k = remainder % n_k + 1
-        
-        @inbounds node = subtract_nodes[node_idx]
-        
-        if node > 0
-            parent = node >> 1
-            sibling = node ⊻ 1
-            
-            @inbounds h∇[k, b, j, node] = h∇[k, b, j, parent] - h∇[k, b, j, sibling]
-        end
-    end
-end
-
 # Kernel to clear per-node histograms on device
 @kernel function clear_hist_kernel!(h∇, @Const(active_nodes), n_active)
     idx = @index(Global, Linear)
@@ -408,10 +357,10 @@ end
 # Build histograms and find best splits
 function update_hist_gpu!(
     ::Type{L},
-    h∇, gains::AbstractVector{T}, bins::AbstractVector{Int32}, feats::AbstractVector{Int32}, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
-    feattypes, monotone_constraints, K, L2::T, sums_temp=nothing
+    h∇, gains::AbstractVector{T}, bins::AbstractVector{Int32}, feats::AbstractVector{Int32}, 
+    ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
+    feattypes, monotone_constraints, K, L2::T, sums_temp, backend
 ) where {T,L}
-    backend = KernelAbstractions.get_backend(h∇)
     n_active = length(active_nodes)
     
     if sums_temp === nothing && K > 1
@@ -420,15 +369,17 @@ function update_hist_gpu!(
         sums_temp = similar(nodes_sum_gpu, 1, 1)
     end
     
-    # Use GPU kernel instead of CPU loop
+    # Clear histograms on GPU
     if n_active > 0
         clear_hist_kernel!(backend)(
             h∇, active_nodes, n_active;
             ndrange = n_active * size(h∇, 1) * size(h∇, 2) * size(h∇, 3),
             workgroupsize = 256
         )
+        KernelAbstractions.synchronize(backend)
     end
     
+    # Build histograms for all active nodes
     n_feats = length(js)
     chunk_size = 64
     n_obs_chunks = cld(length(is), chunk_size)
@@ -437,10 +388,13 @@ function update_hist_gpu!(
     hist_kernel_f! = hist_kernel!(backend)
     workgroup_size = min(256, max(64, num_threads))
     hist_kernel_f!(h∇, ∇, x_bin, nidx, js, is, K, chunk_size; ndrange = num_threads, workgroupsize = workgroup_size)
+    KernelAbstractions.synchronize(backend)
     
+    # Find best splits for all active nodes
     find_split! = find_best_split_from_hist_kernel!(backend)
     find_split!(L, gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js, feattypes, monotone_constraints,
                 eltype(gains)(params.lambda), L2, eltype(gains)(params.min_weight), K, sums_temp;
                 ndrange = max(n_active, 1), workgroupsize = min(256, max(64, n_active)))
+    KernelAbstractions.synchronize(backend)
 end
 

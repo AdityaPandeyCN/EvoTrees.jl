@@ -29,16 +29,6 @@ function grow_otree!(
     grow_tree!(tree, params, cache, is)
 end
 
-# Add kernel to check active count without CPU transfer
-@kernel function count_active_kernel!(count, @Const(values), threshold)
-    idx = @index(Global, Linear)
-    if idx <= length(values)
-        @inbounds if values[idx] > threshold
-            Atomix.@atomic count[1] += Int32(1)
-        end
-    end
-end
-
 function grow_tree!(
     tree::EvoTrees.Tree{L,K},
     params::EvoTrees.EvoTypes,
@@ -82,14 +72,12 @@ function grow_tree!(
             cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
             ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
             1, view(cache.anodes_gpu, 1:1), cache.nodes_sum_gpu, params,
-            cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K, Float32(params.L2), view(cache.sums_temp_gpu, 1:(2*cache.K+1), 1:1)
+            cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K, Float32(params.L2), 
+            view(cache.sums_temp_gpu, 1:(2*cache.K+1), 1:1)
         )
     end
 
     n_active = params.max_depth == 1 ? 0 : 1
-    
-    # Preallocate small CPU buffer for reading build/subtract counters
-    count_buffer = zeros(Int32, 2)  # For build_count and subtract_count
 
     for depth in 1:params.max_depth
         !iszero(n_active) || break
@@ -107,49 +95,20 @@ function grow_tree!(
         view_bin  = view(cache.best_bin_gpu, 1:n_nodes_level)
         view_feat = view(cache.best_feat_gpu, 1:n_nodes_level)
         
+        # Build histograms for all active nodes
         if depth > 1
             active_nodes_act = view(active_nodes_full, 1:n_active)
-
-            cache.build_nodes_gpu .= 0
-            cache.subtract_nodes_gpu .= 0
-            cache.build_count .= 0
-            cache.subtract_count .= 0
-
-            separate_kernel! = separate_nodes_kernel!(backend)
-            separate_kernel!(
-                cache.build_nodes_gpu, cache.build_count,
-                cache.subtract_nodes_gpu, cache.subtract_count,
-                active_nodes_act;
-                ndrange=n_active, workgroupsize=256
+            
+            update_hist_gpu!(
+                L,
+                cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
+                ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
+                depth, active_nodes_act, cache.nodes_sum_gpu, params,
+                cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K, 
+                Float32(params.L2), 
+                view(cache.sums_temp_gpu, 1:(2*cache.K+1), 1:n_active),
+                backend
             )
-            KernelAbstractions.synchronize(backend)
-            
-            # Read both counters with one host transfer
-            copyto!(count_buffer, 1, cache.build_count, 1, 1)
-            copyto!(count_buffer, 2, cache.subtract_count, 1, 1)
-            build_count_val = count_buffer[1]
-            subtract_count_val = count_buffer[2]
-            
-            if build_count_val > 0
-                update_hist_gpu_optimized!(
-                    L,
-                    cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
-                    ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
-                    depth, view(cache.build_nodes_gpu, 1:build_count_val), cache.nodes_sum_gpu, params,
-                    cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K, Float32(params.L2), 
-                    view(cache.sums_temp_gpu, 1:(2*cache.K+1), 1:max(build_count_val,1)),
-                    backend
-                )
-            end
-            
-            if subtract_count_val > 0
-                subtract_hist_kernel!(backend)(
-                    cache.h∇, view(cache.subtract_nodes_gpu, 1:subtract_count_val);
-                    ndrange = subtract_count_val * size(cache.h∇, 1) * size(cache.h∇, 2) * size(cache.h∇, 3),
-                    workgroupsize=256
-                )
-                KernelAbstractions.synchronize(backend)
-            end
         end
 
         apply_splits_kernel!(backend)(
@@ -231,50 +190,6 @@ function grow_tree!(
     end
     
     return nothing
-end
-
-# Histogram update using device-side clear and kernels
-function update_hist_gpu_optimized!(
-    ::Type{L},
-    h∇, gains::AbstractVector{T}, bins::AbstractVector{Int32}, feats::AbstractVector{Int32}, 
-    ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
-    feattypes, monotone_constraints, K, L2::T, sums_temp, backend
-) where {T,L}
-    
-    n_active = length(active_nodes)
-    
-    if sums_temp === nothing && K > 1
-        sums_temp = similar(nodes_sum_gpu, 2*K+1, max(n_active, 1))
-    elseif K == 1
-        sums_temp = similar(nodes_sum_gpu, 1, 1)
-    end
-    
-    # OPTIMIZATION 6: Use GPU kernel to clear histogram instead of CPU loop
-    if n_active > 0
-        clear_hist_kernel!(backend)(
-            h∇, active_nodes, n_active;
-            ndrange = n_active * size(h∇, 1) * size(h∇, 2) * size(h∇, 3),
-            workgroupsize = 256
-        )
-        KernelAbstractions.synchronize(backend)
-    end
-    
-    # Continue with existing histogram building logic
-    n_feats = length(js)
-    chunk_size = 64
-    n_obs_chunks = cld(length(is), chunk_size)
-    num_threads = n_feats * n_obs_chunks
-    
-    hist_kernel_f! = hist_kernel!(backend)
-    workgroup_size = min(256, max(64, num_threads))
-    hist_kernel_f!(h∇, ∇, x_bin, nidx, js, is, K, chunk_size; ndrange = num_threads, workgroupsize = workgroup_size)
-    KernelAbstractions.synchronize(backend)
-    
-    find_split! = find_best_split_from_hist_kernel!(backend)
-    find_split!(L, gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js, feattypes, monotone_constraints,
-                eltype(gains)(params.lambda), L2, eltype(gains)(params.min_weight), K, sums_temp;
-                ndrange = max(n_active, 1), workgroupsize = min(256, max(64, n_active)))
-    KernelAbstractions.synchronize(backend)
 end
 
 # Apply splits and write children/leaf predictions
@@ -374,3 +289,4 @@ end
         end
     end
 end
+
