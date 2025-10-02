@@ -7,6 +7,9 @@ using EvoTrees
 using BenchmarkTools
 using Random: seed!
 
+# Enable lightweight GPU profiling prints by default for this benchmark
+ENV["EVOTREES_GPU_PROFILE"] = get(ENV, "EVOTREES_GPU_PROFILE", "1")
+
 run_evo = true
 run_xgb = false
 nrounds = 200
