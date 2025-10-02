@@ -363,6 +363,11 @@ function update_hist_gpu!(
 ) where {T,L}
     n_active = length(active_nodes)
     
+    t_global_start = time_ns()
+    t_clear_ns = 0
+    t_hist_ns = 0
+    t_split_ns = 0
+    
     if sums_temp === nothing && K > 1
         sums_temp = similar(nodes_sum_gpu, 2*K+1, max(n_active, 1))
     elseif K == 1
@@ -371,12 +376,14 @@ function update_hist_gpu!(
     
     # Clear histograms on GPU
     if n_active > 0
+        t0 = time_ns()
         clear_hist_kernel!(backend)(
             h∇, active_nodes, n_active;
             ndrange = n_active * size(h∇, 1) * size(h∇, 2) * size(h∇, 3),
             workgroupsize = 256
         )
         KernelAbstractions.synchronize(backend)
+        t_clear_ns = time_ns() - t0
     end
     
     # Build histograms for all active nodes
@@ -387,14 +394,26 @@ function update_hist_gpu!(
     
     hist_kernel_f! = hist_kernel!(backend)
     workgroup_size = min(256, max(64, num_threads))
+    t0 = time_ns()
     hist_kernel_f!(h∇, ∇, x_bin, nidx, js, is, K, chunk_size; ndrange = num_threads, workgroupsize = workgroup_size)
     KernelAbstractions.synchronize(backend)
+    t_hist_ns = time_ns() - t0
     
     # Find best splits for all active nodes
     find_split! = find_best_split_from_hist_kernel!(backend)
+    t0 = time_ns()
     find_split!(L, gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js, feattypes, monotone_constraints,
                 eltype(gains)(params.lambda), L2, eltype(gains)(params.min_weight), K, sums_temp;
                 ndrange = max(n_active, 1), workgroupsize = min(256, max(64, n_active)))
     KernelAbstractions.synchronize(backend)
+    t_split_ns = time_ns() - t0
+    
+    if get(ENV, "EVOTREES_GPU_PROFILE", "0") == "1"
+        total_ms = round((time_ns() - t_global_start) / 1e6; digits=3)
+        clear_ms = round(t_clear_ns / 1e6; digits=3)
+        hist_ms = round(t_hist_ns / 1e6; digits=3)
+        split_ms = round(t_split_ns / 1e6; digits=3)
+        println("GPU update_hist: obs=$(length(is)) feats=$(length(js)) active=$(n_active) chunk=$(chunk_size) threads=$(num_threads) clear=$(clear_ms)ms hist=$(hist_ms)ms split=$(split_ms)ms total=$(total_ms)ms")
+    end
 end
 
