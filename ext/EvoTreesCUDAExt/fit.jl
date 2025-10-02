@@ -74,6 +74,7 @@ function grow_tree!(
             1, view(cache.anodes_gpu, 1:1), cache.nodes_sum_gpu, params,
             cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K, Float32(params.L2), 
             view(cache.sums_temp_gpu, 1:(2*cache.K+1), 1:1),
+            cache.target_mask_buf,
             backend
         )
     end
@@ -108,6 +109,7 @@ function grow_tree!(
                 cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K, 
                 Float32(params.L2), 
                 view(cache.sums_temp_gpu, 1:(2*cache.K+1), 1:n_active),
+                cache.target_mask_buf,
                 backend
             )
         end

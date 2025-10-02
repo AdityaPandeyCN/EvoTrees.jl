@@ -36,7 +36,8 @@ end
     @Const(js),
     @Const(is),
     K::Int,
-    chunk_size::Int
+    chunk_size::Int,
+    @Const(target_mask)
 ) where {T}
     gidx = @index(Global, Linear)
     
@@ -56,7 +57,7 @@ end
         @inbounds for obs_idx in start_idx:end_idx
             obs = is[obs_idx]
             node = nidx[obs]
-            if node > 0 && node <= size(h∇, 4)
+            if node > 0 && node <= size(h∇, 4) && target_mask[node] != 0
                 bin = x_bin[obs, feat]
                 if bin > 0 && bin <= size(h∇, 2)
                     for k in 1:(2*K+1)
@@ -354,12 +355,30 @@ end
     end
 end
 
+# New kernels to manage active node mask
+@kernel function clear_mask_kernel!(mask)
+    idx = @index(Global)
+    if idx <= length(mask)
+        mask[idx] = 0
+    end
+end
+
+@kernel function mark_active_nodes_kernel!(mask, @Const(active_nodes))
+    idx = @index(Global)
+    if idx <= length(active_nodes)
+        node = active_nodes[idx]
+        if node > 0 && node <= length(mask)
+            mask[node] = 1
+        end
+    end
+end
+
 # Build histograms and find best splits
 function update_hist_gpu!(
     ::Type{L},
     h∇, gains::AbstractVector{T}, bins::AbstractVector{Int32}, feats::AbstractVector{Int32}, 
     ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
-    feattypes, monotone_constraints, K, L2::T, sums_temp, backend
+    feattypes, monotone_constraints, K, L2::T, sums_temp, target_mask, backend
 ) where {T,L}
     n_active = length(active_nodes)
     
@@ -373,6 +392,12 @@ function update_hist_gpu!(
     elseif K == 1
         sums_temp = similar(nodes_sum_gpu, 1, 1)
     end
+    
+    # Prepare active node mask on device
+    clear_mask_kernel!(backend)(target_mask; ndrange = length(target_mask), workgroupsize = 256)
+    KernelAbstractions.synchronize(backend)
+    mark_active_nodes_kernel!(backend)(target_mask, active_nodes; ndrange = n_active, workgroupsize = 256)
+    KernelAbstractions.synchronize(backend)
     
     # Clear histograms on GPU
     if n_active > 0
@@ -395,7 +420,7 @@ function update_hist_gpu!(
     hist_kernel_f! = hist_kernel!(backend)
     workgroup_size = min(256, max(64, num_threads))
     t0 = time_ns()
-    hist_kernel_f!(h∇, ∇, x_bin, nidx, js, is, K, chunk_size; ndrange = num_threads, workgroupsize = workgroup_size)
+    hist_kernel_f!(h∇, ∇, x_bin, nidx, js, is, K, chunk_size, target_mask; ndrange = num_threads, workgroupsize = workgroup_size)
     KernelAbstractions.synchronize(backend)
     t_hist_ns = time_ns() - t0
     
@@ -408,12 +433,5 @@ function update_hist_gpu!(
     KernelAbstractions.synchronize(backend)
     t_split_ns = time_ns() - t0
     
-    if get(ENV, "EVOTREES_GPU_PROFILE", "0") == "1"
-        total_ms = round((time_ns() - t_global_start) / 1e6; digits=3)
-        clear_ms = round(t_clear_ns / 1e6; digits=3)
-        hist_ms = round(t_hist_ns / 1e6; digits=3)
-        split_ms = round(t_split_ns / 1e6; digits=3)
-        println("GPU update_hist: obs=$(length(is)) feats=$(length(js)) active=$(n_active) chunk=$(chunk_size) threads=$(num_threads) clear=$(clear_ms)ms hist=$(hist_ms)ms split=$(split_ms)ms total=$(total_ms)ms")
-    end
 end
 
