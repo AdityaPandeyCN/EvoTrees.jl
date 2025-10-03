@@ -1,7 +1,9 @@
+# fit-utils.jl - SIMPLE FIX for large dataset performance
+
 using KernelAbstractions
 using Atomix
 
-# Kernels used by the GPU training path
+# EXISTING KERNELS - Keep as is
 @kernel function update_nodes_idx_kernel!(
     nidx::AbstractVector{T},
     @Const(is),
@@ -28,6 +30,7 @@ using Atomix
     end
 end
 
+# SIMPLIFIED histogram kernel - remove grid-stride loop overhead
 @kernel function hist_kernel!(
     h∇::AbstractArray{T,4},
     @Const(∇),
@@ -37,28 +40,26 @@ end
     @Const(is),
     K::Int,
     chunk_size::Int,
-    @Const(target_mask)
+    @Const(target_mask),
+    total_threads::Int,
+    @Const(active_nodes),
+    n_active::Int
 ) where {T}
     gidx = @index(Global, Linear)
-    
+
     n_feats = length(js)
     n_obs = length(is)
-    total_work_items = n_feats * cld(n_obs, chunk_size)
     
-    if gidx <= total_work_items
-        feat_idx = (gidx - 1) % n_feats + 1
-        obs_chunk = (gidx - 1) ÷ n_feats
+    # SIMPLE: Just process observations directly, no complex decomposition
+    @inbounds if gidx <= n_obs
+        obs = is[gidx]
+        node = nidx[obs]
         
-        feat = js[feat_idx]
-        
-        start_idx = obs_chunk * chunk_size + 1
-        end_idx = min(start_idx + (chunk_size - 1), n_obs)
-        
-        @inbounds for obs_idx in start_idx:end_idx
-            obs = is[obs_idx]
-            node = nidx[obs]
-            if node > 0 && node <= size(h∇, 4) && target_mask[node] != 0
+        if node > 0 && node <= size(h∇, 4) && target_mask[node] != 0
+            for feat_idx in 1:n_feats
+                feat = js[feat_idx]
                 bin = x_bin[obs, feat]
+                
                 if bin > 0 && bin <= size(h∇, 2)
                     for k in 1:(2*K+1)
                         grad = ∇[k, obs]
@@ -81,8 +82,7 @@ end
     end
 end
 
-# Kernel computing best split from histograms
-# Loss-specific logic uses type-based dispatch.
+# Keep existing find_best_split kernel unchanged
 @kernel function find_best_split_from_hist_kernel!(
     ::Type{L},
     gains::AbstractVector{T},
@@ -112,7 +112,6 @@ end
             nbins = size(h∇, 2)
             eps = T(1e-8)
             
-            # Initialize node sums from first feature
             if !isempty(js)
                 first_feat = js[1]
                 for k in 1:(2*K+1)
@@ -124,11 +123,9 @@ end
                 end
             end
             
-            # Pre-calculate parent components
             w_p = nodes_sum[2*K+1, node]
             λw_p = lambda * w_p
             
-            # Parent gain depends on loss
             gain_p = zero(T)
             if L <: EvoTrees.GradientRegression
                 if K == 1
@@ -184,7 +181,6 @@ end
                 is_numeric = feattypes[f]
                 constraint = monotone_constraints[f]
                 
-                # Initialize accumulators
                 if K == 1
                     acc1 = zero(T)
                     acc2 = zero(T)
@@ -197,7 +193,6 @@ end
                 
                 b_max = is_numeric ? (nbins - 1) : nbins
                 for b in 1:b_max
-                    # Update accumulator
                     if K == 1
                         if is_numeric
                             acc1 += h∇[1, b, f, node]
@@ -232,7 +227,6 @@ end
                                 end
                             end
                         elseif L == EvoTrees.MAE
-                            # MAE uses accumulated residuals 
                             μp = nodes_sum[1, node] / w_p
                             μl = acc1 / w_l
                             μr = (nodes_sum[1, node] - acc1) / w_r
@@ -242,7 +236,6 @@ end
                             d_r = d_r < eps ? eps : d_r
                             g_val = abs(μl - μp) * w_l / d_l + abs(μr - μp) * w_r / d_r
                         elseif L == EvoTrees.Quantile
-                            # Quantile
                             μp = nodes_sum[1, node] / w_p
                             μl = acc1 / w_l
                             μr = (nodes_sum[1, node] - acc1) / w_r
@@ -271,7 +264,7 @@ end
                             g_r = Zr * abs(nodes_sum[1, node] - acc1) / (1 + L2 / w_r)
                             g_val = g_l + g_r - Zp * abs(nodes_sum[1, node]) / (1 + L2 / w_p)
                         end
-                    else  # K > 1
+                    else
                         if is_numeric
                             for kk in 1:(2*K+1)
                                 sums_temp[kk, n_idx] += h∇[kk, b, f, node]
@@ -287,7 +280,6 @@ end
                         (w_l < min_weight || w_r < min_weight) && continue
                         
                         if L == EvoTrees.MLogLoss
-                            # no monotone constraint check for softmax
                         elseif constraint != 0
                             g_l1 = sums_temp[1, n_idx]
                             h_l1 = sums_temp[K+1, n_idx]
@@ -334,7 +326,6 @@ end
     end
 end
 
-# Kernel to clear per-node histograms on device
 @kernel function clear_hist_kernel!(h∇, @Const(active_nodes), n_active)
     idx = @index(Global, Linear)
     
@@ -355,7 +346,6 @@ end
     end
 end
 
-# New kernels to manage active node mask
 @kernel function clear_mask_kernel!(mask)
     idx = @index(Global)
     if idx <= length(mask)
@@ -373,7 +363,7 @@ end
     end
 end
 
-# Build histograms and find best splits
+# MAIN FIX: Simple, smart thread configuration
 function update_hist_gpu!(
     ::Type{L},
     h∇, gains::AbstractVector{T}, bins::AbstractVector{Int32}, feats::AbstractVector{Int32}, 
@@ -381,57 +371,43 @@ function update_hist_gpu!(
     feattypes, monotone_constraints, K, L2::T, sums_temp, target_mask, backend
 ) where {T,L}
     n_active = length(active_nodes)
-    
-    t_global_start = time_ns()
-    t_clear_ns = 0
-    t_hist_ns = 0
-    t_split_ns = 0
-    
+
     if sums_temp === nothing && K > 1
         sums_temp = similar(nodes_sum_gpu, 2*K+1, max(n_active, 1))
     elseif K == 1
         sums_temp = similar(nodes_sum_gpu, 1, 1)
     end
-    
-    # Prepare active node mask on device
+
     clear_mask_kernel!(backend)(target_mask; ndrange = length(target_mask), workgroupsize = 256)
     KernelAbstractions.synchronize(backend)
     mark_active_nodes_kernel!(backend)(target_mask, active_nodes; ndrange = n_active, workgroupsize = 256)
     KernelAbstractions.synchronize(backend)
-    
-    # Clear histograms on GPU
+
     if n_active > 0
-        t0 = time_ns()
         clear_hist_kernel!(backend)(
             h∇, active_nodes, n_active;
             ndrange = n_active * size(h∇, 1) * size(h∇, 2) * size(h∇, 3),
             workgroupsize = 256
         )
         KernelAbstractions.synchronize(backend)
-        t_clear_ns = time_ns() - t0
     end
-    
-    # Build histograms for all active nodes
-    n_feats = length(js)
-    chunk_size = 64
-    n_obs_chunks = cld(length(is), chunk_size)
-    num_threads = n_feats * n_obs_chunks
+
+    # SIMPLE FIX: Launch one thread per observation
+    # No grid-stride, no complex work decomposition
+    n_obs = length(is)
     
     hist_kernel_f! = hist_kernel!(backend)
-    workgroup_size = min(256, max(64, num_threads))
-    t0 = time_ns()
-    hist_kernel_f!(h∇, ∇, x_bin, nidx, js, is, K, chunk_size, target_mask; ndrange = num_threads, workgroupsize = workgroup_size)
+    hist_kernel_f!(
+        h∇, ∇, x_bin, nidx, js, is, K, 0, target_mask, n_obs, active_nodes, n_active; 
+        ndrange = n_obs,  # One thread per observation!
+        workgroupsize = 256
+    )
     KernelAbstractions.synchronize(backend)
-    t_hist_ns = time_ns() - t0
-    
-    # Find best splits for all active nodes
+
     find_split! = find_best_split_from_hist_kernel!(backend)
-    t0 = time_ns()
     find_split!(L, gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js, feattypes, monotone_constraints,
                 eltype(gains)(params.lambda), L2, eltype(gains)(params.min_weight), K, sums_temp;
                 ndrange = max(n_active, 1), workgroupsize = min(256, max(64, n_active)))
     KernelAbstractions.synchronize(backend)
-    t_split_ns = time_ns() - t0
-    
 end
 
