@@ -452,14 +452,7 @@ function update_hist_gpu!(
         workgroupsize = 256
     )
     KernelAbstractions.synchronize(backend)
-
-    find_split! = find_best_split_from_hist_kernel!(backend)
-    find_split!(
-        L, gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js, feattypes, monotone_constraints,
-        eltype(gains)(params.lambda), L2, eltype(gains)(params.min_weight), K, sums_temp;
-        ndrange = max(n_active, 1), 
-        workgroupsize = min(256, max(64, n_active))
-    )
-    KernelAbstractions.synchronize(backend)
+    
+    # REMOVED: find_best_split call - now done in fit.jl after subtraction
 end
 

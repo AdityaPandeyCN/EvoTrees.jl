@@ -69,6 +69,7 @@ function grow_tree!(
         )
         KernelAbstractions.synchronize(backend)
     else
+        # Build histogram for root node
         update_hist_gpu!(
             L, cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
             ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
@@ -77,6 +78,22 @@ function grow_tree!(
             Float32(params.L2), view(cache.sums_temp_gpu, 1:(2*cache.K+1), 1:1),
             cache.target_mask_buf, backend
         )
+        
+        # Find split for root node
+        find_split_root! = find_best_split_from_hist_kernel!(backend)
+        find_split_root!(
+            L, view(cache.best_gain_gpu, 1:1), 
+            view(cache.best_bin_gpu, 1:1), 
+            view(cache.best_feat_gpu, 1:1),
+            cache.h∇, cache.nodes_sum_gpu,
+            view(cache.anodes_gpu, 1:1),
+            cache.js, cache.feattypes_gpu, cache.monotone_constraints_gpu,
+            Float32(params.lambda), Float32(params.L2), Float32(params.min_weight),
+            cache.K, view(cache.sums_temp_gpu, 1:(2*cache.K+1), 1:1);
+            ndrange = 1, 
+            workgroupsize = 64
+        )
+        KernelAbstractions.synchronize(backend)
     end
 
     n_active = params.max_depth == 1 ? 0 : 1
@@ -96,8 +113,6 @@ function grow_tree!(
 
         # Build histograms (skip depth 1, already done)
         if depth > 1
-            # NEW: Use histogram subtraction optimization (50% less work)
-            
             # Initialize build/subtract tracking
             cache.build_nodes_gpu .= 0
             cache.subtract_nodes_gpu .= 0
@@ -141,21 +156,23 @@ function grow_tree!(
                     workgroupsize = 256
                 )
                 KernelAbstractions.synchronize(backend)
-                
-                # FIX: Find splits for subtract nodes (this was the bug!)
-                find_split_subtract! = find_best_split_from_hist_kernel!(backend)
-                find_split_subtract!(
-                    L, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,
-                    cache.h∇, cache.nodes_sum_gpu,
-                    view(cache.subtract_nodes_gpu, 1:subtract_count_val),
-                    cache.js, cache.feattypes_gpu, cache.monotone_constraints_gpu,
-                    Float32(params.lambda), Float32(params.L2), Float32(params.min_weight),
-                    cache.K, view(cache.sums_temp_gpu, 1:(2*cache.K+1), 1:max(subtract_count_val, 1));
-                    ndrange = max(subtract_count_val, 1),
-                    workgroupsize = min(256, max(64, subtract_count_val))
-                )
-                KernelAbstractions.synchronize(backend)
             end
+            
+            # Find splits for ALL active nodes ONCE (maintains correct indexing)
+            find_split_all! = find_best_split_from_hist_kernel!(backend)
+            find_split_all!(
+                L, view(cache.best_gain_gpu, 1:n_nodes), 
+                view(cache.best_bin_gpu, 1:n_nodes), 
+                view(cache.best_feat_gpu, 1:n_nodes),
+                cache.h∇, cache.nodes_sum_gpu,
+                view(active_nodes, 1:n_active), 
+                cache.js, cache.feattypes_gpu, cache.monotone_constraints_gpu,
+                Float32(params.lambda), Float32(params.L2), Float32(params.min_weight),
+                cache.K, view(cache.sums_temp_gpu, 1:(2*cache.K+1), 1:n_active);
+                ndrange = n_active, 
+                workgroupsize = min(256, max(64, n_active))
+            )
+            KernelAbstractions.synchronize(backend)
         end
 
         # Apply splits
