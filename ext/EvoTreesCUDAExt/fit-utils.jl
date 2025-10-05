@@ -1,4 +1,4 @@
-# fit-utils.jl - OPTIMIZED with feature-chunking for better atomic locality
+# fit-utils.jl - WITH HISTOGRAM SUBTRACTION OPTIMIZATION
 
 using KernelAbstractions
 using Atomix
@@ -29,7 +29,6 @@ using Atomix
     end
 end
 
-# OPTIMIZED: Feature-per-thread with chunking for better atomic locality
 @kernel function hist_kernel!(
     h∇::AbstractArray{T,4},
     @Const(∇),
@@ -49,16 +48,13 @@ end
     total_threads = n_feats * total_chunks
     
     if gidx <= total_threads
-        # Each thread handles ONE feature and ONE chunk of observations
         feat_idx = (gidx - 1) % n_feats + 1
         chunk_idx = (gidx - 1) ÷ n_feats
         feat = js[feat_idx]
         
-        # Calculate observation range for this chunk
         start_obs = chunk_idx * chunk_size + 1
         end_obs = min(start_obs + chunk_size - 1, n_obs)
         
-        # Process observations in this chunk for this feature
         @inbounds for obs_idx in start_obs:end_obs
             obs = is[obs_idx]
             node = nidx[obs]
@@ -73,6 +69,55 @@ end
                     end
                 end
             end
+        end
+    end
+end
+
+# NEW: Separate nodes into build and subtract lists
+@kernel function separate_nodes_kernel!(
+    build_nodes, build_count,
+    subtract_nodes, subtract_count,
+    @Const(active_nodes)
+)
+    idx = @index(Global)
+    @inbounds node = active_nodes[idx]
+    
+    if node > 0
+        if idx % 2 == 1  # Odd indices -> build (compute histogram)
+            pos = Atomix.@atomic build_count[1] += 1
+            build_nodes[pos] = node
+        else  # Even indices -> subtract (use parent - sibling)
+            pos = Atomix.@atomic subtract_count[1] += 1
+            subtract_nodes[pos] = node
+        end
+    end
+end
+
+# NEW: Compute histogram via subtraction: hist[child] = hist[parent] - hist[sibling]
+@kernel function subtract_hist_kernel!(h∇, @Const(subtract_nodes))
+    gidx = @index(Global)
+    
+    n_k = size(h∇, 1)
+    n_b = size(h∇, 2)
+    n_j = size(h∇, 3)
+    n_elements_per_node = n_k * n_b * n_j
+    
+    node_idx = (gidx - 1) ÷ n_elements_per_node + 1
+    
+    if node_idx <= length(subtract_nodes)
+        remainder = (gidx - 1) % n_elements_per_node
+        j = remainder ÷ (n_k * n_b) + 1
+        remainder = remainder % (n_k * n_b)
+        b = remainder ÷ n_k + 1
+        k = remainder % n_k + 1
+        
+        @inbounds node = subtract_nodes[node_idx]
+        
+        if node > 0
+            parent = node >> 1
+            sibling = node ⊻ 1
+            
+            @inbounds h∇[k, b, j, node] = h∇[k, b, j, parent] - h∇[k, b, j, sibling]
         end
     end
 end
@@ -396,7 +441,6 @@ function update_hist_gpu!(
         KernelAbstractions.synchronize(backend)
     end
 
-    # Feature-chunking optimization
     chunk_size = 64
     n_obs_chunks = cld(length(is), chunk_size)
     num_threads = length(js) * n_obs_chunks
