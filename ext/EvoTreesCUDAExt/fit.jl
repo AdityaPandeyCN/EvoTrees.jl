@@ -1,4 +1,3 @@
-# Grow EvoTree ensemble: compute gradients → grow trees → update predictions
 function EvoTrees.grow_evotree!(evotree::EvoTree{L,K}, cache::CacheGPU, params::EvoTrees.EvoTypes) where {L,K}
     EvoTrees.update_grads!(cache.∇, cache.pred, cache.y, L, params)
     
@@ -118,20 +117,6 @@ function grow_tree!(
         # At depth ≥ 2, parent histograms are available, so we use subtraction
         # Key insight: h∇[parent] = h∇[left_child] + h∇[right_child]
         # Therefore: h∇[larger_child] = h∇[parent] - h∇[smaller_child]
-        # 
-        # Example at depth 3:
-        #   active_nodes = [4, 5, 6, 7] (children of nodes 2 and 3)
-        #   Node 4 has 800 obs, Node 5 has 200 obs (siblings, parent=2)
-        #   Node 6 has 450 obs, Node 7 has 450 obs (siblings, parent=3)
-        #   
-        #   After separation:
-        #   - build_nodes = [5, 6 or 7] (smaller children)
-        #   - subtract_nodes = [4, 7 or 6] (larger children)
-        #   
-        #   Process:
-        #   1. Build histogram for node 5 (scan 200 obs)
-        #   2. Subtract: h∇[4] = h∇[2] - h∇[5] (no scan!)
-        #   Result: Process 200 obs instead of 1000 for this sibling pair!
         if depth >= 2
             # Clear tracking arrays
             cache.build_nodes_gpu .= 0

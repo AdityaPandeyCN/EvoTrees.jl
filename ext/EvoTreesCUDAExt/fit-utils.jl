@@ -1,6 +1,3 @@
-# fit-utils.jl - GPU kernels with histogram subtraction optimization
-# Key optimization: build histogram for smaller child, subtract from parent to get larger child (~50% speedup)
-
 using KernelAbstractions
 using Atomix
 
