@@ -111,20 +111,22 @@ function grow_tree!(
             view(cache.anodes_gpu, n_active+1:n_nodes) .= 0
         end
 
-        # Build histograms (skip depth 1, already done)
-        if depth > 1
+        # Build histograms (MODIFIED: start subtraction from depth 2)
+        if depth >= 2  # Changed from depth > 1
             # Initialize build/subtract tracking
             cache.build_nodes_gpu .= 0
             cache.subtract_nodes_gpu .= 0
             cache.build_count .= 0
             cache.subtract_count .= 0
             
-            # Separate nodes: odd indices -> build, even indices -> subtract
+            # Separate nodes: smaller -> build, larger -> subtract
             separate_kernel! = separate_nodes_kernel!(backend)
             separate_kernel!(
                 cache.build_nodes_gpu, cache.build_count,
                 cache.subtract_nodes_gpu, cache.subtract_count,
-                view(active_nodes, 1:n_active);
+                view(active_nodes, 1:n_active),
+                cache.nodes_sum_gpu,  # ADDED: pass nodes_sum for weight comparison
+                cache.K;              # ADDED: pass K value
                 ndrange = n_active,
                 workgroupsize = 256
             )
@@ -134,7 +136,7 @@ function grow_tree!(
             build_count_val = Array(cache.build_count)[1]
             subtract_count_val = Array(cache.subtract_count)[1]
             
-            # Build histograms only for build nodes (50% of nodes)
+            # Build histograms only for build nodes (~50% of nodes)
             if build_count_val > 0
                 update_hist_gpu!(
                     L, cache.h∇, cache.best_gain_gpu, cache.best_bin_gpu, cache.best_feat_gpu,

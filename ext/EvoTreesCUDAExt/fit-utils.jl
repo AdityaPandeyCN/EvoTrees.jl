@@ -73,27 +73,39 @@ end
     end
 end
 
-# NEW: Separate nodes into build and subtract lists
+# MODIFIED: Smart node separation - build smaller child, subtract larger
 @kernel function separate_nodes_kernel!(
     build_nodes, build_count,
     subtract_nodes, subtract_count,
-    @Const(active_nodes)
+    @Const(active_nodes),
+    @Const(nodes_sum_gpu),
+    K_val::Int
 )
     idx = @index(Global)
-    @inbounds node = active_nodes[idx]
-    
-    if node > 0
-        if idx % 2 == 1  # Odd indices -> build (compute histogram)
-            pos = Atomix.@atomic build_count[1] += 1
-            build_nodes[pos] = node
-        else  # Even indices -> subtract (use parent - sibling)
-            pos = Atomix.@atomic subtract_count[1] += 1
-            subtract_nodes[pos] = node
+    @inbounds if idx <= length(active_nodes)
+        node = active_nodes[idx]
+        
+        if node > 0
+            sibling = node ⊻ 1  # XOR to get sibling
+            
+            # Get observation counts (weight is at index 2*K+1)
+            w_node = nodes_sum_gpu[2*K_val+1, node]
+            w_sibling = nodes_sum_gpu[2*K_val+1, sibling]
+            
+            # Build histogram for smaller child only
+            # Use node index as tiebreaker to ensure only one builds
+            if w_node < w_sibling || (w_node == w_sibling && node < sibling)
+                pos = Atomix.@atomic build_count[1] += 1
+                build_nodes[pos] = node
+            else
+                pos = Atomix.@atomic subtract_count[1] += 1
+                subtract_nodes[pos] = node
+            end
         end
     end
 end
 
-# NEW: Compute histogram via subtraction: hist[child] = hist[parent] - hist[sibling]
+# Compute histogram via subtraction: hist[child] = hist[parent] - hist[sibling]
 @kernel function subtract_hist_kernel!(h∇, @Const(subtract_nodes))
     gidx = @index(Global)
     
@@ -452,7 +464,5 @@ function update_hist_gpu!(
         workgroupsize = 256
     )
     KernelAbstractions.synchronize(backend)
-    
-    # REMOVED: find_best_split call - now done in fit.jl after subtraction
 end
 
