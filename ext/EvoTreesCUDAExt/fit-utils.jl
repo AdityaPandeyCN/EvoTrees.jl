@@ -1,9 +1,8 @@
-# fit-utils.jl - SIMPLE FIX for large dataset performance
+# fit-utils.jl - OPTIMIZED with feature-chunking for better atomic locality
 
 using KernelAbstractions
 using Atomix
 
-# EXISTING KERNELS - Keep as is
 @kernel function update_nodes_idx_kernel!(
     nidx::AbstractVector{T},
     @Const(is),
@@ -30,7 +29,7 @@ using Atomix
     end
 end
 
-# SIMPLIFIED histogram kernel - remove grid-stride loop overhead
+# OPTIMIZED: Feature-per-thread with chunking for better atomic locality
 @kernel function hist_kernel!(
     h∇::AbstractArray{T,4},
     @Const(∇),
@@ -40,24 +39,31 @@ end
     @Const(is),
     K::Int,
     chunk_size::Int,
-    @Const(target_mask),
-    total_threads::Int,
-    @Const(active_nodes),
-    n_active::Int
+    @Const(target_mask)
 ) where {T}
     gidx = @index(Global, Linear)
-
+    
     n_feats = length(js)
     n_obs = length(is)
+    total_chunks = cld(n_obs, chunk_size)
+    total_threads = n_feats * total_chunks
     
-    # SIMPLE: Just process observations directly, no complex decomposition
-    @inbounds if gidx <= n_obs
-        obs = is[gidx]
-        node = nidx[obs]
+    if gidx <= total_threads
+        # Each thread handles ONE feature and ONE chunk of observations
+        feat_idx = (gidx - 1) % n_feats + 1
+        chunk_idx = (gidx - 1) ÷ n_feats
+        feat = js[feat_idx]
         
-        if node > 0 && node <= size(h∇, 4) && target_mask[node] != 0
-            for feat_idx in 1:n_feats
-                feat = js[feat_idx]
+        # Calculate observation range for this chunk
+        start_obs = chunk_idx * chunk_size + 1
+        end_obs = min(start_obs + chunk_size - 1, n_obs)
+        
+        # Process observations in this chunk for this feature
+        @inbounds for obs_idx in start_obs:end_obs
+            obs = is[obs_idx]
+            node = nidx[obs]
+            
+            if node > 0 && node <= size(h∇, 4) && target_mask[node] != 0
                 bin = x_bin[obs, feat]
                 
                 if bin > 0 && bin <= size(h∇, 2)
@@ -82,7 +88,6 @@ end
     end
 end
 
-# Keep existing find_best_split kernel unchanged
 @kernel function find_best_split_from_hist_kernel!(
     ::Type{L},
     gains::AbstractVector{T},
@@ -328,7 +333,6 @@ end
 
 @kernel function clear_hist_kernel!(h∇, @Const(active_nodes), n_active)
     idx = @index(Global, Linear)
-    
     n_elements = size(h∇, 1) * size(h∇, 2) * size(h∇, 3)
     total = n_elements * n_active
     
@@ -363,7 +367,6 @@ end
     end
 end
 
-# MAIN FIX: Simple, smart thread configuration
 function update_hist_gpu!(
     ::Type{L},
     h∇, gains::AbstractVector{T}, bins::AbstractVector{Int32}, feats::AbstractVector{Int32}, 
@@ -380,6 +383,7 @@ function update_hist_gpu!(
 
     clear_mask_kernel!(backend)(target_mask; ndrange = length(target_mask), workgroupsize = 256)
     KernelAbstractions.synchronize(backend)
+    
     mark_active_nodes_kernel!(backend)(target_mask, active_nodes; ndrange = n_active, workgroupsize = 256)
     KernelAbstractions.synchronize(backend)
 
@@ -392,22 +396,26 @@ function update_hist_gpu!(
         KernelAbstractions.synchronize(backend)
     end
 
-    # SIMPLE FIX: Launch one thread per observation
-    # No grid-stride, no complex work decomposition
-    n_obs = length(is)
-    
+    # Feature-chunking optimization
+    chunk_size = 64
+    n_obs_chunks = cld(length(is), chunk_size)
+    num_threads = length(js) * n_obs_chunks
+
     hist_kernel_f! = hist_kernel!(backend)
     hist_kernel_f!(
-        h∇, ∇, x_bin, nidx, js, is, K, 0, target_mask, n_obs, active_nodes, n_active; 
-        ndrange = n_obs,  # One thread per observation!
+        h∇, ∇, x_bin, nidx, js, is, K, chunk_size, target_mask;
+        ndrange = num_threads,
         workgroupsize = 256
     )
     KernelAbstractions.synchronize(backend)
 
     find_split! = find_best_split_from_hist_kernel!(backend)
-    find_split!(L, gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js, feattypes, monotone_constraints,
-                eltype(gains)(params.lambda), L2, eltype(gains)(params.min_weight), K, sums_temp;
-                ndrange = max(n_active, 1), workgroupsize = min(256, max(64, n_active)))
+    find_split!(
+        L, gains, bins, feats, h∇, nodes_sum_gpu, active_nodes, js, feattypes, monotone_constraints,
+        eltype(gains)(params.lambda), L2, eltype(gains)(params.min_weight), K, sums_temp;
+        ndrange = max(n_active, 1), 
+        workgroupsize = min(256, max(64, n_active))
+    )
     KernelAbstractions.synchronize(backend)
 end
 
