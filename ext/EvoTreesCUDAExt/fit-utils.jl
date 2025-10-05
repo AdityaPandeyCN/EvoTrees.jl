@@ -1,25 +1,28 @@
-# fit-utils.jl - WITH HISTOGRAM SUBTRACTION OPTIMIZATION
+# fit-utils.jl - GPU kernels with histogram subtraction optimization
+# Key optimization: build histogram for smaller child, subtract from parent to get larger child (~50% speedup)
 
 using KernelAbstractions
 using Atomix
 
+# Update observation-to-node assignments after splits
+# Left child = node*2, right child = node*2+1
 @kernel function update_nodes_idx_kernel!(
-    nidx::AbstractVector{T},
-    @Const(is),
-    @Const(x_bin),
-    @Const(cond_feats),
-    @Const(cond_bins),
-    @Const(feattypes),
+    nidx::AbstractVector{T},        # Node index for each observation (in/out)
+    @Const(is),                     # Observation indices to process
+    @Const(x_bin),                  # Binned feature values [n_obs, n_feats]
+    @Const(cond_feats),             # Split feature for each node
+    @Const(cond_bins),              # Split threshold for each node
+    @Const(feattypes),              # Feature types (true=numeric, false=categorical)
 ) where {T<:Unsigned}
     gidx = @index(Global)
     @inbounds if gidx <= length(is)
-        obs = is[gidx]
-        node = nidx[obs]
-        if node > 0
-            feat = cond_feats[node]
-            bin = cond_bins[node]
-            if bin == 0
-                nidx[obs] = zero(T)
+        obs = is[gidx]              # Get observation index
+        node = nidx[obs]            # Get current node for this observation
+        if node > 0                 # If observation is in an active node
+            feat = cond_feats[node] # Get split feature for this node
+            bin = cond_bins[node]   # Get split threshold
+            if bin == 0             # No split (leaf node)
+                nidx[obs] = zero(T) # Mark as inactive
             else
                 feattype = feattypes[feat]
                 is_left = feattype ? (x_bin[obs, feat] <= bin) : (x_bin[obs, feat] == bin)
@@ -29,16 +32,19 @@ using Atomix
     end
 end
 
+# Build gradient histograms by accumulating (gradient, hessian, weight) for each (feature, bin, node)
+# h∇[2K+1, n_bins, n_feats, n_nodes] stores: [g1..gK, h1..hK, weight]
+# Chunking reduces atomic contention
 @kernel function hist_kernel!(
-    h∇::AbstractArray{T,4},
-    @Const(∇),
-    @Const(x_bin),
-    @Const(nidx),
-    @Const(js),
-    @Const(is),
-    K::Int,
-    chunk_size::Int,
-    @Const(target_mask)
+    h∇::AbstractArray{T,4},         # Histogram [2K+1, n_bins, n_feats, n_nodes]
+    @Const(∇),                      # Gradients [2K+1, n_obs]
+    @Const(x_bin),                  # Binned features [n_obs, n_feats]
+    @Const(nidx),                   # Node index for each observation
+    @Const(js),                     # Feature indices to process
+    @Const(is),                     # Observation indices to process
+    K::Int,                         # Number of output dimensions
+    chunk_size::Int,                # Observations per thread (reduces contention)
+    @Const(target_mask)             # Mask indicating which nodes to build histograms for
 ) where {T}
     gidx = @index(Global, Linear)
     
@@ -73,31 +79,39 @@ end
     end
 end
 
-# MODIFIED: Smart node separation - build smaller child, subtract larger
+# KEY OPTIMIZATION: Separate sibling nodes into BUILD (smaller) vs SUBTRACT (larger) lists
+# Math: h∇[larger_child] = h∇[parent] - h∇[smaller_child] (no observation scan!)
+# Siblings identified by XOR: node ⊻ 1 (e.g., 4⊻1=5, 5⊻1=4)
 @kernel function separate_nodes_kernel!(
-    build_nodes, build_count,
-    subtract_nodes, subtract_count,
-    @Const(active_nodes),
-    @Const(nodes_sum_gpu),
-    K_val::Int
+    build_nodes, build_count,       # Output: nodes to build via observation scan
+    subtract_nodes, subtract_count, # Output: nodes to compute via subtraction
+    @Const(active_nodes),           # Input: all active child nodes at current depth
+    @Const(nodes_sum_gpu),          # Input: gradient sums [2K+1, n_nodes] - weight at index 2K+1
+    K_val::Int                      # Number of output dimensions
 )
     idx = @index(Global)
     @inbounds if idx <= length(active_nodes)
+        # Get node from active_nodes list (e.g., nodes 4,5,6,7 at depth 3)
         node = active_nodes[idx]
         
         if node > 0
-            sibling = node ⊻ 1  # XOR to get sibling
+            # Find sibling using XOR trick:
+            # Left child (even): 4⊻1=5, Right child (odd): 5⊻1=4
+            sibling = node ⊻ 1
             
-            # Get observation counts (weight is at index 2*K+1)
+            # Compare observation counts to decide which is smaller
+            # Weight stored at index 2*K+1 in nodes_sum_gpu
             w_node = nodes_sum_gpu[2*K_val+1, node]
             w_sibling = nodes_sum_gpu[2*K_val+1, sibling]
             
-            # Build histogram for smaller child only
-            # Use node index as tiebreaker to ensure only one builds
+            # Decision: build smaller, subtract larger
+            # Tiebreaker ensures only one sibling gets added to each list
             if w_node < w_sibling || (w_node == w_sibling && node < sibling)
+                # This node is smaller → BUILD its histogram
                 pos = Atomix.@atomic build_count[1] += 1
                 build_nodes[pos] = node
             else
+                # This node is larger → SUBTRACT from parent
                 pos = Atomix.@atomic subtract_count[1] += 1
                 subtract_nodes[pos] = node
             end
@@ -105,35 +119,51 @@ end
     end
 end
 
-# Compute histogram via subtraction: hist[child] = hist[parent] - hist[sibling]
-@kernel function subtract_hist_kernel!(h∇, @Const(subtract_nodes))
+# Compute histograms via subtraction: h∇[child] = h∇[parent] - h∇[sibling]
+# Much faster than observation scan: no memory access, no atomics, pure arithmetic
+@kernel function subtract_hist_kernel!(
+    h∇,                    # Histogram [2K+1, n_bins, n_feats, n_nodes] - modified in-place
+    @Const(subtract_nodes) # List of larger children to compute via subtraction
+)
     gidx = @index(Global)
     
-    n_k = size(h∇, 1)
-    n_b = size(h∇, 2)
-    n_j = size(h∇, 3)
+    # Decode histogram dimensions to parallelize across all elements
+    n_k = size(h∇, 1)  # 2K+1 gradient components
+    n_b = size(h∇, 2)  # Number of bins
+    n_j = size(h∇, 3)  # Number of features
     n_elements_per_node = n_k * n_b * n_j
     
+    # Which node from subtract_nodes list are we processing?
     node_idx = (gidx - 1) ÷ n_elements_per_node + 1
     
     if node_idx <= length(subtract_nodes)
+        # Decode which (feature, bin, gradient_component) within this node
         remainder = (gidx - 1) % n_elements_per_node
         j = remainder ÷ (n_k * n_b) + 1
         remainder = remainder % (n_k * n_b)
         b = remainder ÷ n_k + 1
         k = remainder % n_k + 1
         
+        # Get the node to compute (from subtract_nodes list)
         @inbounds node = subtract_nodes[node_idx]
         
         if node > 0
+            # THE SUBTRACTION LOGIC:
+            # parent = node / 2 (e.g., node 5 → parent 2)
             parent = node >> 1
+            # sibling = XOR to flip last bit (e.g., node 5 → sibling 4)
             sibling = node ⊻ 1
             
+            # Compute: h∇[node] = h∇[parent] - h∇[sibling]
+            # Parent histogram already contains sum of both children
+            # Sibling histogram was built by scanning observations
+            # So: this node = parent - sibling (no observation scan needed!)
             @inbounds h∇[k, b, j, node] = h∇[k, b, j, parent] - h∇[k, b, j, sibling]
         end
     end
 end
 
+# Accumulate gradients for root node
 @kernel function reduce_root_sums_kernel!(nodes_sum, @Const(∇), @Const(is))
     idx = @index(Global)
     if idx <= length(is)
@@ -145,22 +175,25 @@ end
     end
 end
 
+# Find best split for each node by evaluating all (feature, bin) combinations
+# Gain = (left_score + right_score) - parent_score, where score = -g²/(h + λ*w + L2)
+# Supports multiple loss functions and monotone constraints
 @kernel function find_best_split_from_hist_kernel!(
-    ::Type{L},
-    gains::AbstractVector{T},
-    bins::AbstractVector{Int32},
-    feats::AbstractVector{Int32},
-    @Const(h∇),
-    nodes_sum,
-    @Const(active_nodes),
-    @Const(js),
-    @Const(feattypes),
-    @Const(monotone_constraints),
-    lambda::T,
-    L2::T,
-    min_weight::T,
-    K::Int,
-    sums_temp::AbstractArray{T,2}
+    ::Type{L},                      # Loss function type
+    gains::AbstractVector{T},       # Output: best gain for each node
+    bins::AbstractVector{Int32},    # Output: best bin for each node
+    feats::AbstractVector{Int32},   # Output: best feature for each node
+    @Const(h∇),                     # Input: histograms [2K+1, n_bins, n_feats, n_nodes]
+    nodes_sum,                      # Input/Output: gradient sums per node
+    @Const(active_nodes),           # Input: which nodes to process
+    @Const(js),                     # Input: feature indices to consider
+    @Const(feattypes),              # Input: feature types (numeric/categorical)
+    @Const(monotone_constraints),   # Input: monotonicity constraints per feature
+    lambda::T,                      # Regularization: L1-like penalty
+    L2::T,                          # Regularization: L2 penalty
+    min_weight::T,                  # Minimum observations per leaf
+    K::Int,                         # Number of output dimensions
+    sums_temp::AbstractArray{T,2}   # Temporary storage for gradient accumulation
 ) where {T,L}
     n_idx = @index(Global)
     
@@ -174,6 +207,7 @@ end
             nbins = size(h∇, 2)
             eps = T(1e-8)
             
+            # Compute node total gradients by summing across bins
             if !isempty(js)
                 first_feat = js[1]
                 for k in 1:(2*K+1)
@@ -424,6 +458,8 @@ end
     end
 end
 
+# Main entry point for histogram building: marks nodes, clears old data, builds histograms
+# Called for BUILD nodes; SUBTRACT nodes use parent - sibling arithmetic (see fit.jl)
 function update_hist_gpu!(
     ::Type{L},
     h∇, gains::AbstractVector{T}, bins::AbstractVector{Int32}, feats::AbstractVector{Int32}, 
