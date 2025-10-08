@@ -109,9 +109,7 @@ function grow_tree!(
         end
 
         # Build histograms for all active nodes (depth >= 2)
-        # No histogram subtraction - direct build for all nodes
         if depth >= 2
-            # Build histograms for all active nodes
             update_hist_gpu!(
                 cache.h∇, ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
                 depth, view(active_nodes, 1:n_active),
@@ -122,7 +120,6 @@ function grow_tree!(
                 cache.target_mask_buf, backend
             )
 
-            # Find best splits for all active nodes
             find_split_all! = find_best_split_from_hist_kernel!(backend)
             find_split_all!(
                 L, view(cache.best_gain_gpu, 1:n_nodes),
@@ -170,7 +167,7 @@ function grow_tree!(
             )
             KernelAbstractions.synchronize(backend)
         elseif depth == params.max_depth && n_active > 0
-            # ✅ CRITICAL: Finalize mapping to the last-level leaves so Quantile/MAE leaf preds get correct observation sets
+            # CRITICAL: Finalize mapping to the last-level leaves
             update_nodes_idx_kernel!(backend)(
                 cache.nidx, is, cache.x_bin, cache.tree_feat_gpu,
                 cache.tree_cond_bin_gpu, cache.feattypes_gpu;
@@ -190,39 +187,98 @@ function grow_tree!(
     leaf_nodes = findall(!, tree.split)
 
     if L <: Union{EvoTrees.MAE,EvoTrees.Quantile}
-        # ✅ OPTIMIZED: Use nidx directly instead of tree traversal
-        # Only copy small arrays - no x_bin copy!
+        # Copy arrays from GPU
         is_cpu = Array(is)
-        nidx_cpu = Array(cache.nidx)  # ← Changed: use nidx instead of x_bin
+        x_bin_cpu = Array(cache.x_bin)
+        feattypes_cpu = Array(cache.feattypes_gpu)
+        nidx_cpu = Array(cache.nidx)
         ∇cpu = Array(cache.∇)
         nodes_sum_cpu = Array(cache.nodes_sum_gpu)
 
-        # ✅ FAST: Build leaf membership using nidx (direct lookup, no traversal)
+        # Verify nidx correctness by comparing with tree traversal
+        use_nidx = true
+        if length(is_cpu) > 0
+            # Check first 100 samples
+            n_check = min(100, length(is_cpu))
+            mismatches = 0
+            
+            for i in 1:n_check
+                obs_idx = is_cpu[i]
+                nidx_leaf = nidx_cpu[obs_idx]
+                
+                # Tree traversal to get true leaf
+                node = 1
+                while tree.split[node]
+                    feat = tree.feat[node]
+                    cond = feattypes_cpu[feat] ? x_bin_cpu[obs_idx, feat] <= tree.cond_bin[node] : x_bin_cpu[obs_idx, feat] == tree.cond_bin[node]
+                    node = (node << 1) + Int(!cond)
+                end
+                
+                if nidx_leaf != node
+                    mismatches += 1
+                    if mismatches <= 3
+                        @warn "nidx mismatch: obs=$obs_idx, nidx=$nidx_leaf, traversal=$node, depth=$(floor(Int, log2(node)))"
+                    end
+                end
+            end
+            
+            if mismatches > 0
+                @warn "Found $mismatches mismatches out of $n_check samples - using tree traversal"
+                use_nidx = false
+            end
+        end
+
+        # Build leaf membership map
         leaf_map = Dict{Int,Vector{UInt32}}()
         sizehint!(leaf_map, length(leaf_nodes))
         
-        for i in 1:length(is_cpu)
-            idx = is_cpu[i]
-            leaf_id = nidx_cpu[idx]  # ← Direct O(1) lookup instead of O(depth) traversal
-            if !haskey(leaf_map, leaf_id)
-                leaf_map[leaf_id] = UInt32[]
+        if use_nidx
+            # Fast path: use nidx directly
+            for obs_idx in is_cpu
+                leaf_id = nidx_cpu[obs_idx]
+                # Verify it's actually a leaf
+                if leaf_id > 0 && leaf_id <= length(tree.split) && !tree.split[leaf_id]
+                    if !haskey(leaf_map, leaf_id)
+                        leaf_map[leaf_id] = UInt32[]
+                    end
+                    push!(leaf_map[leaf_id], UInt32(obs_idx))
+                end
             end
-            push!(leaf_map[leaf_id], UInt32(idx))
+        else
+            # Safe path: tree traversal (slower but always correct)
+            for obs_idx in is_cpu
+                node = 1
+                while tree.split[node]
+                    feat = tree.feat[node]
+                    cond = feattypes_cpu[feat] ? x_bin_cpu[obs_idx, feat] <= tree.cond_bin[node] : x_bin_cpu[obs_idx, feat] == tree.cond_bin[node]
+                    node = (node << 1) + Int(!cond)
+                end
+                if !haskey(leaf_map, node)
+                    leaf_map[node] = UInt32[]
+                end
+                push!(leaf_map[node], UInt32(obs_idx))
+            end
         end
 
-        # ✅ UNCHANGED: Quantile/MAE computation stays exactly the same
+        # Debug: Check leaf map coverage
+        total_mapped = sum(length(v) for v in values(leaf_map))
+        if total_mapped != length(is_cpu)
+            @warn "Leaf map inconsistency: mapped $total_mapped obs but expected $(length(is_cpu))"
+        end
+
+        # Compute leaf predictions
         for n in leaf_nodes
             if L <: EvoTrees.Quantile
                 node_is = get(leaf_map, n, UInt32[])
                 if !isempty(node_is)
-                    # Recompute leaf sums from actual indices and use CPU quantile
+                    # Recompute leaf sums from actual indices
                     sum_vec = Vector{Float64}(undef, 3)
                     sum_vec[1] = sum(Float64, view(∇cpu, 1, node_is))
                     sum_vec[2] = sum(Float64, view(∇cpu, 2, node_is))
                     sum_vec[3] = sum(Float64, view(∇cpu, 3, node_is))
                     EvoTrees.pred_leaf_cpu!(tree.pred, n, sum_vec, L, params, ∇cpu, node_is)
                 else
-                    # Fallback to MAE update if empty (should be rare)
+                    # Fallback to MAE if empty
                     node_sum_view = view(nodes_sum_cpu, :, n)
                     EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_view, EvoTrees.MAE, params)
                 end
