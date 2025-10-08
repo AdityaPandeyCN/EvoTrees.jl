@@ -73,69 +73,6 @@ end
     end
 end
 
-# Split active siblings into BUILD (smaller) vs SUBTRACT (larger) lists; sibling via node ⊻ 1
-@kernel function separate_nodes_kernel!(
-    build_nodes, build_count,       # Output: nodes to build via observation scan
-    subtract_nodes, subtract_count, # Output: nodes to compute via subtraction
-    @Const(active_nodes),           # Input: all active child nodes at current depth
-    @Const(node_counts)             # Input: raw counts per node (number of observations)
-)
-    idx = @index(Global)
-    @inbounds if idx <= length(active_nodes)
-        node = active_nodes[idx]
-
-        if node > 0
-            sibling = node ⊻ 1
-
-            # Compare raw observation counts (not weights)
-            w_node = node_counts[node]
-            w_sibling = node_counts[sibling]
-
-            # Tiebreak by node id on equality
-            if w_node < w_sibling || (w_node == w_sibling && node < sibling)
-                pos = Atomix.@atomic build_count[1] += 1
-                build_nodes[pos] = node
-            else
-                pos = Atomix.@atomic subtract_count[1] += 1
-                subtract_nodes[pos] = node
-            end
-        end
-    end
-end
-
-# Compute hist via subtraction: h∇[child] = h∇[parent] - h∇[sibling]
-@kernel function subtract_hist_kernel!(
-    h∇,                    # Histogram [2K+1, n_bins, n_feats, n_nodes] - modified in-place
-    @Const(subtract_nodes) # List of larger children to compute via subtraction
-)
-    gidx = @index(Global)
-
-    # Decode histogram dimensions to parallelize across all elements
-    n_k = size(h∇, 1)
-    n_b = size(h∇, 2)
-    n_j = size(h∇, 3)
-    n_elements_per_node = n_k * n_b * n_j
-
-    node_idx = (gidx - 1) ÷ n_elements_per_node + 1
-
-    if node_idx <= length(subtract_nodes)
-        remainder = (gidx - 1) % n_elements_per_node
-        j = remainder ÷ (n_k * n_b) + 1
-        remainder = remainder % (n_k * n_b)
-        b = remainder ÷ n_k + 1
-        k = remainder % n_k + 1
-
-        @inbounds node = subtract_nodes[node_idx]
-
-        if node > 0
-            parent = node >> 1
-            sibling = node ⊻ 1
-
-            @inbounds h∇[k, b, j, node] = h∇[k, b, j, parent] - h∇[k, b, j, sibling]
-        end
-    end
-end
-
 # Accumulate gradients for root node
 @kernel function reduce_root_sums_kernel!(nodes_sum, @Const(∇), @Const(is))
     idx = @index(Global)
@@ -429,19 +366,7 @@ end
     end
 end
 
-# Count raw number of observations per node for the current is/nidx mapping
-@kernel function count_nodes_kernel!(node_counts, @Const(nidx), @Const(is))
-    idx = @index(Global)
-    if idx <= length(is)
-        obs = is[idx]
-        node = nidx[obs]
-        if node > 0 && node <= length(node_counts)
-            Atomix.@atomic node_counts[node] += 1
-        end
-    end
-end
-
-# Build histograms for a set of active nodes (BUILD side of subtraction)
+# Build histograms for a set of active nodes
 function update_hist_gpu!(
     h∇, ∇, x_bin, nidx, js, is, depth, active_nodes, nodes_sum_gpu, params,
     feattypes, monotone_constraints, K, L2, sums_temp, target_mask, backend
@@ -454,12 +379,14 @@ function update_hist_gpu!(
         sums_temp = similar(nodes_sum_gpu, 1, 1)
     end
 
+    # Clear and mark target nodes
     clear_mask_kernel!(backend)(target_mask; ndrange=length(target_mask), workgroupsize=256)
     KernelAbstractions.synchronize(backend)
 
     mark_active_nodes_kernel!(backend)(target_mask, active_nodes; ndrange=n_active, workgroupsize=256)
     KernelAbstractions.synchronize(backend)
 
+    # Clear histograms for active nodes
     if n_active > 0
         clear_hist_kernel!(backend)(
             h∇, active_nodes, n_active;
@@ -469,6 +396,7 @@ function update_hist_gpu!(
         KernelAbstractions.synchronize(backend)
     end
 
+    # Build histograms
     chunk_size = 64
     n_obs_chunks = cld(length(is), chunk_size)
     num_threads = length(js) * n_obs_chunks

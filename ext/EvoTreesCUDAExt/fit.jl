@@ -25,11 +25,11 @@ function grow_otree!(
     cache::CacheGPU,
     is::CuVector
 ) where {L,K}
-    @warn "Oblivious tree GPU implementation not yet available, using standard tree" maxlog = 1
+    @warn "Oblivious tree GPU implementation not yet available, using standard tree" maxlog=1
     grow_tree!(tree, params, cache, is)
 end
 
-# Grow decision tree level-by-level; at depth≥2 use histogram subtraction
+# Grow decision tree level-by-level without histogram subtraction
 function grow_tree!(
     tree::EvoTrees.Tree{L,K},
     params::EvoTrees.EvoTypes,
@@ -74,7 +74,7 @@ function grow_tree!(
             cache.h∇, ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
             1, view(cache.anodes_gpu, 1:1), cache.nodes_sum_gpu, params,
             cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K,
-            Float32(params.L2), view(cache.sums_temp_gpu, 1:(2*cache.K+1), 1:1),
+            params.L2, view(cache.sums_temp_gpu, 1:(2*cache.K+1), 1:1),
             cache.target_mask_buf, backend
         )
 
@@ -108,61 +108,21 @@ function grow_tree!(
             view(cache.anodes_gpu, n_active+1:n_nodes) .= 0
         end
 
-        # Histogram subtraction (depth ≥ 2): h∇[big] = h∇[parent] - h∇[small]
+        # Build histograms for all active nodes (depth >= 2)
+        # No histogram subtraction - direct build for all nodes
         if depth >= 2
-            # Clear tracking arrays
-            cache.build_nodes_gpu .= 0
-            cache.subtract_nodes_gpu .= 0
-            cache.build_count .= 0
-            cache.subtract_count .= 0
-
-            # Separate active nodes into BUILD (smaller) and SUBTRACT (larger) using raw counts
-            cache.node_counts_gpu .= 0
-            count_nodes_kernel!(backend)(
-                cache.node_counts_gpu, cache.nidx, is;
-                ndrange=length(is), workgroupsize=256
+            # Build histograms for all active nodes
+            update_hist_gpu!(
+                cache.h∇, ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
+                depth, view(active_nodes, 1:n_active),
+                cache.nodes_sum_gpu, params,
+                cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K,
+                params.L2,
+                view(cache.sums_temp_gpu, 1:(2*cache.K+1), 1:n_active),
+                cache.target_mask_buf, backend
             )
-            KernelAbstractions.synchronize(backend)
 
-            separate_kernel! = separate_nodes_kernel!(backend)
-            separate_kernel!(
-                cache.build_nodes_gpu, cache.build_count,
-                cache.subtract_nodes_gpu, cache.subtract_count,
-                view(active_nodes, 1:n_active),
-                cache.node_counts_gpu;
-                ndrange=n_active,
-                workgroupsize=256
-            )
-            KernelAbstractions.synchronize(backend)
-
-            build_count_val = Array(cache.build_count)[1]
-            subtract_count_val = Array(cache.subtract_count)[1]
-
-            # Build histograms only for smaller children (observation scan)
-            if build_count_val > 0
-                update_hist_gpu!(
-                    cache.h∇, ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
-                    depth, view(cache.build_nodes_gpu, 1:build_count_val),
-                    cache.nodes_sum_gpu, params,
-                    cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K,
-                    Float32(params.L2),
-                    view(cache.sums_temp_gpu, 1:(2*cache.K+1), 1:max(build_count_val, 1)),
-                    cache.target_mask_buf, backend
-                )
-            end
-
-            # Compute larger children via subtraction (no observation scan)
-            if subtract_count_val > 0
-                subtract_hist_kernel!(backend)(
-                    cache.h∇,                                             # Histogram to update
-                    view(cache.subtract_nodes_gpu, 1:subtract_count_val); # Nodes to compute
-                    ndrange=subtract_count_val * size(cache.h∇, 1) * size(cache.h∇, 2) * size(cache.h∇, 3),
-                    workgroupsize=256
-                )
-                KernelAbstractions.synchronize(backend)
-            end
-
-            # Find best splits for all active nodes (built or subtracted)
+            # Find best splits for all active nodes
             find_split_all! = find_best_split_from_hist_kernel!(backend)
             find_split_all!(
                 L, view(cache.best_gain_gpu, 1:n_nodes),
@@ -188,8 +148,8 @@ function grow_tree!(
             view(cache.best_bin_gpu, 1:n_nodes),
             view(cache.best_feat_gpu, 1:n_nodes),
             cache.h∇, active_nodes, cache.feattypes_gpu,
-            depth, params.max_depth, Float32(params.lambda), Float32(params.gamma),
-            Float32(params.L2), cache.K;
+            depth, params.max_depth, params.lambda, params.gamma,
+            params.L2, cache.K;
             ndrange=max(n_active, 1),
             workgroupsize=256
         )
@@ -209,6 +169,15 @@ function grow_tree!(
                 workgroupsize=256
             )
             KernelAbstractions.synchronize(backend)
+        elseif depth == params.max_depth && n_active > 0
+            # Finalize mapping to the last-level leaves so Quantile/MAE leaf preds get correct observation sets
+            update_nodes_idx_kernel!(backend)(
+                cache.nidx, is, cache.x_bin, cache.tree_feat_gpu,
+                cache.tree_cond_bin_gpu, cache.feattypes_gpu;
+                ndrange=length(is),
+                workgroupsize=256
+            )
+            KernelAbstractions.synchronize(backend)
         end
     end
 
@@ -221,34 +190,46 @@ function grow_tree!(
     leaf_nodes = findall(!, tree.split)
 
     if L <: Union{EvoTrees.MAE,EvoTrees.Quantile}
-        # Special handling: MAE/Quantile need median computation on CPU
-        cpu_data = (
-            nidx=Array(cache.nidx),
-            is=Array(is),
-            ∇=Array(cache.∇),
-            nodes_sum=Array(cache.nodes_sum_gpu)
-        )
+        # Special handling: MAE/Quantile need CPU computations using exact leaf memberships
+        is_cpu = Array(is)
+        x_bin_cpu = Array(cache.x_bin)
+        feattypes_cpu = Array(cache.feattypes_gpu)
+        ∇cpu = Array(cache.∇)
+        nodes_sum_cpu = Array(cache.nodes_sum_gpu)
 
+        # Build leaf membership by traversing the final tree on CPU
         leaf_map = Dict{Int,Vector{UInt32}}()
         sizehint!(leaf_map, length(leaf_nodes))
-        for i in 1:length(cpu_data.is)
-            leaf_id = cpu_data.nidx[cpu_data.is[i]]
-            if !haskey(leaf_map, leaf_id)
-                leaf_map[leaf_id] = UInt32[]
+        for idx in is_cpu
+            node = 1
+            while tree.split[node]
+                feat = tree.feat[node]
+                cond = feattypes_cpu[feat] ? x_bin_cpu[idx, feat] <= tree.cond_bin[node] : x_bin_cpu[idx, feat] == tree.cond_bin[node]
+                node = (node << 1) + Int(!cond)
             end
-            push!(leaf_map[leaf_id], cpu_data.is[i])
+            if !haskey(leaf_map, node)
+                leaf_map[node] = UInt32[]
+            end
+            push!(leaf_map[node], UInt32(idx))
         end
 
         for n in leaf_nodes
-            node_sum_view = view(cpu_data.nodes_sum, :, n)
             if L <: EvoTrees.Quantile
                 node_is = get(leaf_map, n, UInt32[])
                 if !isempty(node_is)
-                    EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_view, L, params, cpu_data.∇, node_is)
+                    # Recompute leaf sums from actual indices and use CPU quantile
+                    sum_vec = Vector{Float64}(undef, 3)
+                    sum_vec[1] = sum(Float64, view(∇cpu, 1, node_is))
+                    sum_vec[2] = sum(Float64, view(∇cpu, 2, node_is))
+                    sum_vec[3] = sum(Float64, view(∇cpu, 3, node_is))
+                    EvoTrees.pred_leaf_cpu!(tree.pred, n, sum_vec, L, params, ∇cpu, node_is)
                 else
+                    # Fallback to MAE update if empty (should be rare)
+                    node_sum_view = view(nodes_sum_cpu, :, n)
                     EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_view, EvoTrees.MAE, params)
                 end
             else
+                node_sum_view = view(nodes_sum_cpu, :, n)
                 EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_view, L, params)
             end
         end
@@ -265,7 +246,6 @@ function grow_tree!(
 end
 
 # Apply splits kernel: decide split vs leaf, compute child gradient sums
-# Note: histogram subtraction uses h∇, not nodes_sum; nodes_sum is used for gains/prediction
 @kernel function apply_splits_kernel!(
     tree_split, tree_cond_bin, tree_feat, tree_gain,
     nodes_sum, n_next, n_next_active,
@@ -303,13 +283,10 @@ end
             nodes_sum[kk, child_l] = sum_val
             nodes_sum[kk, child_r] = nodes_sum[kk, node] - sum_val
         end
-        # Predictions are computed later on CPU (loss-specific)
 
         idx_base = Atomix.@atomic n_next_active[1] += 2
         n_next[idx_base-1] = child_l
         n_next[idx_base] = child_r
-    else
-        # Leaf node: prediction computed later on CPU (loss-specific)
     end
 end
 
