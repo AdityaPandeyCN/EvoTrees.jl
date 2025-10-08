@@ -170,7 +170,7 @@ function grow_tree!(
             )
             KernelAbstractions.synchronize(backend)
         elseif depth == params.max_depth && n_active > 0
-            # Finalize mapping to the last-level leaves so Quantile/MAE leaf preds get correct observation sets
+            # ✅ CRITICAL: Finalize mapping to the last-level leaves so Quantile/MAE leaf preds get correct observation sets
             update_nodes_idx_kernel!(backend)(
                 cache.nidx, is, cache.x_bin, cache.tree_feat_gpu,
                 cache.tree_cond_bin_gpu, cache.feattypes_gpu;
@@ -190,29 +190,27 @@ function grow_tree!(
     leaf_nodes = findall(!, tree.split)
 
     if L <: Union{EvoTrees.MAE,EvoTrees.Quantile}
-        # Special handling: MAE/Quantile need CPU computations using exact leaf memberships
+        # ✅ OPTIMIZED: Use nidx directly instead of tree traversal
+        # Only copy small arrays - no x_bin copy!
         is_cpu = Array(is)
-        x_bin_cpu = Array(cache.x_bin)
-        feattypes_cpu = Array(cache.feattypes_gpu)
+        nidx_cpu = Array(cache.nidx)  # ← Changed: use nidx instead of x_bin
         ∇cpu = Array(cache.∇)
         nodes_sum_cpu = Array(cache.nodes_sum_gpu)
 
-        # Build leaf membership by traversing the final tree on CPU
+        # ✅ FAST: Build leaf membership using nidx (direct lookup, no traversal)
         leaf_map = Dict{Int,Vector{UInt32}}()
         sizehint!(leaf_map, length(leaf_nodes))
-        for idx in is_cpu
-            node = 1
-            while tree.split[node]
-                feat = tree.feat[node]
-                cond = feattypes_cpu[feat] ? x_bin_cpu[idx, feat] <= tree.cond_bin[node] : x_bin_cpu[idx, feat] == tree.cond_bin[node]
-                node = (node << 1) + Int(!cond)
+        
+        for i in 1:length(is_cpu)
+            idx = is_cpu[i]
+            leaf_id = nidx_cpu[idx]  # ← Direct O(1) lookup instead of O(depth) traversal
+            if !haskey(leaf_map, leaf_id)
+                leaf_map[leaf_id] = UInt32[]
             end
-            if !haskey(leaf_map, node)
-                leaf_map[node] = UInt32[]
-            end
-            push!(leaf_map[node], UInt32(idx))
+            push!(leaf_map[leaf_id], UInt32(idx))
         end
 
+        # ✅ UNCHANGED: Quantile/MAE computation stays exactly the same
         for n in leaf_nodes
             if L <: EvoTrees.Quantile
                 node_is = get(leaf_map, n, UInt32[])
@@ -228,7 +226,7 @@ function grow_tree!(
                     node_sum_view = view(nodes_sum_cpu, :, n)
                     EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_view, EvoTrees.MAE, params)
                 end
-            else
+            else  # MAE
                 node_sum_view = view(nodes_sum_cpu, :, n)
                 EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_view, L, params)
             end
