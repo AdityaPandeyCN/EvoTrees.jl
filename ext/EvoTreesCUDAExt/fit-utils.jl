@@ -2,6 +2,7 @@ using KernelAbstractions
 using Atomix
 
 # Update observation-to-node assignments (left=node*2, right=node*2+1)
+# Update observation-to-node assignments (left=node*2, right=node*2+1)
 @kernel function update_nodes_idx_kernel!(
     nidx::AbstractVector{T},        # Node index for each observation (in/out)
     @Const(is),                     # Observation indices to process
@@ -17,9 +18,9 @@ using Atomix
         if node > 0                 # If observation is in an active node
             feat = cond_feats[node] # Get split feature for this node
             bin = cond_bins[node]   # Get split threshold
-            if bin == 0             # No split (leaf node)
-                nidx[obs] = zero(T) # Mark as inactive
-            else
+            # ✅ FIX: Only update if node has a split (bin != 0)
+            # If bin == 0, node is a leaf - keep the current node ID
+            if bin != 0
                 feattype = feattypes[feat]
                 is_left = feattype ? (x_bin[obs, feat] <= bin) : (x_bin[obs, feat] == bin)
                 nidx[obs] = (node << 1) + T(Int(!is_left))
@@ -27,7 +28,6 @@ using Atomix
         end
     end
 end
-
 # Build gradient histograms: h∇[2K+1, n_bins, n_feats, n_nodes]
 @kernel function hist_kernel!(
     h∇::AbstractArray{T,4},         # Histogram [2K+1, n_bins, n_feats, n_nodes]
