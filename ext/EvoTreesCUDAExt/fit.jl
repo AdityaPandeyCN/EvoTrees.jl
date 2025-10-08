@@ -210,8 +210,7 @@ function grow_tree!(
             )
             KernelAbstractions.synchronize(backend)
         elseif depth == params.max_depth && n_active > 0
-            # ✅ CRITICAL FIX: Finalize mapping to the last-level leaves
-            # This ensures nidx has correct leaf assignments for Quantile/MAE
+            
             update_nodes_idx_kernel!(backend)(
                 cache.nidx, is, cache.x_bin, cache.tree_feat_gpu,
                 cache.tree_cond_bin_gpu, cache.feattypes_gpu;
@@ -231,7 +230,6 @@ function grow_tree!(
     leaf_nodes = findall(!, tree.split)
 
     if L <: Union{EvoTrees.MAE,EvoTrees.Quantile}
-        # ✅ OPTIMIZED: Use nidx directly (no x_bin copy needed!)
         cpu_data = (
             nidx=Array(cache.nidx),
             is=Array(is),
@@ -243,7 +241,7 @@ function grow_tree!(
         sizehint!(leaf_map, length(leaf_nodes))
         for i in 1:length(cpu_data.is)
             leaf_id = cpu_data.nidx[cpu_data.is[i]]
-            # ✅ Only add if it's a valid leaf
+        
             if leaf_id > 0 && leaf_id <= length(tree.split) && !tree.split[leaf_id]
                 if !haskey(leaf_map, leaf_id)
                     leaf_map[leaf_id] = UInt32[]

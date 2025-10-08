@@ -17,7 +17,6 @@ using Atomix
         if node > 0                 # If observation is in an active node
             feat = cond_feats[node] # Get split feature for this node
             bin = cond_bins[node]   # Get split threshold
-            # ✅ FIX: Only update if there's a split (bin != 0)
             # If bin == 0, node is a leaf - keep the current node ID
             if bin != 0
                 feattype = feattypes[feat]
