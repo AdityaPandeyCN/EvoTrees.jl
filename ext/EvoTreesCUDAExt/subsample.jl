@@ -1,88 +1,50 @@
-function get_rand_kernel!(mask_cond)
-	tix = threadIdx().x
-	bdx = blockDim().x
-	bix = blockIdx().x
-	gdx = gridDim().x
+using CUDA
 
-	i_max = length(mask_cond)
-	niter = cld(i_max, bdx * gdx)
-	for iter ∈ 1:niter
-		i = tix + bdx * (bix - 1) + bdx * gdx * (iter - 1)
-		if i <= i_max
-			mask_cond[i] = rand(UInt8)
+function EvoTrees.subsample(
+	left::CuVector{T},
+	is::CuVector{T},
+	mask_cond::CuVector{UInt8},
+	rowsample::AbstractFloat,
+	rng
+) where {T}
+	n = length(left)
+	threshold = UInt8(round(255 * rowsample))
+
+	rand!(mask_cond)
+
+	mask = CuArray{Int32}(undef, n)
+
+	function mark_kernel!(mask, mask_cond, threshold)
+		i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+		if i <= length(mask)
+			@inbounds mask[i] = mask_cond[i] <= threshold ? Int32(1) : Int32(0)
 		end
+		return nothing
 	end
-	sync_threads()
-end
-function get_rand_gpu!(mask_cond)
-	threads = (1024,)
-	blocks = (256,)
-	@cuda threads = threads blocks = blocks get_rand_kernel!(mask_cond)
-	CUDA.synchronize()
-end
 
-function subsample_step_1_kernel(left, mask_cond, cond, counts, chunk_size)
+	threads = 256
+	blocks = cld(n, threads)
+	@cuda threads = threads blocks = blocks mark_kernel!(mask, mask_cond, threshold)
 
-	bid = blockIdx().x
-	gdim = gridDim().x
+	positions = cumsum(mask)
+	count = Array(positions[end:end])[1]
 
-	i_start = chunk_size * (bid - 1) + 1
-	i_stop = bid == gdim ? length(left) : i_start + chunk_size - 1
-	count = 0
-
-	@inbounds for i ∈ i_start:i_stop
-		@inbounds if mask_cond[i] <= cond
-			left[i_start+count] = i
-			count += 1
-		end
-	end
-	sync_threads()
-	@inbounds counts[bid] = count
-	sync_threads()
-end
-
-function subsample_step_2_kernel(left, is, counts, counts_cum, chunk_size)
-	bid = blockIdx().x
-	count_cum = counts_cum[bid]
-	i_start = chunk_size * (bid - 1)
-	@inbounds for i ∈ 1:counts[bid]
-		is[count_cum+i] = left[i_start+i]
-	end
-	sync_threads()
-end
-
-function EvoTrees.subsample(left::CuVector, is::CuVector, mask_cond::CuVector, rowsample::AbstractFloat, rng)
-	get_rand_gpu!(mask_cond)
-	cond = round(UInt8, 255 * rowsample)
-	chunk_size = cld(length(left), min(cld(length(left), 128), 2048))
-	nblocks = cld(length(left), chunk_size)
-	counts = CUDA.zeros(Int, nblocks)
-
-	blocks = (nblocks,)
-	threads = (1,)
-
-	@cuda blocks = nblocks threads = 1 subsample_step_1_kernel(
-		left,
-		mask_cond,
-		cond,
-		counts,
-		chunk_size,
-	)
-	CUDA.synchronize()
-	counts_cum = cumsum(counts) - counts
-	@cuda blocks = nblocks threads = 1 subsample_step_2_kernel(
-		left,
-		is,
-		counts,
-		counts_cum,
-		chunk_size,
-	)
-	CUDA.synchronize()
-	counts_sum = sum(counts)
-	if counts_cum == 0
+	if count == 0
 		@error "no subsample observation - choose larger rowsample"
-	else
-		return view(is, 1:counts_sum)
+		return view(is, 1:1)
 	end
-end
 
+	function compact_kernel!(is, left, mask, positions)
+		i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+		if i <= length(left)
+			@inbounds if mask[i] == 1
+				is[positions[i]] = left[i]
+			end
+		end
+		return nothing
+	end
+
+	@cuda threads = threads blocks = blocks compact_kernel!(is, left, mask, positions)
+
+	return view(is, 1:count)
+end
