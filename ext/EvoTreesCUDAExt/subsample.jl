@@ -10,7 +10,7 @@ function EvoTrees.subsample(
 	n = length(left)
 	threshold = UInt8(round(255 * rowsample))
 
-	rand!(mask_cond)
+	CUDA.rand!(mask_cond)
 
 	mask = CuArray{Int32}(undef, n)
 
@@ -48,3 +48,4 @@ function EvoTrees.subsample(
 
 	return view(is, 1:count)
 end
+
