@@ -1,12 +1,10 @@
 function profile_gpu_kernel(backend, name, f, args...; kwargs...)
     if backend isa CUDA.CUDABackend || typeof(backend).name.name == :CUDABackend
-        start_event = CUDA.Event()
-        end_event = CUDA.Event()
-        CUDA.record(start_event)
-        result = f(args...; kwargs...)
-        CUDA.record(end_event)
         CUDA.synchronize()
-        elapsed = CUDA.elapsed(start_event, end_event)
+        elapsed = @elapsed begin
+            result = f(args...; kwargs...)
+            CUDA.synchronize()
+        end
         @info "GPU timing: $name" elapsed_ms=elapsed*1000
         return result
     else
