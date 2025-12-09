@@ -1,7 +1,7 @@
 function profile_gpu_kernel(backend, name, f, args...; kwargs...)
     if backend isa CUDA.CUDABackend || typeof(backend).name.name == :CUDABackend
-        start_event = CUDA.CUDAEvent(CUDA.CUDA_EVENT_DEFAULT)
-        end_event = CUDA.CUDAEvent(CUDA.CUDA_EVENT_DEFAULT)
+        start_event = CUDA.Event()
+        end_event = CUDA.Event()
         CUDA.record(start_event)
         result = f(args...; kwargs...)
         CUDA.record(end_event)
