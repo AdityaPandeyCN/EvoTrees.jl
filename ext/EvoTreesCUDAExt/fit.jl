@@ -1,3 +1,25 @@
+function profile_gpu_kernel(backend, name, f, args...; kwargs...)
+    if backend isa CUDA.CUDABackend || typeof(backend).name.name == :CUDABackend
+        start_event = CUDA.CUDAEvent(CUDA.CUDA_EVENT_DEFAULT)
+        end_event = CUDA.CUDAEvent(CUDA.CUDA_EVENT_DEFAULT)
+        CUDA.record(start_event)
+        result = f(args...; kwargs...)
+        CUDA.record(end_event)
+        CUDA.synchronize()
+        elapsed = CUDA.elapsed(start_event, end_event)
+        @info "GPU timing: $name" elapsed_ms=elapsed*1000
+        return result
+    else
+        return f(args...; kwargs...)
+    end
+end
+
+function profile_cpu(name, f)
+    elapsed = @elapsed result = f()
+    @info "CPU timing: $name" elapsed_ms=elapsed*1000
+    return result
+end
+
 function EvoTrees.grow_evotree!(m::EvoTree{L,K}, cache::EvoTrees.CacheGPU, params::EvoTrees.EvoTypes) where {L,K}
 
     EvoTrees.update_grads!(cache.∇, cache.pred, cache.y, L, params)
@@ -70,14 +92,14 @@ function grow_tree!(
     view(cache.anodes_gpu, 1:1) .= 1
 
     if params.max_depth == 1
-        reduce_root_sums_kernel!(backend)(
+        profile_gpu_kernel(backend, "reduce_root_sums", reduce_root_sums_kernel!(backend),
             cache.nodes_sum_gpu, ∇_gpu, is;
             ndrange=length(is),
         )
         KernelAbstractions.synchronize(backend)
         n_active = 0
     else
-        update_hist_gpu!(
+        profile_gpu_kernel(backend, "update_hist_root", update_hist_gpu!,
             cache.h∇, ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
             1, view(cache.anodes_gpu, 1:1), cache.nodes_sum_gpu, params,
             cache.feattypes_gpu, cache.monotone_constraints_gpu, cache.K,
@@ -86,7 +108,7 @@ function grow_tree!(
 
         n_feats = length(cache.js)
         find_split_root! = find_best_split_parallel_kernel!(backend)
-        find_split_root!(
+        profile_gpu_kernel(backend, "find_best_split_root", find_split_root!,
             L,
             view(cache.gains_per_feat_gpu, 1:n_feats, 1:1),
             view(cache.bins_per_feat_gpu, 1:n_feats, 1:1),
@@ -100,26 +122,28 @@ function grow_tree!(
         )
         KernelAbstractions.synchronize(backend)
 
-        gains_cpu = Array(view(cache.gains_per_feat_gpu, 1:n_feats, 1:1))
-        bins_cpu = Array(view(cache.bins_per_feat_gpu, 1:n_feats, 1:1))
-        js_cpu = Array(cache.js)
+        profile_cpu("cpu_reduction_root") do
+            gains_cpu = Array(view(cache.gains_per_feat_gpu, 1:n_feats, 1:1))
+            bins_cpu = Array(view(cache.bins_per_feat_gpu, 1:n_feats, 1:1))
+            js_cpu = Array(cache.js)
 
-        best_f_idx = 1
-        best_gain = gains_cpu[1, 1]
-        for f_idx in 2:n_feats
-            if gains_cpu[f_idx, 1] > best_gain
-                best_gain = gains_cpu[f_idx, 1]
-                best_f_idx = f_idx
+            best_f_idx = 1
+            best_gain = gains_cpu[1, 1]
+            for f_idx in 2:n_feats
+                if gains_cpu[f_idx, 1] > best_gain
+                    best_gain = gains_cpu[f_idx, 1]
+                    best_f_idx = f_idx
+                end
             end
-        end
 
-        best_gain_cpu = [best_gain]
-        best_bin_cpu = Int32[bins_cpu[best_f_idx, 1]]
-        best_feat_cpu = Int32[js_cpu[best_f_idx]]
-        
-        copyto!(view(cache.best_gain_gpu, 1:1), best_gain_cpu)
-        copyto!(view(cache.best_bin_gpu, 1:1), best_bin_cpu)
-        copyto!(view(cache.best_feat_gpu, 1:1), best_feat_cpu)
+            best_gain_cpu = [best_gain]
+            best_bin_cpu = Int32[bins_cpu[best_f_idx, 1]]
+            best_feat_cpu = Int32[js_cpu[best_f_idx]]
+            
+            copyto!(view(cache.best_gain_gpu, 1:1), best_gain_cpu)
+            copyto!(view(cache.best_bin_gpu, 1:1), best_bin_cpu)
+            copyto!(view(cache.best_feat_gpu, 1:1), best_feat_cpu)
+        end
 
         n_active = 1
     end
@@ -138,14 +162,14 @@ function grow_tree!(
             cache.subtract_count .= 0
 
             cache.node_counts_gpu .= 0
-            count_nodes_kernel!(backend)(
+            profile_gpu_kernel(backend, "count_nodes", count_nodes_kernel!(backend),
                 cache.node_counts_gpu, cache.nidx, is;
                 ndrange=length(is)
             )
             KernelAbstractions.synchronize(backend)
 
             separate_kernel! = separate_nodes_kernel!(backend)
-            separate_kernel!(
+            profile_gpu_kernel(backend, "separate_nodes", separate_kernel!,
                 cache.build_nodes_gpu, cache.build_count,
                 cache.subtract_nodes_gpu, cache.subtract_count,
                 active_nodes,
@@ -158,7 +182,7 @@ function grow_tree!(
             subtract_count_val = Array(cache.subtract_count)[1]
 
             if build_count_val > 0
-                update_hist_gpu!(
+                profile_gpu_kernel(backend, "update_hist_build", update_hist_gpu!,
                     cache.h∇, ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
                     depth, view(cache.build_nodes_gpu, 1:build_count_val),
                     cache.nodes_sum_gpu, params,
@@ -168,7 +192,7 @@ function grow_tree!(
             end
 
             if subtract_count_val > 0
-                subtract_hist_kernel!(backend)(
+                profile_gpu_kernel(backend, "subtract_hist", subtract_hist_kernel!(backend),
                     cache.h∇,
                     view(cache.subtract_nodes_gpu, 1:subtract_count_val);
                     ndrange=subtract_count_val * size(cache.h∇, 1) * size(cache.h∇, 2) * size(cache.h∇, 3),
@@ -179,7 +203,7 @@ function grow_tree!(
             n_feats = length(cache.js)
             
             find_split_parallel! = find_best_split_parallel_kernel!(backend)
-            find_split_parallel!(
+            profile_gpu_kernel(backend, "find_best_split_parallel", find_split_parallel!,
                 L,
                 view(cache.gains_per_feat_gpu, 1:n_feats, 1:n_active),
                 view(cache.bins_per_feat_gpu, 1:n_feats, 1:n_active),
@@ -193,35 +217,37 @@ function grow_tree!(
             )
             KernelAbstractions.synchronize(backend)
 
-            gains_cpu = Array(view(cache.gains_per_feat_gpu, 1:n_feats, 1:n_active))
-            bins_cpu = Array(view(cache.bins_per_feat_gpu, 1:n_feats, 1:n_active))
-            js_cpu = Array(cache.js)
-            
-            best_gains_cpu = Vector{Float64}(undef, n_active)
-            best_bins_cpu = Vector{Int32}(undef, n_active)
-            best_feats_cpu = Vector{Int32}(undef, n_active)
-            
-            for n_idx in 1:n_active
-                best_f_idx = 1
-                best_gain = gains_cpu[1, n_idx]
-                for f_idx in 2:n_feats
-                    if gains_cpu[f_idx, n_idx] > best_gain
-                        best_gain = gains_cpu[f_idx, n_idx]
-                        best_f_idx = f_idx
+            profile_cpu("cpu_reduction") do
+                gains_cpu = Array(view(cache.gains_per_feat_gpu, 1:n_feats, 1:n_active))
+                bins_cpu = Array(view(cache.bins_per_feat_gpu, 1:n_feats, 1:n_active))
+                js_cpu = Array(cache.js)
+                
+                best_gains_cpu = Vector{Float64}(undef, n_active)
+                best_bins_cpu = Vector{Int32}(undef, n_active)
+                best_feats_cpu = Vector{Int32}(undef, n_active)
+                
+                for n_idx in 1:n_active
+                    best_f_idx = 1
+                    best_gain = gains_cpu[1, n_idx]
+                    for f_idx in 2:n_feats
+                        if gains_cpu[f_idx, n_idx] > best_gain
+                            best_gain = gains_cpu[f_idx, n_idx]
+                            best_f_idx = f_idx
+                        end
                     end
+                    best_gains_cpu[n_idx] = best_gain
+                    best_bins_cpu[n_idx] = bins_cpu[best_f_idx, n_idx]
+                    best_feats_cpu[n_idx] = js_cpu[best_f_idx]
                 end
-                best_gains_cpu[n_idx] = best_gain
-                best_bins_cpu[n_idx] = bins_cpu[best_f_idx, n_idx]
-                best_feats_cpu[n_idx] = js_cpu[best_f_idx]
+                
+                copyto!(view(cache.best_gain_gpu, 1:n_active), best_gains_cpu)
+                copyto!(view(cache.best_bin_gpu, 1:n_active), best_bins_cpu)
+                copyto!(view(cache.best_feat_gpu, 1:n_active), best_feats_cpu)
             end
-            
-            copyto!(view(cache.best_gain_gpu, 1:n_active), best_gains_cpu)
-            copyto!(view(cache.best_bin_gpu, 1:n_active), best_bins_cpu)
-            copyto!(view(cache.best_feat_gpu, 1:n_active), best_feats_cpu)
             
         end
 
-        apply_splits_kernel!(backend)(
+        profile_gpu_kernel(backend, "apply_splits", apply_splits_kernel!(backend),
             cache.tree_split_gpu, cache.tree_cond_bin_gpu, cache.tree_feat_gpu,
             cache.tree_gain_gpu, cache.nodes_sum_gpu,
             cache.n_next_gpu, cache.n_next_active_gpu,
@@ -241,7 +267,7 @@ function grow_tree!(
         end
 
         if n_active > 0
-            update_nodes_idx_kernel!(backend)(
+            profile_gpu_kernel(backend, "update_nodes_idx", update_nodes_idx_kernel!(backend),
                 cache.nidx, is, cache.x_bin, cache.tree_feat_gpu,
                 cache.tree_cond_bin_gpu, cache.feattypes_gpu;
                 ndrange=length(is),
