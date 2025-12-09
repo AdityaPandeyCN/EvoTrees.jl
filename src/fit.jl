@@ -346,13 +346,6 @@ function fit(
     end
     post_fit_gc(_device)
     m.info[:logger] = logger
-    
-    if _device == GPU
-        try
-            EvoTreesCUDAExt.print_profile_summary()
-        catch
-        end
-    end
 
     return m
 
@@ -444,13 +437,6 @@ function fit(
     end
     post_fit_gc(_device)
     m.info[:logger] = logger
-    
-    if _device == GPU
-        try
-            EvoTreesCUDAExt.print_profile_summary()
-        catch
-        end
-    end
 
     return m
 
