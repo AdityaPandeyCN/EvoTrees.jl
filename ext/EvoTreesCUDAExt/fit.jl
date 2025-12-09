@@ -84,19 +84,39 @@ function grow_tree!(
             cache.target_mask_buf, backend,
         )
 
-        find_split_root! = find_best_split_from_hist_kernel!(backend)
+        n_feats = length(cache.js)
+        find_split_root! = find_best_split_parallel_kernel!(backend)
         find_split_root!(
-            L, view(cache.best_gain_gpu, 1:1),
-            view(cache.best_bin_gpu, 1:1),
-            view(cache.best_feat_gpu, 1:1),
+            L,
+            view(cache.gains_per_feat_gpu, 1:n_feats, 1:1),
+            view(cache.bins_per_feat_gpu, 1:n_feats, 1:1),
             cache.h∇, cache.nodes_sum_gpu,
             view(cache.anodes_gpu, 1:1),
             cache.js, cache.feattypes_gpu, cache.monotone_constraints_gpu,
             params.lambda, params.L2, params.min_weight,
-            cache.K, view(cache.sums_temp_gpu, 1:(2*cache.K+1), 1:1);
-            ndrange=1,
+            cache.K, n_feats,
+            cache.sums_temp_par_gpu;
+            ndrange=n_feats,
         )
         KernelAbstractions.synchronize(backend)
+
+        gains_cpu = Array(view(cache.gains_per_feat_gpu, 1:n_feats, 1:1))
+        bins_cpu = Array(view(cache.bins_per_feat_gpu, 1:n_feats, 1:1))
+        js_cpu = Array(cache.js)
+
+        best_f_idx = 1
+        best_gain = gains_cpu[1, 1]
+        for f_idx in 2:n_feats
+            if gains_cpu[f_idx, 1] > best_gain
+                best_gain = gains_cpu[f_idx, 1]
+                best_f_idx = f_idx
+            end
+        end
+
+        cache.best_gain_gpu[1] = best_gain
+        cache.best_bin_gpu[1] = bins_cpu[best_f_idx, 1]
+        cache.best_feat_gpu[1] = js_cpu[best_f_idx]
+
         n_active = 1
     end
 
