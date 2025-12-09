@@ -10,7 +10,7 @@ using Random: seed!
 
 run_evo = true
 run_xgb = false
-nrounds = 200
+nrounds = 1
 
 loss = :mse
 tree_type = :binary
