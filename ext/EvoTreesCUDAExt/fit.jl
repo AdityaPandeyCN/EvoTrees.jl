@@ -113,9 +113,13 @@ function grow_tree!(
             end
         end
 
-        cache.best_gain_gpu[1] = best_gain
-        cache.best_bin_gpu[1] = bins_cpu[best_f_idx, 1]
-        cache.best_feat_gpu[1] = js_cpu[best_f_idx]
+        best_gain_cpu = [best_gain]
+        best_bin_cpu = Int32[bins_cpu[best_f_idx, 1]]
+        best_feat_cpu = Int32[js_cpu[best_f_idx]]
+        
+        copyto!(view(cache.best_gain_gpu, 1:1), best_gain_cpu)
+        copyto!(view(cache.best_bin_gpu, 1:1), best_bin_cpu)
+        copyto!(view(cache.best_feat_gpu, 1:1), best_feat_cpu)
 
         n_active = 1
     end
