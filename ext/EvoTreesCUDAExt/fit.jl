@@ -12,8 +12,10 @@ function profile_gpu_kernel(backend, name, f, args...; kwargs...)
     end
 end
 
-function profile_cpu(name, f)
-    elapsed = @elapsed result = f()
+function profile_cpu(name::String, f::Function)
+    t0 = time()
+    result = f()
+    elapsed = time() - t0
     @info "CPU timing: $name" elapsed_ms=elapsed*1000
     return result
 end
@@ -120,7 +122,7 @@ function grow_tree!(
         )
         KernelAbstractions.synchronize(backend)
 
-        profile_cpu("cpu_reduction_root") do
+        profile_cpu("cpu_reduction_root", () -> begin
             gains_cpu = Array(view(cache.gains_per_feat_gpu, 1:n_feats, 1:1))
             bins_cpu = Array(view(cache.bins_per_feat_gpu, 1:n_feats, 1:1))
             js_cpu = Array(cache.js)
@@ -141,7 +143,7 @@ function grow_tree!(
             copyto!(view(cache.best_gain_gpu, 1:1), best_gain_cpu)
             copyto!(view(cache.best_bin_gpu, 1:1), best_bin_cpu)
             copyto!(view(cache.best_feat_gpu, 1:1), best_feat_cpu)
-        end
+        end)
 
         n_active = 1
     end
@@ -215,7 +217,7 @@ function grow_tree!(
             )
             KernelAbstractions.synchronize(backend)
 
-            profile_cpu("cpu_reduction") do
+            profile_cpu("cpu_reduction", () -> begin
                 gains_cpu = Array(view(cache.gains_per_feat_gpu, 1:n_feats, 1:n_active))
                 bins_cpu = Array(view(cache.bins_per_feat_gpu, 1:n_feats, 1:n_active))
                 js_cpu = Array(cache.js)
@@ -241,7 +243,7 @@ function grow_tree!(
                 copyto!(view(cache.best_gain_gpu, 1:n_active), best_gains_cpu)
                 copyto!(view(cache.best_bin_gpu, 1:n_active), best_bins_cpu)
                 copyto!(view(cache.best_feat_gpu, 1:n_active), best_feats_cpu)
-            end
+            end)
             
         end
 
