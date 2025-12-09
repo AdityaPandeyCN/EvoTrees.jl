@@ -1,3 +1,5 @@
+const _profile_times = Dict{String,Float64}()
+
 function profile_gpu_kernel(backend, name, f, args...; kwargs...)
     if backend isa CUDA.CUDABackend || typeof(backend).name.name == :CUDABackend
         CUDA.synchronize()
@@ -5,7 +7,7 @@ function profile_gpu_kernel(backend, name, f, args...; kwargs...)
             result = f(args...; kwargs...)
             CUDA.synchronize()
         end
-        @info "GPU timing: $name" elapsed_ms=elapsed*1000
+        _profile_times[name] = get(_profile_times, name, 0.0) + elapsed * 1000
         return result
     else
         return f(args...; kwargs...)
@@ -16,13 +18,26 @@ function profile_cpu(name::String, f::Function)
     t0 = time()
     result = f()
     elapsed = time() - t0
-    @info "CPU timing: $name" elapsed_ms=elapsed*1000
+    _profile_times[name] = get(_profile_times, name, 0.0) + elapsed * 1000
     return result
+end
+
+function print_profile_summary()
+    if !isempty(_profile_times)
+        sorted = sort(collect(_profile_times), by=x->x[2], rev=true)
+        total = sum(x->x[2], sorted)
+        println("Profiling summary (total ms: $(round(total, digits=2))):")
+        for (name, time_ms) in sorted
+            println("  $name: $(round(time_ms, digits=2)) ms ($(round(100*time_ms/total, digits=1))%)")
+        end
+        empty!(_profile_times)
+    end
 end
 
 function EvoTrees.grow_evotree!(m::EvoTree{L,K}, cache::EvoTrees.CacheGPU, params::EvoTrees.EvoTypes) where {L,K}
 
     EvoTrees.update_grads!(cache.∇, cache.pred, cache.y, L, params)
+    empty!(_profile_times)
 
     for _ in 1:params.bagging_size
         is = EvoTrees.subsample(cache.is_full, cache.mask_cpu, cache.mask_gpu, params.rowsample, cache.rng)
@@ -37,6 +52,7 @@ function EvoTrees.grow_evotree!(m::EvoTree{L,K}, cache::EvoTrees.CacheGPU, param
         EvoTrees.predict!(cache.pred, tree, cache.x_bin, cache.feattypes_gpu)
     end
 
+    print_profile_summary()
     m.info[:nrounds] += 1
     return nothing
 end
