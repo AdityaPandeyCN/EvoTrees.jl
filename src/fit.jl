@@ -145,7 +145,6 @@ function grow_tree!(
     return nothing
 end
 
-
 # grow a single oblivious tree
 function grow_otree!(
     tree::Tree{L,K},
@@ -347,6 +346,13 @@ function fit(
     end
     post_fit_gc(_device)
     m.info[:logger] = logger
+    
+    if _device == GPU
+        try
+            EvoTreesCUDAExt.print_profile_summary()
+        catch
+        end
+    end
 
     return m
 
@@ -438,7 +444,15 @@ function fit(
     end
     post_fit_gc(_device)
     m.info[:logger] = logger
+    
+    if _device == GPU
+        try
+            EvoTreesCUDAExt.print_profile_summary()
+        catch
+        end
+    end
 
     return m
 
 end
+

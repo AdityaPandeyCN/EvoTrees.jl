@@ -36,8 +36,11 @@ end
 
 function EvoTrees.grow_evotree!(m::EvoTree{L,K}, cache::EvoTrees.CacheGPU, params::EvoTrees.EvoTypes) where {L,K}
 
+    if m.info[:nrounds] == 0
+        empty!(_profile_times)
+    end
+    
     EvoTrees.update_grads!(cache.∇, cache.pred, cache.y, L, params)
-    empty!(_profile_times)
 
     for _ in 1:params.bagging_size
         is = EvoTrees.subsample(cache.is_full, cache.mask_cpu, cache.mask_gpu, params.rowsample, cache.rng)
@@ -52,7 +55,6 @@ function EvoTrees.grow_evotree!(m::EvoTree{L,K}, cache::EvoTrees.CacheGPU, param
         EvoTrees.predict!(cache.pred, tree, cache.x_bin, cache.feattypes_gpu)
     end
 
-    print_profile_summary()
     m.info[:nrounds] += 1
     return nothing
 end
