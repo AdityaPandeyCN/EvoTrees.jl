@@ -85,6 +85,9 @@ function grow_tree!(
         )
 
         n_feats = length(cache.js)
+        if backend isa CUDA.CUDABackend || typeof(backend).name.name == :CUDABackend
+            CUDA.synchronize()
+        end
         find_split_root! = find_best_split_parallel_kernel!(backend)
         find_split_root!(
             L,
@@ -178,6 +181,9 @@ function grow_tree!(
 
             n_feats = length(cache.js)
             
+            if backend isa CUDA.CUDABackend || typeof(backend).name.name == :CUDABackend
+                CUDA.synchronize()
+            end
             find_split_parallel! = find_best_split_parallel_kernel!(backend)
             find_split_parallel!(
                 L,
