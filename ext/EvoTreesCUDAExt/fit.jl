@@ -38,6 +38,7 @@ end
 	grow_tree!(tree, params, cache, is)
 
 Grow a binary decision tree on GPU level-by-level using histogram-based splits.
+Uses GPU reduction for best split selection (no CPU round-trips).
 """
 function grow_tree!(
     tree::EvoTrees.Tree{L,K},
@@ -54,6 +55,7 @@ function grow_tree!(
         ∇_gpu[2, :] .= 1.0f0
     end
 
+    # Reset tree buffers
     cache.tree_split_gpu .= false
     cache.tree_cond_bin_gpu .= 0
     cache.tree_feat_gpu .= 0
@@ -69,6 +71,8 @@ function grow_tree!(
     cache.nidx .= 1
     view(cache.anodes_gpu, 1:1) .= 1
 
+    n_feats = length(cache.js)
+
     if params.max_depth == 1
         reduce_root_sums_kernel!(backend)(
             cache.nodes_sum_gpu, ∇_gpu, is;
@@ -77,6 +81,7 @@ function grow_tree!(
         KernelAbstractions.synchronize(backend)
         n_active = 0
     else
+        # Build histogram for root node
         update_hist_gpu!(
             cache.h∇, ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
             1, view(cache.anodes_gpu, 1:1), cache.nodes_sum_gpu, params,
@@ -84,7 +89,7 @@ function grow_tree!(
             cache.target_mask_buf, backend,
         )
 
-        n_feats = length(cache.js)
+        # Find best split for root - parallel over features
         if backend isa CUDA.CUDABackend || typeof(backend).name.name == :CUDABackend
             CUDA.synchronize()
         end
@@ -103,30 +108,23 @@ function grow_tree!(
         )
         KernelAbstractions.synchronize(backend)
 
-        gains_cpu = Array(view(cache.gains_per_feat_gpu, 1:n_feats, 1:1))
-        bins_cpu = Array(view(cache.bins_per_feat_gpu, 1:n_feats, 1:1))
-        js_cpu = Array(cache.js)
-
-        best_f_idx = 1
-        best_gain = gains_cpu[1, 1]
-        for f_idx in 2:n_feats
-            if gains_cpu[f_idx, 1] > best_gain
-                best_gain = gains_cpu[f_idx, 1]
-                best_f_idx = f_idx
-            end
-        end
-
-        best_gain_cpu = [best_gain]
-        best_bin_cpu = Int32[bins_cpu[best_f_idx, 1]]
-        best_feat_cpu = Int32[js_cpu[best_f_idx]]
-        
-        copyto!(view(cache.best_gain_gpu, 1:1), best_gain_cpu)
-        copyto!(view(cache.best_bin_gpu, 1:1), best_bin_cpu)
-        copyto!(view(cache.best_feat_gpu, 1:1), best_feat_cpu)
+        # GPU reduction for root node
+        reduce_best_split_kernel!(backend)(
+            view(cache.best_gain_gpu, 1:1),
+            view(cache.best_bin_gpu, 1:1),
+            view(cache.best_feat_gpu, 1:1),
+            view(cache.gains_per_feat_gpu, 1:n_feats, 1:1),
+            view(cache.bins_per_feat_gpu, 1:n_feats, 1:1),
+            cache.js,
+            n_feats;
+            ndrange=1
+        )
+        KernelAbstractions.synchronize(backend)
 
         n_active = 1
     end
 
+    # Main tree building loop - level by level
     for depth in 1:(params.max_depth-1)
         iszero(n_active) && break
 
@@ -134,12 +132,13 @@ function grow_tree!(
         active_nodes = view(cache.anodes_gpu, 1:n_active)
 
         if depth >= 2
-            
+            # Reset histogram subtraction buffers
             cache.build_nodes_gpu .= 0
             cache.subtract_nodes_gpu .= 0
             cache.build_count .= 0
             cache.subtract_count .= 0
 
+            # Count observations per node for build/subtract decision
             cache.node_counts_gpu .= 0
             count_nodes_kernel!(backend)(
                 cache.node_counts_gpu, cache.nidx, is;
@@ -147,6 +146,7 @@ function grow_tree!(
             )
             KernelAbstractions.synchronize(backend)
 
+            # Separate nodes into build vs subtract lists
             separate_kernel! = separate_nodes_kernel!(backend)
             separate_kernel!(
                 cache.build_nodes_gpu, cache.build_count,
@@ -157,9 +157,11 @@ function grow_tree!(
             )
             KernelAbstractions.synchronize(backend)
 
+            # Get counts (small transfers - 1 integer each)
             build_count_val = Array(cache.build_count)[1]
             subtract_count_val = Array(cache.subtract_count)[1]
 
+            # Build histograms for smaller children
             if build_count_val > 0
                 update_hist_gpu!(
                     cache.h∇, ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
@@ -170,6 +172,7 @@ function grow_tree!(
                 )
             end
 
+            # Compute histograms for larger children via subtraction
             if subtract_count_val > 0
                 subtract_hist_kernel!(backend)(
                     cache.h∇,
@@ -179,8 +182,7 @@ function grow_tree!(
                 KernelAbstractions.synchronize(backend)
             end
 
-            n_feats = length(cache.js)
-            
+            # Find best splits - parallel over (node, feature) pairs
             if backend isa CUDA.CUDABackend || typeof(backend).name.name == :CUDABackend
                 CUDA.synchronize()
             end
@@ -195,38 +197,27 @@ function grow_tree!(
                 params.lambda, params.L2, params.min_weight,
                 cache.K, n_feats,
                 cache.sums_temp_par_gpu;
-                ndrange = n_active * n_feats
+                ndrange=n_active * n_feats
             )
             KernelAbstractions.synchronize(backend)
 
-            gains_cpu = Array(view(cache.gains_per_feat_gpu, 1:n_feats, 1:n_active))
-            bins_cpu = Array(view(cache.bins_per_feat_gpu, 1:n_feats, 1:n_active))
-            js_cpu = Array(cache.js)
-            
-            best_gains_cpu = Vector{Float64}(undef, n_active)
-            best_bins_cpu = Vector{Int32}(undef, n_active)
-            best_feats_cpu = Vector{Int32}(undef, n_active)
-            
-            for n_idx in 1:n_active
-                best_f_idx = 1
-                best_gain = gains_cpu[1, n_idx]
-                for f_idx in 2:n_feats
-                    if gains_cpu[f_idx, n_idx] > best_gain
-                        best_gain = gains_cpu[f_idx, n_idx]
-                        best_f_idx = f_idx
-                    end
-                end
-                best_gains_cpu[n_idx] = best_gain
-                best_bins_cpu[n_idx] = bins_cpu[best_f_idx, n_idx]
-                best_feats_cpu[n_idx] = js_cpu[best_f_idx]
-            end
-            
-            copyto!(view(cache.best_gain_gpu, 1:n_active), best_gains_cpu)
-            copyto!(view(cache.best_bin_gpu, 1:n_active), best_bins_cpu)
-            copyto!(view(cache.best_feat_gpu, 1:n_active), best_feats_cpu)
-            
+            # ================================================================
+            # GPU REDUCTION - NO CPU ROUND-TRIP!
+            # ================================================================
+            reduce_best_split_kernel!(backend)(
+                view(cache.best_gain_gpu, 1:n_active),
+                view(cache.best_bin_gpu, 1:n_active),
+                view(cache.best_feat_gpu, 1:n_active),
+                view(cache.gains_per_feat_gpu, 1:n_feats, 1:n_active),
+                view(cache.bins_per_feat_gpu, 1:n_feats, 1:n_active),
+                cache.js,
+                n_feats;
+                ndrange=n_active
+            )
+            KernelAbstractions.synchronize(backend)
         end
 
+        # Apply splits and create child nodes
         apply_splits_kernel!(backend)(
             cache.tree_split_gpu, cache.tree_cond_bin_gpu, cache.tree_feat_gpu,
             cache.tree_gain_gpu, cache.nodes_sum_gpu,
@@ -241,11 +232,13 @@ function grow_tree!(
         )
         KernelAbstractions.synchronize(backend)
 
+        # Get number of active nodes for next level
         n_active = Array(cache.n_next_active_gpu)[1]
         if n_active > 0
             copyto!(view(cache.anodes_gpu, 1:n_active), view(cache.n_next_gpu, 1:n_active))
         end
 
+        # Update observation-to-node assignments
         if n_active > 0
             update_nodes_idx_kernel!(backend)(
                 cache.nidx, is, cache.x_bin, cache.tree_feat_gpu,
@@ -256,15 +249,18 @@ function grow_tree!(
         end
     end
 
+    # Copy final tree structure to CPU
     copyto!(tree.split, cache.tree_split_gpu)
     copyto!(tree.feat, cache.tree_feat_gpu)
     copyto!(tree.cond_bin, cache.tree_cond_bin_gpu)
     copyto!(tree.gain, cache.tree_gain_gpu)
     copyto!(tree.w, view(cache.nodes_sum_gpu, size(cache.nodes_sum_gpu, 1), 1:length(tree.w)))
 
+    # Compute leaf predictions
     leaf_nodes = findall(!, tree.split)
 
     if L <: EvoTrees.Quantile
+        # Quantile regression needs per-sample data
         cpu_data = (
             nidx=Array(cache.nidx),
             is=Array(is),
@@ -276,7 +272,6 @@ function grow_tree!(
         sizehint!(leaf_map, length(leaf_nodes))
         for i in 1:length(cpu_data.is)
             leaf_id = cpu_data.nidx[cpu_data.is[i]]
-
             if leaf_id > 0 && leaf_id <= length(tree.split) && !tree.split[leaf_id]
                 if !haskey(leaf_map, leaf_id)
                     leaf_map[leaf_id] = UInt32[]
@@ -291,12 +286,11 @@ function grow_tree!(
             if !isempty(node_is)
                 EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_view, L, params, cpu_data.∇, node_is)
             else
-                
                 tree.pred[:, n] .= 0
             end
         end
     else
-        
+        # Standard leaf prediction
         nodes_sum_cpu = Array(cache.nodes_sum_gpu)
         Threads.@threads for n in leaf_nodes
             node_sum_view = view(nodes_sum_cpu, :, n)

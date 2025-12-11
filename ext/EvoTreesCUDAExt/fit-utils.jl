@@ -537,3 +537,43 @@ function update_hist_gpu!(
     KernelAbstractions.synchronize(backend)
 end
 
+"""
+    reduce_best_split_kernel!(best_gain, best_bin, best_feat, gains, bins, js, n_feats)
+
+Reduce per-feature gains to find the best split for each active node entirely on GPU.
+Eliminates CPU round-trip for best split selection.
+
+Each thread handles one active node and finds the best feature for that node.
+"""
+@kernel function reduce_best_split_kernel!(
+    best_gain,                      # Output: [n_active] best gain per node
+    best_bin,                       # Output: [n_active] best bin per node
+    best_feat,                      # Output: [n_active] best feature per node
+    @Const(gains),                  # Input: [n_feats, n_active] gain per (feat, node)
+    @Const(bins),                   # Input: [n_feats, n_active] bin per (feat, node)
+    @Const(js),                     # Input: [n_feats] feature indices
+    n_feats::Int
+)
+    n_idx = @index(Global)
+    
+    @inbounds if n_idx <= size(gains, 2)
+        # Initialize with first feature
+        best_f_idx = 1
+        best_g = gains[1, n_idx]
+        
+        # Linear scan to find best feature for this node
+        for f_idx in 2:n_feats
+            g = gains[f_idx, n_idx]
+            if g > best_g
+                best_g = g
+                best_f_idx = f_idx
+            end
+        end
+        
+        # Write results directly to GPU memory
+        best_gain[n_idx] = best_g
+        best_bin[n_idx] = bins[best_f_idx, n_idx]
+        best_feat[n_idx] = js[best_f_idx]
+    end
+end
+
