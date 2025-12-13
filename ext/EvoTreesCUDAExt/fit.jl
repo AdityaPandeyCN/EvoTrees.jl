@@ -89,10 +89,14 @@ function grow_tree!(
             cache.target_mask_buf, backend,
         )
 
+        # Precompute nodes_sum for root node
+        compute_nodes_sum_kernel!(backend)(
+            cache.nodes_sum_gpu, cache.h∇, view(cache.anodes_gpu, 1:1), cache.K;
+            ndrange=(2 * cache.K + 1),
+        )
+        KernelAbstractions.synchronize(backend)
+
         # Find best split for root - parallel over features
-        if backend isa CUDA.CUDABackend || typeof(backend).name.name == :CUDABackend
-            CUDA.synchronize()
-        end
         find_split_root! = find_best_split_parallel_kernel!(backend)
         find_split_root!(
             L,
@@ -182,10 +186,14 @@ function grow_tree!(
                 KernelAbstractions.synchronize(backend)
             end
 
+            # Precompute nodes_sum for all active nodes before split finding
+            compute_nodes_sum_kernel!(backend)(
+                cache.nodes_sum_gpu, cache.h∇, active_nodes, cache.K;
+                ndrange=n_active * (2 * cache.K + 1),
+            )
+            KernelAbstractions.synchronize(backend)
+
             # Find best splits - parallel over (node, feature) pairs
-            if backend isa CUDA.CUDABackend || typeof(backend).name.name == :CUDABackend
-                CUDA.synchronize()
-            end
             find_split_parallel! = find_best_split_parallel_kernel!(backend)
             find_split_parallel!(
                 L,
@@ -201,9 +209,7 @@ function grow_tree!(
             )
             KernelAbstractions.synchronize(backend)
 
-            # ================================================================
-            # GPU REDUCTION - NO CPU ROUND-TRIP!
-            # ================================================================
+            # GPU reduction for best split selection
             reduce_best_split_kernel!(backend)(
                 view(cache.best_gain_gpu, 1:n_active),
                 view(cache.best_bin_gpu, 1:n_active),
@@ -330,15 +336,12 @@ Apply splits by creating child nodes if gain exceeds gamma threshold, otherwise 
         for kk in 1:(2*K_val+1)
             sum_val = zero(eltype(nodes_sum))
             if is_numeric
-                
                 for b in 1:bin
                     sum_val += h∇[kk, b, feat, node]
                 end
             else
-                
                 sum_val = h∇[kk, bin, feat, node]
             end
-            
             nodes_sum[kk, child_l] = sum_val
             nodes_sum[kk, child_r] = nodes_sum[kk, node] - sum_val
         end
