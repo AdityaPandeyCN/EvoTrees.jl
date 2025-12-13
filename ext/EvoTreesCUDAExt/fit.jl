@@ -5,6 +5,7 @@ function EvoTrees.grow_evotree!(m::EvoTree{L,K}, cache::EvoTrees.CacheGPU, param
     for _ in 1:params.bagging_size
         is = EvoTrees.subsample(cache.is_full, cache.mask_cpu, cache.mask_gpu, params.rowsample, cache.rng)
 
+        # Feature sampling done on CPU then copied to GPU
         js_cpu = Vector{eltype(cache.js)}(undef, length(cache.js))
         EvoTrees.sample!(cache.rng, cache.js_, js_cpu, replace=false, ordered=true)
         copyto!(cache.js, js_cpu)
@@ -38,7 +39,6 @@ end
 	grow_tree!(tree, params, cache, is)
 
 Grow a binary decision tree on GPU level-by-level using histogram-based splits.
-Uses GPU reduction for best split selection (no CPU round-trips).
 """
 function grow_tree!(
     tree::EvoTrees.Tree{L,K},
@@ -55,7 +55,7 @@ function grow_tree!(
         ∇_gpu[2, :] .= 1.0f0
     end
 
-    # Reset tree buffers
+    # Initialize cache arrays
     cache.tree_split_gpu .= false
     cache.tree_cond_bin_gpu .= 0
     cache.tree_feat_gpu .= 0
@@ -73,6 +73,7 @@ function grow_tree!(
 
     n_feats = length(cache.js)
 
+    # Root node processing
     if params.max_depth == 1
         reduce_root_sums_kernel!(backend)(
             cache.nodes_sum_gpu, ∇_gpu, is;
@@ -81,7 +82,6 @@ function grow_tree!(
         KernelAbstractions.synchronize(backend)
         n_active = 0
     else
-        # Build histogram for root node
         update_hist_gpu!(
             cache.h∇, ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
             1, view(cache.anodes_gpu, 1:1), cache.nodes_sum_gpu, params,
@@ -89,16 +89,13 @@ function grow_tree!(
             cache.target_mask_buf, backend,
         )
 
-        # Precompute nodes_sum for root node
         compute_nodes_sum_kernel!(backend)(
             cache.nodes_sum_gpu, cache.h∇, view(cache.anodes_gpu, 1:1), cache.K;
             ndrange=(2 * cache.K + 1),
         )
         KernelAbstractions.synchronize(backend)
 
-        # Find best split for root - parallel over features
-        find_split_root! = find_best_split_parallel_kernel!(backend)
-        find_split_root!(
+        find_best_split_parallel_kernel!(backend)(
             L,
             view(cache.gains_per_feat_gpu, 1:n_feats, 1:1),
             view(cache.bins_per_feat_gpu, 1:n_feats, 1:1),
@@ -106,43 +103,41 @@ function grow_tree!(
             view(cache.anodes_gpu, 1:1),
             cache.js, cache.feattypes_gpu, cache.monotone_constraints_gpu,
             params.lambda, params.L2, params.min_weight,
-            cache.K, n_feats,
-            cache.sums_temp_par_gpu;
+            cache.K, n_feats, cache.sums_temp_par_gpu;
             ndrange=n_feats,
         )
         KernelAbstractions.synchronize(backend)
 
-        # GPU reduction for root node
         reduce_best_split_kernel!(backend)(
             view(cache.best_gain_gpu, 1:1),
             view(cache.best_bin_gpu, 1:1),
             view(cache.best_feat_gpu, 1:1),
             view(cache.gains_per_feat_gpu, 1:n_feats, 1:1),
             view(cache.bins_per_feat_gpu, 1:n_feats, 1:1),
-            cache.js,
-            n_feats;
-            ndrange=1
+            cache.js, n_feats;
+            ndrange=1,
         )
         KernelAbstractions.synchronize(backend)
 
         n_active = 1
     end
 
-    # Main tree building loop - level by level
+    # Main loop: build tree level by level
     for depth in 1:(params.max_depth-1)
         iszero(n_active) && break
 
         view(cache.n_next_active_gpu, 1:1) .= 0
         active_nodes = view(cache.anodes_gpu, 1:n_active)
 
+        # Histogram subtraction (depth ≥ 2): h∇[big] = h∇[parent] - h∇[small]
         if depth >= 2
-            # Reset histogram subtraction buffers
+            # Clear tracking arrays
             cache.build_nodes_gpu .= 0
             cache.subtract_nodes_gpu .= 0
             cache.build_count .= 0
             cache.subtract_count .= 0
 
-            # Count observations per node for build/subtract decision
+            # Separate active nodes into BUILD (smaller) and SUBTRACT (larger) using raw counts
             cache.node_counts_gpu .= 0
             count_nodes_kernel!(backend)(
                 cache.node_counts_gpu, cache.nidx, is;
@@ -150,7 +145,6 @@ function grow_tree!(
             )
             KernelAbstractions.synchronize(backend)
 
-            # Separate nodes into build vs subtract lists
             separate_kernel! = separate_nodes_kernel!(backend)
             separate_kernel!(
                 cache.build_nodes_gpu, cache.build_count,
@@ -161,11 +155,10 @@ function grow_tree!(
             )
             KernelAbstractions.synchronize(backend)
 
-            # Get counts (small transfers - 1 integer each)
             build_count_val = Array(cache.build_count)[1]
             subtract_count_val = Array(cache.subtract_count)[1]
 
-            # Build histograms for smaller children
+            # Build histograms only for smaller children (observation scan)
             if build_count_val > 0
                 update_hist_gpu!(
                     cache.h∇, ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
@@ -176,7 +169,7 @@ function grow_tree!(
                 )
             end
 
-            # Compute histograms for larger children via subtraction
+            # Compute larger children via subtraction (no observation scan)
             if subtract_count_val > 0
                 subtract_hist_kernel!(backend)(
                     cache.h∇,
@@ -186,16 +179,14 @@ function grow_tree!(
                 KernelAbstractions.synchronize(backend)
             end
 
-            # Precompute nodes_sum for all active nodes before split finding
             compute_nodes_sum_kernel!(backend)(
                 cache.nodes_sum_gpu, cache.h∇, active_nodes, cache.K;
                 ndrange=n_active * (2 * cache.K + 1),
             )
             KernelAbstractions.synchronize(backend)
 
-            # Find best splits - parallel over (node, feature) pairs
-            find_split_parallel! = find_best_split_parallel_kernel!(backend)
-            find_split_parallel!(
+            # Find best splits for all active nodes (built or subtracted)
+            find_best_split_parallel_kernel!(backend)(
                 L,
                 view(cache.gains_per_feat_gpu, 1:n_feats, 1:n_active),
                 view(cache.bins_per_feat_gpu, 1:n_feats, 1:n_active),
@@ -203,27 +194,24 @@ function grow_tree!(
                 active_nodes,
                 cache.js, cache.feattypes_gpu, cache.monotone_constraints_gpu,
                 params.lambda, params.L2, params.min_weight,
-                cache.K, n_feats,
-                cache.sums_temp_par_gpu;
-                ndrange=n_active * n_feats
+                cache.K, n_feats, cache.sums_temp_par_gpu;
+                ndrange=n_active * n_feats,
             )
             KernelAbstractions.synchronize(backend)
 
-            # GPU reduction for best split selection
             reduce_best_split_kernel!(backend)(
                 view(cache.best_gain_gpu, 1:n_active),
                 view(cache.best_bin_gpu, 1:n_active),
                 view(cache.best_feat_gpu, 1:n_active),
                 view(cache.gains_per_feat_gpu, 1:n_feats, 1:n_active),
                 view(cache.bins_per_feat_gpu, 1:n_feats, 1:n_active),
-                cache.js,
-                n_feats;
-                ndrange=n_active
+                cache.js, n_feats;
+                ndrange=n_active,
             )
             KernelAbstractions.synchronize(backend)
         end
 
-        # Apply splits and create child nodes
+        # Apply splits: create children if gain > threshold, else make leaf
         apply_splits_kernel!(backend)(
             cache.tree_split_gpu, cache.tree_cond_bin_gpu, cache.tree_feat_gpu,
             cache.tree_gain_gpu, cache.nodes_sum_gpu,
@@ -238,13 +226,12 @@ function grow_tree!(
         )
         KernelAbstractions.synchronize(backend)
 
-        # Get number of active nodes for next level
         n_active = Array(cache.n_next_active_gpu)[1]
         if n_active > 0
             copyto!(view(cache.anodes_gpu, 1:n_active), view(cache.n_next_gpu, 1:n_active))
         end
 
-        # Update observation-to-node assignments
+        # Update observation→node assignments for next level
         if n_active > 0
             update_nodes_idx_kernel!(backend)(
                 cache.nidx, is, cache.x_bin, cache.tree_feat_gpu,
@@ -255,18 +242,17 @@ function grow_tree!(
         end
     end
 
-    # Copy final tree structure to CPU
+    # Copy tree to CPU and compute leaf predictions
     copyto!(tree.split, cache.tree_split_gpu)
     copyto!(tree.feat, cache.tree_feat_gpu)
     copyto!(tree.cond_bin, cache.tree_cond_bin_gpu)
     copyto!(tree.gain, cache.tree_gain_gpu)
     copyto!(tree.w, view(cache.nodes_sum_gpu, size(cache.nodes_sum_gpu, 1), 1:length(tree.w)))
 
-    # Compute leaf predictions
     leaf_nodes = findall(!, tree.split)
 
+    # Quantile: needs exact observation indices for median computation
     if L <: EvoTrees.Quantile
-        # Quantile regression needs per-sample data
         cpu_data = (
             nidx=Array(cache.nidx),
             is=Array(is),
@@ -278,6 +264,7 @@ function grow_tree!(
         sizehint!(leaf_map, length(leaf_nodes))
         for i in 1:length(cpu_data.is)
             leaf_id = cpu_data.nidx[cpu_data.is[i]]
+
             if leaf_id > 0 && leaf_id <= length(tree.split) && !tree.split[leaf_id]
                 if !haskey(leaf_map, leaf_id)
                     leaf_map[leaf_id] = UInt32[]
@@ -286,17 +273,19 @@ function grow_tree!(
             end
         end
 
+        # Process Quantile leaves with multithreading
         Threads.@threads for n in leaf_nodes
             node_sum_view = view(cpu_data.nodes_sum, :, n)
             node_is = get(leaf_map, n, UInt32[])
             if !isempty(node_is)
                 EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_view, L, params, cpu_data.∇, node_is)
             else
+                # Handle empty leaf - set to zero prediction
                 tree.pred[:, n] .= 0
             end
         end
     else
-        # Standard leaf prediction
+        # All other losses (including MAE): use histogram-based predictions with multithreading
         nodes_sum_cpu = Array(cache.nodes_sum_gpu)
         Threads.@threads for n in leaf_nodes
             node_sum_view = view(nodes_sum_cpu, :, n)
@@ -333,15 +322,19 @@ Apply splits by creating child nodes if gain exceeds gamma threshold, otherwise 
         bin = Int(tree_cond_bin[node])
         is_numeric = feattypes[feat]
 
+        # Compute child gradient sums
         for kk in 1:(2*K_val+1)
             sum_val = zero(eltype(nodes_sum))
             if is_numeric
+                # Numeric: left child gets bins [1..threshold]
                 for b in 1:bin
                     sum_val += h∇[kk, b, feat, node]
                 end
             else
+                # Categorical: left child gets only matching bin
                 sum_val = h∇[kk, bin, feat, node]
             end
+            # Store child sums
             nodes_sum[kk, child_l] = sum_val
             nodes_sum[kk, child_r] = nodes_sum[kk, node] - sum_val
         end

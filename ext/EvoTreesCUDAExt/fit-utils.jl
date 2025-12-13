@@ -163,29 +163,25 @@ end
 """
     compute_nodes_sum_kernel!(nodes_sum, h∇, active_nodes, K)
 
-Precompute gradient sums for each active node by summing across all bins.
-Each thread handles one (node, k) pair for maximum parallelism.
+Precompute gradient sums for each active node by summing histogram across all bins.
 """
 @kernel function compute_nodes_sum_kernel!(
-    nodes_sum,                      # Output: [2K+1, n_nodes] gradient sums per node
-    @Const(h∇),                     # Input: histograms [2K+1, n_bins, n_feats, n_nodes]
-    @Const(active_nodes),           # Input: which nodes to process
-    K::Int                          # Number of output dimensions
+    nodes_sum,
+    @Const(h∇),
+    @Const(active_nodes),
+    K::Int
 )
     gidx = @index(Global)
-    
     n_active = length(active_nodes)
     n_k = 2 * K + 1
-    
+
     @inbounds if gidx <= n_active * n_k
-        n_idx = (gidx - 1) ÷ n_k + 1    # Which node (1 to n_active)
-        k = (gidx - 1) % n_k + 1         # Which gradient component (1 to 2K+1)
-        
+        n_idx = (gidx - 1) ÷ n_k + 1
+        k = (gidx - 1) % n_k + 1
         node = active_nodes[n_idx]
-        
+
         if node > 0
             nbins = size(h∇, 2)
-            # Use first feature to sum (all features have same total)
             sum_val = zero(eltype(nodes_sum))
             for b in 1:nbins
                 sum_val += h∇[k, b, 1, node]
@@ -195,49 +191,50 @@ Each thread handles one (node, k) pair for maximum parallelism.
     end
 end
 
+"""
+	find_best_split_parallel_kernel!(L, gains, bins, h∇, nodes_sum, active_nodes, js, feattypes, monotone_constraints, lambda, L2, min_weight, K, n_feats, sums_temp)
+
+Find the best split for each (node, feature) pair in parallel.
+"""
 @kernel function find_best_split_parallel_kernel!(
-    ::Type{L},                      # Loss function type
-    gains::AbstractMatrix{T},       # Output: [n_feats, n_active] best gain per (feat, node)
-    bins::AbstractMatrix{Int32},    # Output: [n_feats, n_active] best bin per (feat, node)
-    @Const(h∇),                     # Input: histograms [2K+1, n_bins, n_feats, n_nodes]
-    @Const(nodes_sum),              # Input: gradient sums per node [2K+1, n_nodes] (precomputed)
-    @Const(active_nodes),           # Input: which nodes to process
-    @Const(js),                     # Input: feature indices to consider
-    @Const(feattypes),              # Input: feature types (numeric/categorical)
-    @Const(monotone_constraints),   # Input: monotonicity constraints per feature
-    lambda::T,                      # Regularization: L1-like penalty
-    L2::T,                          # Regularization: L2 penalty
-    min_weight::T,                  # Minimum observations per leaf
-    K::Int,                         # Number of output dimensions
-    n_feats::Int,                   # Number of features (for indexing)
+    ::Type{L},
+    gains::AbstractMatrix{T},
+    bins::AbstractMatrix{Int32},
+    @Const(h∇),
+    @Const(nodes_sum),
+    @Const(active_nodes),
+    @Const(js),
+    @Const(feattypes),
+    @Const(monotone_constraints),
+    lambda::T,
+    L2::T,
+    min_weight::T,
+    K::Int,
+    n_feats::Int,
     sums_temp::AbstractArray{T,2},
 ) where {T,L}
     gidx = @index(Global)
-    
     n_active = length(active_nodes)
-    
+
     @inbounds if gidx <= n_active * n_feats
-        n_idx = (gidx - 1) ÷ n_feats + 1    # Which node (1 to n_active)
-        f_idx = (gidx - 1) % n_feats + 1    # Which feature (1 to n_feats)
-        
+        n_idx = (gidx - 1) ÷ n_feats + 1
+        f_idx = (gidx - 1) % n_feats + 1
         node = active_nodes[n_idx]
-        
+
         if node == 0
             gains[f_idx, n_idx] = T(-Inf)
             bins[f_idx, n_idx] = Int32(0)
         else
             nbins = size(h∇, 2)
             eps = T(1e-8)
-            
+
             f = js[f_idx]
             is_numeric = feattypes[f]
             constraint = monotone_constraints[f]
-            
-            # Read precomputed node totals (no race condition, no redundant work)
+
             w_p = nodes_sum[2*K+1, node]
             λw_p = lambda * w_p
-            
-            # Compute parent gain
+
             gain_p = zero(T)
             if L <: EvoTrees.GradientRegression
                 if K == 1
@@ -283,10 +280,11 @@ end
                 Zp = VHM / (VHM + EVPV)
                 gain_p = Zp * abs(nodes_sum[1, node]) / (1 + L2 / w_p)
             end
-            
+
             g_best = T(-Inf)
             b_best = Int32(0)
             temp_idx = (n_idx - 1) * n_feats + f_idx
+
             acc1 = zero(T)
             acc2 = zero(T)
             accw = zero(T)
@@ -295,11 +293,12 @@ end
                     sums_temp[kk, temp_idx] = zero(T)
                 end
             end
+
             b_max = is_numeric ? (nbins - 1) : nbins
             for b in 1:b_max
                 skip_bin = false
                 g_val = zero(T)
-                
+
                 if K == 1
                     if is_numeric
                         acc1 += h∇[1, b, f, node]
@@ -312,11 +311,10 @@ end
                     end
                     w_l = accw
                     w_r = w_p - w_l
-                    
                     if w_l < min_weight || w_r < min_weight
                         skip_bin = true
                     end
-                    
+
                     if !skip_bin
                         if L <: EvoTrees.GradientRegression
                             g_l = acc1
@@ -328,7 +326,7 @@ end
                             d_l = d_l < eps ? eps : d_l
                             d_r = d_r < eps ? eps : d_r
                             g_val = (g_l^2 / d_l + g_r^2 / d_r) / 2 - gain_p
-                            
+
                             if constraint != 0
                                 pred_l = -g_l / d_l
                                 pred_r = -g_r / d_r
@@ -376,7 +374,6 @@ end
                         end
                     end
                 else
-                    # K > 1 case
                     if is_numeric
                         for kk in 1:(2*K+1)
                             sums_temp[kk, temp_idx] += h∇[kk, b, f, node]
@@ -386,17 +383,15 @@ end
                             sums_temp[kk, temp_idx] = h∇[kk, b, f, node]
                         end
                     end
-                    
+
                     w_l = sums_temp[2*K+1, temp_idx]
                     w_r = w_p - w_l
-                    
                     if w_l < min_weight || w_r < min_weight
                         skip_bin = true
                     end
-                    
+
                     if !skip_bin
                         if L == EvoTrees.MLogLoss
-                            # No constraint check for MLogLoss
                         elseif constraint != 0
                             g_l1 = sums_temp[1, temp_idx]
                             h_l1 = sums_temp[K+1, temp_idx]
@@ -412,7 +407,7 @@ end
                                 skip_bin = true
                             end
                         end
-                        
+
                         if !skip_bin
                             g_val = zero(T)
                             for k in 1:K
@@ -430,14 +425,13 @@ end
                         end
                     end
                 end
-                
-                # Update best if not skipped and better than current best
+
                 if !skip_bin && g_val > g_best
                     g_best = g_val
                     b_best = Int32(b)
                 end
             end
-            
+
             gains[f_idx, n_idx] = g_best
             bins[f_idx, n_idx] = b_best
         end
@@ -547,28 +541,23 @@ end
 """
     reduce_best_split_kernel!(best_gain, best_bin, best_feat, gains, bins, js, n_feats)
 
-Reduce per-feature gains to find the best split for each active node entirely on GPU.
-Eliminates CPU round-trip for best split selection.
-
-Each thread handles one active node and finds the best feature for that node.
+Reduce per-feature gains to find the best split for each active node.
 """
 @kernel function reduce_best_split_kernel!(
-    best_gain,                      # Output: [n_active] best gain per node
-    best_bin,                       # Output: [n_active] best bin per node
-    best_feat,                      # Output: [n_active] best feature per node
-    @Const(gains),                  # Input: [n_feats, n_active] gain per (feat, node)
-    @Const(bins),                   # Input: [n_feats, n_active] bin per (feat, node)
-    @Const(js),                     # Input: [n_feats] feature indices
+    best_gain,
+    best_bin,
+    best_feat,
+    @Const(gains),
+    @Const(bins),
+    @Const(js),
     n_feats::Int
 )
     n_idx = @index(Global)
-    
+
     @inbounds if n_idx <= size(gains, 2)
-        # Initialize with first feature
         best_f_idx = 1
         best_g = gains[1, n_idx]
-        
-        # Linear scan to find best feature for this node
+
         for f_idx in 2:n_feats
             g = gains[f_idx, n_idx]
             if g > best_g
@@ -576,8 +565,7 @@ Each thread handles one active node and finds the best feature for that node.
                 best_f_idx = f_idx
             end
         end
-        
-        # Write results directly to GPU memory
+
         best_gain[n_idx] = best_g
         best_bin[n_idx] = bins[best_f_idx, n_idx]
         best_feat[n_idx] = js[best_f_idx]
