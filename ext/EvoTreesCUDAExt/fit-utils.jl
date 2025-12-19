@@ -447,71 +447,70 @@ end
         if node == 0
             gains[f_idx, n_idx] = T(-Inf)
             bins[f_idx, n_idx] = Int32(0)
-            return
-        end
+        else
+            f = js[f_idx]
+            nbins = size(h∇, 2)
+            is_numeric = feattypes[f]
+            constraint = monotone_constraints[f]
+            w_p = nodes_sum[2*K+1, node]
+            λw = lambda * w_p
 
-        f = js[f_idx]
-        nbins = size(h∇, 2)
-        is_numeric = feattypes[f]
-        constraint = monotone_constraints[f]
-        w_p = nodes_sum[2*K+1, node]
-        λw = lambda * w_p
+            gain_p = parent_gain(L, nodes_sum, node, K, λw, L2, w_p, ε)
 
-        gain_p = parent_gain(L, nodes_sum, node, K, λw, L2, w_p, ε)
+            g_best = T(-Inf)
+            b_best = Int32(0)
+            temp_idx = (n_idx - 1) * n_feats + f_idx
 
-        g_best = T(-Inf)
-        b_best = Int32(0)
-        temp_idx = (n_idx - 1) * n_feats + f_idx
-
-        acc1, acc2, accw = zero(T), zero(T), zero(T)
-        if K > 1
-            for kk in 1:(2*K+1)
-                sums_temp[kk, temp_idx] = zero(T)
-            end
-        end
-
-        b_max = is_numeric ? (nbins - 1) : nbins
-        for b in 1:b_max
-            if K == 1
-                acc1, acc2, accw = accumulate_hist_k1(h∇, f, b, node, is_numeric, acc1, acc2, accw)
-                w_l, w_r = accw, w_p - accw
-
-                (w_l < min_weight || w_r < min_weight) && continue
-
-                g_l, h_l = acc1, acc2
-                g_r = nodes_sum[1, node] - g_l
-                h_r = nodes_sum[2, node] - h_l
-                g_p = nodes_sum[1, node]
-                h_p = nodes_sum[2, node]
-
-                check_monotone(L, constraint, g_l, h_l, g_r, h_r, w_l, w_r, lambda, L2, ε) && continue
-
-                stats = SplitStats(g_l, h_l, w_l, g_r, h_r, w_r, g_p, h_p, w_p)
-                g_val = split_gain(L, stats, gain_p, lambda, L2, ε)
-            else
-                accumulate_hist_kn!(sums_temp, h∇, f, b, node, K, is_numeric, temp_idx)
-                w_l = sums_temp[2*K+1, temp_idx]
-                w_r = w_p - w_l
-
-                (w_l < min_weight || w_r < min_weight) && continue
-
-                g_l1 = sums_temp[1, temp_idx]
-                h_l1 = sums_temp[K+1, temp_idx]
-                g_r1 = nodes_sum[1, node] - g_l1
-                h_r1 = nodes_sum[K+1, node] - h_l1
-                check_monotone(L, constraint, g_l1, h_l1, g_r1, h_r1, w_l, w_r, lambda, L2, ε) && continue
-
-                g_val = split_gain_multi(L, sums_temp, nodes_sum, node, temp_idx, K, w_l, w_r, gain_p, lambda, L2, ε)
+            acc1, acc2, accw = zero(T), zero(T), zero(T)
+            if K > 1
+                for kk in 1:(2*K+1)
+                    sums_temp[kk, temp_idx] = zero(T)
+                end
             end
 
-            if g_val > g_best
-                g_best = g_val
-                b_best = Int32(b)
-            end
-        end
+            b_max = is_numeric ? (nbins - 1) : nbins
+            for b in 1:b_max
+                if K == 1
+                    acc1, acc2, accw = accumulate_hist_k1(h∇, f, b, node, is_numeric, acc1, acc2, accw)
+                    w_l, w_r = accw, w_p - accw
 
-        gains[f_idx, n_idx] = g_best
-        bins[f_idx, n_idx] = b_best
+                    (w_l < min_weight || w_r < min_weight) && continue
+
+                    g_l, h_l = acc1, acc2
+                    g_r = nodes_sum[1, node] - g_l
+                    h_r = nodes_sum[2, node] - h_l
+                    g_p = nodes_sum[1, node]
+                    h_p = nodes_sum[2, node]
+
+                    check_monotone(L, constraint, g_l, h_l, g_r, h_r, w_l, w_r, lambda, L2, ε) && continue
+
+                    stats = SplitStats(g_l, h_l, w_l, g_r, h_r, w_r, g_p, h_p, w_p)
+                    g_val = split_gain(L, stats, gain_p, lambda, L2, ε)
+                else
+                    accumulate_hist_kn!(sums_temp, h∇, f, b, node, K, is_numeric, temp_idx)
+                    w_l = sums_temp[2*K+1, temp_idx]
+                    w_r = w_p - w_l
+
+                    (w_l < min_weight || w_r < min_weight) && continue
+
+                    g_l1 = sums_temp[1, temp_idx]
+                    h_l1 = sums_temp[K+1, temp_idx]
+                    g_r1 = nodes_sum[1, node] - g_l1
+                    h_r1 = nodes_sum[K+1, node] - h_l1
+                    check_monotone(L, constraint, g_l1, h_l1, g_r1, h_r1, w_l, w_r, lambda, L2, ε) && continue
+
+                    g_val = split_gain_multi(L, sums_temp, nodes_sum, node, temp_idx, K, w_l, w_r, gain_p, lambda, L2, ε)
+                end
+
+                if g_val > g_best
+                    g_best = g_val
+                    b_best = Int32(b)
+                end
+            end
+
+            gains[f_idx, n_idx] = g_best
+            bins[f_idx, n_idx] = b_best
+        end
     end
 end
 
