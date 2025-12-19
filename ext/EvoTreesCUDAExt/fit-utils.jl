@@ -195,39 +195,20 @@ Precompute gradient sums for each active node by summing histogram across all bi
 end
 
 """
-    find_best_split_gpu!(L, ..., backend)
+    find_best_split_parallel_kernel!(L, gains, bins, h∇, nodes_sum, active_nodes, 
+        js, feattypes, monotone_constraints, lambda, L2, min_weight, K, n_feats, sums_temp)
 
-Find the best split for each (node, feature) pair. Dispatches to a
-loss-specialized kernel. Julia compiles away the type checks on L.
+Find best split for each (node, feature) pair. Julia specializes on type L,
+compiling away loss-type branches at kernel generation time.
 """
-function find_best_split_gpu!(
-    ::Type{L}, gains, bins, h∇, nodes_sum, active_nodes, js,
-    feattypes, monotone_constraints,
-    lambda::T, L2::T, min_weight::T,
-    K::Int, n_feats::Int, sums_temp, backend
-) where {T,L}
-    ndrange = length(active_nodes) * n_feats
-    check_mono = L <: EvoTrees.GradientRegression || L <: EvoTrees.MLE2P
-    find_split_kernel!(backend)(
-        L, gains, bins, h∇, nodes_sum, active_nodes, js,
-        feattypes, monotone_constraints,
-        lambda, L2, min_weight, K, n_feats, sums_temp, check_mono;
-        ndrange
-    )
-    KernelAbstractions.synchronize(backend)
-end
-
-"""
-Split-finding kernel. Loss-specific gain computed inline; Julia specializes on L.
-"""
-@kernel function find_split_kernel!(
+@kernel function find_best_split_parallel_kernel!(
     ::Type{L},
     gains::AbstractMatrix{T},
     bins::AbstractMatrix{Int32},
     @Const(h∇), @Const(nodes_sum), @Const(active_nodes), @Const(js),
     @Const(feattypes), @Const(monotone_constraints),
     lambda::T, L2::T, min_weight::T,
-    K::Int, n_feats::Int, sums_temp::AbstractArray{T,2}, check_mono::Bool,
+    K::Int, n_feats::Int, sums_temp::AbstractArray{T,2},
 ) where {T,L}
     gidx = @index(Global)
     n_active = length(active_nodes)
@@ -244,7 +225,7 @@ Split-finding kernel. Loss-specific gain computed inline; Julia specializes on L
         else
             f, nbins = js[f_idx], size(h∇, 2)
             is_numeric = feattypes[f]
-            constraint = check_mono ? monotone_constraints[f] : Int32(0)
+            constraint = monotone_constraints[f]
             w_p = nodes_sum[2*K+1, node]
 
             # === Parent gain (compile-time specialized) ===
@@ -305,12 +286,14 @@ Split-finding kernel. Loss-specific gain computed inline; Julia specializes on L
                         d_l = h_l + lambda*w_l + L2; d_l = d_l < ε ? ε : d_l
                         d_r = h_r + lambda*w_r + L2; d_r = d_r < ε ? ε : d_r
                         g_val = (g_l^2/d_l + g_r^2/d_r)/2 - gain_p
-                        if constraint != 0
+                        # Monotone constraints only for GradientRegression/MLE2P
+                        if (L <: EvoTrees.GradientRegression || L <: EvoTrees.MLE2P) && constraint != 0
                             skip = (constraint == -1 && -g_l/d_l <= -g_r/d_r) ||
                                    (constraint == 1 && -g_l/d_l >= -g_r/d_r)
                         end
                     else
-                        if constraint != 0
+                        # Monotone constraints only for GradientRegression/MLE2P
+                        if (L <: EvoTrees.GradientRegression || L <: EvoTrees.MLE2P) && constraint != 0
                             g1, h1 = sums_temp[1,temp_idx], sums_temp[K+1,temp_idx]
                             d1l = h1 + lambda*w_l + L2; d1l = d1l < ε ? ε : d1l
                             d1r = nodes_sum[K+1,node] - h1 + lambda*w_r + L2; d1r = d1r < ε ? ε : d1r
