@@ -194,10 +194,42 @@ Precompute gradient sums for each active node by summing histogram across all bi
     end
 end
 
+#####################################################################
+# Split Finding: Gain Computation Traits & Helpers
+#####################################################################
+
+# Trait: losses using quadratic g²/(h+λw+L2) gain formula
+const QuadraticLoss = Union{EvoTrees.GradientRegression,EvoTrees.MLE2P,EvoTrees.MLogLoss}
+# Trait: losses using absolute deviation gain  
+const DeviationLoss = Union{EvoTrees.MAE,EvoTrees.Quantile}
+# Trait: losses supporting monotone constraints
+const MonotoneLoss = Union{EvoTrees.GradientRegression,EvoTrees.MLE2P}
+
+@inline _safe(x::T, ε::T) where {T} = x < ε ? ε : x
+
+# Quadratic gain: Σ g²/(h+λw+L2) for K dimensions
+@inline function _quadratic_gain(nodes_sum, node::Int, K::Int, λw::T, L2::T, ε::T) where {T}
+    gain = zero(T)
+    for k in 1:K
+        g, h = nodes_sum[k, node], nodes_sum[K+k, node]
+        gain += g^2 / _safe(h + λw + L2, ε)
+    end
+    return gain / 2
+end
+
+# Credibility factor Z = VHM/(VHM+EVPV) where VHM=μ², EVPV=E[X²]-μ²
+@inline function _cred_gain(μ::T, sum_sq::T, w::T, L2::T, ε::T) where {T}
+    VHM = μ^2
+    EVPV = _safe(sum_sq / w - VHM, ε)
+    Z = VHM / (VHM + EVPV)
+    return Z * abs(μ * w) / (1 + L2 / w)
+end
+
 """
-    find_best_split_parallel_kernel!(L, gains, bins, h∇, nodes_sum, active_nodes, js, feattypes, monotone_constraints, lambda, L2, min_weight, K, n_feats, sums_temp)
+    find_best_split_parallel_kernel!(...)
 
 Find the best split for each (node, feature) pair in parallel.
+Loss-specific behavior via type dispatch on L.
 """
 @kernel function find_best_split_parallel_kernel!(
     ::Type{L},
@@ -220,7 +252,6 @@ Find the best split for each (node, feature) pair in parallel.
     n_active = length(active_nodes)
 
     @inbounds if gidx <= n_active * n_feats
-        # Decode global index into (node_index, feature_index)
         n_idx = (gidx - 1) ÷ n_feats + 1
         f_idx = (gidx - 1) % n_feats + 1
         node = active_nodes[n_idx]
@@ -229,217 +260,118 @@ Find the best split for each (node, feature) pair in parallel.
             gains[f_idx, n_idx] = T(-Inf)
             bins[f_idx, n_idx] = Int32(0)
         else
-            nbins = size(h∇, 2)
-            eps = T(1e-8)
-
+            ε = T(1e-8)
             f = js[f_idx]
             is_numeric = feattypes[f]
             constraint = monotone_constraints[f]
+            nbins = size(h∇, 2)
 
             w_p = nodes_sum[2*K+1, node]
             λw_p = lambda * w_p
 
-            # Compute parent node gain for this loss type
-            gain_p = zero(T)
-            if L <: EvoTrees.GradientRegression
-                if K == 1
-                    g_p = nodes_sum[1, node]
-                    h_p = nodes_sum[2, node]
-                    denom_p = h_p + λw_p + L2
-                    denom_p = denom_p < eps ? eps : denom_p
-                    gain_p = g_p^2 / denom_p / 2
-                else
-                    for k in 1:K
-                        g_p = nodes_sum[k, node]
-                        h_p = nodes_sum[K+k, node]
-                        denom_p = h_p + λw_p + L2
-                        denom_p = denom_p < eps ? eps : denom_p
-                        gain_p += g_p^2 / denom_p / 2
-                    end
-                end
-            elseif L <: EvoTrees.MLE2P
-                g1 = nodes_sum[1, node]
-                g2 = nodes_sum[2, node]
-                h1 = nodes_sum[3, node]
-                h2 = nodes_sum[4, node]
-                denom1 = h1 + λw_p + L2
-                denom2 = h2 + λw_p + L2
-                denom1 = denom1 < eps ? eps : denom1
-                denom2 = denom2 < eps ? eps : denom2
-                gain_p = (g1^2 / denom1 + g2^2 / denom2) / 2
-            elseif L == EvoTrees.MLogLoss
-                for k in 1:K
-                    gk = nodes_sum[k, node]
-                    hk = nodes_sum[K+k, node]
-                    denom = hk + λw_p + L2
-                    denom = denom < eps ? eps : denom
-                    gain_p += gk^2 / denom / 2
-                end
-            elseif (L == EvoTrees.MAE || L == EvoTrees.Quantile)
-                gain_p = zero(T)
-            elseif L <: EvoTrees.Cred
-                μp = nodes_sum[1, node] / w_p
-                VHM = μp^2
-                EVPV = nodes_sum[2, node] / w_p - VHM
-                EVPV = EVPV < eps ? eps : EVPV
-                Zp = VHM / (VHM + EVPV)
-                gain_p = Zp * abs(nodes_sum[1, node]) / (1 + L2 / w_p)
+            # Parent gain by loss type
+            gain_p = if L <: QuadraticLoss
+                _quadratic_gain(nodes_sum, node, K, λw_p, L2, ε)
+            elseif L <: DeviationLoss
+                zero(T)
+            else # Cred
+                _cred_gain(nodes_sum[1, node] / w_p, nodes_sum[2, node], w_p, L2, ε)
             end
 
-            g_best = T(-Inf)
-            b_best = Int32(0)
-
-            # Unique column index for this thread's temporary storage
+            g_best, b_best = T(-Inf), Int32(0)
             temp_idx = (n_idx - 1) * n_feats + f_idx
 
-            acc1 = zero(T)
-            acc2 = zero(T)
-            accw = zero(T)
+            # Initialize accumulators
+            acc1, acc2, accw = zero(T), zero(T), zero(T)
             if K > 1
                 for kk in 1:(2*K+1)
                     sums_temp[kk, temp_idx] = zero(T)
                 end
             end
 
-            # Scan bins: numeric features exclude last bin, categorical include all
             b_max = is_numeric ? (nbins - 1) : nbins
             for b in 1:b_max
-                skip_bin = false
-                g_val = zero(T)
-
+                # Accumulate histogram values
                 if K == 1
-                    # Accumulate for numeric, direct assign for categorical
                     if is_numeric
                         acc1 += h∇[1, b, f, node]
                         acc2 += h∇[2, b, f, node]
                         accw += h∇[3, b, f, node]
                     else
-                        acc1 = h∇[1, b, f, node]
-                        acc2 = h∇[2, b, f, node]
-                        accw = h∇[3, b, f, node]
+                        acc1, acc2, accw = h∇[1, b, f, node], h∇[2, b, f, node], h∇[3, b, f, node]
                     end
-                    w_l = accw
-                    w_r = w_p - w_l
-                    if w_l < min_weight || w_r < min_weight
-                        skip_bin = true
-                    end
-
-                    if !skip_bin
-                        if L <: EvoTrees.GradientRegression
-                            g_l = acc1
-                            h_l = acc2
-                            g_r = nodes_sum[1, node] - g_l
-                            h_r = nodes_sum[2, node] - h_l
-                            d_l = h_l + lambda * w_l + L2
-                            d_r = h_r + lambda * w_r + L2
-                            d_l = d_l < eps ? eps : d_l
-                            d_r = d_r < eps ? eps : d_r
-                            g_val = (g_l^2 / d_l + g_r^2 / d_r) / 2 - gain_p
-
-                            if constraint != 0
-                                pred_l = -g_l / d_l
-                                pred_r = -g_r / d_r
-                                if (constraint == -1 && pred_l <= pred_r) || (constraint == 1 && pred_l >= pred_r)
-                                    skip_bin = true
-                                end
-                            end
-                        elseif L == EvoTrees.MAE
-                            μp = nodes_sum[1, node] / w_p
-                            μl = acc1 / w_l
-                            μr = (nodes_sum[1, node] - acc1) / w_r
-                            d_l = 1 + lambda + L2 / w_l
-                            d_r = 1 + lambda + L2 / w_r
-                            d_l = d_l < eps ? eps : d_l
-                            d_r = d_r < eps ? eps : d_r
-                            g_val = abs(μl - μp) * w_l / d_l + abs(μr - μp) * w_r / d_r
-                        elseif L == EvoTrees.Quantile
-                            μp = nodes_sum[1, node] / w_p
-                            μl = acc1 / w_l
-                            μr = (nodes_sum[1, node] - acc1) / w_r
-                            d_l = 1 + lambda + L2 / w_l
-                            d_r = 1 + lambda + L2 / w_r
-                            d_l = d_l < eps ? eps : d_l
-                            d_r = d_r < eps ? eps : d_r
-                            g_val = abs(μl - μp) * w_l / d_l + abs(μr - μp) * w_r / d_r
-                        elseif L <: EvoTrees.Cred
-                            μp = nodes_sum[1, node] / w_p
-                            VHM_p = μp^2
-                            EVPV_p = nodes_sum[2, node] / w_p - VHM_p
-                            EVPV_p = EVPV_p < eps ? eps : EVPV_p
-                            Zp = VHM_p / (VHM_p + EVPV_p)
-                            μl = acc1 / w_l
-                            VHM_l = μl^2
-                            EVPV_l = acc2 / w_l - VHM_l
-                            EVPV_l = EVPV_l < eps ? eps : EVPV_l
-                            Zl = VHM_l / (VHM_l + EVPV_l)
-                            g_l = Zl * abs(acc1) / (1 + L2 / w_l)
-                            μr = (nodes_sum[1, node] - acc1) / w_r
-                            VHM_r = μr^2
-                            EVPV_r = (nodes_sum[2, node] - acc2) / w_r - VHM_r
-                            EVPV_r = EVPV_r < eps ? eps : EVPV_r
-                            Zr = VHM_r / (VHM_r + EVPV_r)
-                            g_r = Zr * abs(nodes_sum[1, node] - acc1) / (1 + L2 / w_r)
-                            g_val = g_l + g_r - Zp * abs(nodes_sum[1, node]) / (1 + L2 / w_p)
-                        end
-                    end
+                    w_l, w_r = accw, w_p - accw
                 else
-                    # K > 1: accumulate into thread-local sums_temp column
-                    if is_numeric
-                        for kk in 1:(2*K+1)
+                    for kk in 1:(2*K+1)
+                        if is_numeric
                             sums_temp[kk, temp_idx] += h∇[kk, b, f, node]
-                        end
-                    else
-                        for kk in 1:(2*K+1)
+                        else
                             sums_temp[kk, temp_idx] = h∇[kk, b, f, node]
                         end
                     end
-
                     w_l = sums_temp[2*K+1, temp_idx]
                     w_r = w_p - w_l
-                    if w_l < min_weight || w_r < min_weight
-                        skip_bin = true
-                    end
+                end
 
-                    if !skip_bin
-                        if L == EvoTrees.MLogLoss
-                            # No monotone constraint for MLogLoss
-                        elseif constraint != 0
+                # Skip if insufficient weight
+                (w_l < min_weight || w_r < min_weight) && continue
+
+                # Compute split gain by loss type
+                skip, g_val = false, zero(T)
+
+                if L <: QuadraticLoss
+                    if K == 1
+                        g_l, h_l = acc1, acc2
+                        g_r = nodes_sum[1, node] - g_l
+                        h_r = nodes_sum[2, node] - h_l
+                        d_l = _safe(h_l + lambda * w_l + L2, ε)
+                        d_r = _safe(h_r + lambda * w_r + L2, ε)
+                        g_val = (g_l^2 / d_l + g_r^2 / d_r) / 2 - gain_p
+                        # Monotone constraint check
+                        if L <: MonotoneLoss && constraint != 0
+                            pl, pr = -g_l / d_l, -g_r / d_r
+                            skip = (constraint == -1 && pl <= pr) || (constraint == 1 && pl >= pr)
+                        end
+                    else
+                        # K > 1: check constraint on first dim for MonotoneLoss
+                        if L <: MonotoneLoss && constraint != 0
                             g_l1 = sums_temp[1, temp_idx]
                             h_l1 = sums_temp[K+1, temp_idx]
                             g_r1 = nodes_sum[1, node] - g_l1
                             h_r1 = nodes_sum[K+1, node] - h_l1
-                            d1_l = h_l1 + lambda * w_l + L2
-                            d1_r = h_r1 + lambda * w_r + L2
-                            d1_l = d1_l < eps ? eps : d1_l
-                            d1_r = d1_r < eps ? eps : d1_r
-                            pred_l = -g_l1 / d1_l
-                            pred_r = -g_r1 / d1_r
-                            if (constraint == -1 && pred_l <= pred_r) || (constraint == 1 && pred_l >= pred_r)
-                                skip_bin = true
-                            end
+                            d1_l = _safe(h_l1 + lambda * w_l + L2, ε)
+                            d1_r = _safe(h_r1 + lambda * w_r + L2, ε)
+                            pl, pr = -g_l1 / d1_l, -g_r1 / d1_r
+                            skip = (constraint == -1 && pl <= pr) || (constraint == 1 && pl >= pr)
                         end
-
-                        if !skip_bin
-                            g_val = zero(T)
+                        if !skip
                             for k in 1:K
                                 g_l = sums_temp[k, temp_idx]
                                 h_l = sums_temp[K+k, temp_idx]
                                 g_r = nodes_sum[k, node] - g_l
                                 h_r = nodes_sum[K+k, node] - h_l
-                                d_l = h_l + lambda * w_l + L2
-                                d_r = h_r + lambda * w_r + L2
-                                d_l = d_l < eps ? eps : d_l
-                                d_r = d_r < eps ? eps : d_r
+                                d_l = _safe(h_l + lambda * w_l + L2, ε)
+                                d_r = _safe(h_r + lambda * w_r + L2, ε)
                                 g_val += (g_l^2 / d_l + g_r^2 / d_r) / 2
                             end
                             g_val -= gain_p
                         end
                     end
+                elseif L <: DeviationLoss
+                    μp = nodes_sum[1, node] / w_p
+                    μl = acc1 / w_l
+                    μr = (nodes_sum[1, node] - acc1) / w_r
+                    d_l = _safe(1 + lambda + L2 / w_l, ε)
+                    d_r = _safe(1 + lambda + L2 / w_r, ε)
+                    g_val = abs(μl - μp) * w_l / d_l + abs(μr - μp) * w_r / d_r
+                else # Cred
+                    g_l = _cred_gain(acc1 / w_l, acc2, w_l, L2, ε)
+                    g_r = _cred_gain((nodes_sum[1, node] - acc1) / w_r, nodes_sum[2, node] - acc2, w_r, L2, ε)
+                    g_val = g_l + g_r - gain_p
                 end
 
-                if !skip_bin && g_val > g_best
-                    g_best = g_val
-                    b_best = Int32(b)
+                if !skip && g_val > g_best
+                    g_best, b_best = g_val, Int32(b)
                 end
             end
 
@@ -448,6 +380,7 @@ Find the best split for each (node, feature) pair in parallel.
         end
     end
 end
+
 """
 	clear_hist_kernel!(h∇, active_nodes, n_active)
 
