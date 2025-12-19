@@ -95,7 +95,7 @@ function grow_tree!(
         )
         KernelAbstractions.synchronize(backend)
 
-        find_best_split_parallel_kernel!(backend)(
+        find_best_split_gpu!(
             L,
             view(cache.gains_per_feat_gpu, 1:n_feats, 1:1),
             view(cache.bins_per_feat_gpu, 1:n_feats, 1:1),
@@ -103,10 +103,8 @@ function grow_tree!(
             view(cache.anodes_gpu, 1:1),
             cache.js, cache.feattypes_gpu, cache.monotone_constraints_gpu,
             params.lambda, params.L2, params.min_weight,
-            cache.K, n_feats, cache.sums_temp_par_gpu;
-            ndrange=n_feats,
+            cache.K, n_feats, cache.sums_temp_par_gpu, backend,
         )
-        KernelAbstractions.synchronize(backend)
 
         reduce_best_split_kernel!(backend)(
             view(cache.best_gain_gpu, 1:1),
@@ -186,7 +184,7 @@ function grow_tree!(
             KernelAbstractions.synchronize(backend)
 
             # Find best splits for all active nodes (built or subtracted)
-            find_best_split_parallel_kernel!(backend)(
+            find_best_split_gpu!(
                 L,
                 view(cache.gains_per_feat_gpu, 1:n_feats, 1:n_active),
                 view(cache.bins_per_feat_gpu, 1:n_feats, 1:n_active),
@@ -194,10 +192,8 @@ function grow_tree!(
                 active_nodes,
                 cache.js, cache.feattypes_gpu, cache.monotone_constraints_gpu,
                 params.lambda, params.L2, params.min_weight,
-                cache.K, n_feats, cache.sums_temp_par_gpu;
-                ndrange=n_active * n_feats,
+                cache.K, n_feats, cache.sums_temp_par_gpu, backend,
             )
-            KernelAbstractions.synchronize(backend)
 
             reduce_best_split_kernel!(backend)(
                 view(cache.best_gain_gpu, 1:n_active),
@@ -344,3 +340,4 @@ Apply splits by creating child nodes if gain exceeds gamma threshold, otherwise 
         n_next[idx_base] = child_r
     end
 end
+
