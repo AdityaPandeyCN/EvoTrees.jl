@@ -440,14 +440,17 @@ end
     ε = T(1e-8)
 
     @inbounds if gidx <= n_active * n_feats
+        # Decode thread index into (node, feature) pair
         n_idx = (gidx - 1) ÷ n_feats + 1
         f_idx = (gidx - 1) % n_feats + 1
         node = active_nodes[n_idx]
 
         if node == 0
+            # Invalid node, mark as no valid split
             gains[f_idx, n_idx] = T(-Inf)
             bins[f_idx, n_idx] = Int32(0)
         else
+            # Setup feature info and parent weight
             f = js[f_idx]
             nbins = size(h∇, 2)
             is_numeric = feattypes[f]
@@ -455,12 +458,17 @@ end
             w_p = nodes_sum[2*K+1, node]
             λw = lambda * w_p
 
+            # Compute baseline gain before splitting
             gain_p = parent_gain(L, nodes_sum, node, K, λw, L2, w_p, ε)
 
+            # Track best split found for this (node, feature)
             g_best = T(-Inf)
             b_best = Int32(0)
+
+            # Unique temp storage column for this thread
             temp_idx = (n_idx - 1) * n_feats + f_idx
 
+            # Initialize left-side accumulators (cumulative sums)
             acc1, acc2, accw = zero(T), zero(T), zero(T)
             if K > 1
                 for kk in 1:(2*K+1)
@@ -468,46 +476,58 @@ end
                 end
             end
 
+            # Scan bins: numeric excludes last bin, categorical includes all
             b_max = is_numeric ? (nbins - 1) : nbins
             for b in 1:b_max
                 if K == 1
+                    # Accumulate histogram into left-side sums
                     acc1, acc2, accw = accumulate_hist_k1(h∇, f, b, node, is_numeric, acc1, acc2, accw)
                     w_l, w_r = accw, w_p - accw
 
+                    # Skip if either child has insufficient weight
                     (w_l < min_weight || w_r < min_weight) && continue
 
+                    # Compute right-side stats by subtraction
                     g_l, h_l = acc1, acc2
                     g_r = nodes_sum[1, node] - g_l
                     h_r = nodes_sum[2, node] - h_l
                     g_p = nodes_sum[1, node]
                     h_p = nodes_sum[2, node]
 
+                    # Skip if split violates monotone constraint
                     check_monotone(L, constraint, g_l, h_l, g_r, h_r, w_l, w_r, lambda, L2, ε) && continue
 
+                    # Compute split gain using loss-specific formula
                     stats = SplitStats(g_l, h_l, w_l, g_r, h_r, w_r, g_p, h_p, w_p)
                     g_val = split_gain(L, stats, gain_p, lambda, L2, ε)
                 else
+                    # K > 1: accumulate all gradient components
                     accumulate_hist_kn!(sums_temp, h∇, f, b, node, K, is_numeric, temp_idx)
                     w_l = sums_temp[2*K+1, temp_idx]
                     w_r = w_p - w_l
 
+                    # Skip if either child has insufficient weight
                     (w_l < min_weight || w_r < min_weight) && continue
 
+                    # Check monotone constraint using first output dimension
                     g_l1 = sums_temp[1, temp_idx]
                     h_l1 = sums_temp[K+1, temp_idx]
                     g_r1 = nodes_sum[1, node] - g_l1
                     h_r1 = nodes_sum[K+1, node] - h_l1
                     check_monotone(L, constraint, g_l1, h_l1, g_r1, h_r1, w_l, w_r, lambda, L2, ε) && continue
 
+                    # Compute multi-output split gain
                     g_val = split_gain_multi(L, sums_temp, nodes_sum, node, temp_idx, K, w_l, w_r, gain_p, lambda, L2, ε)
                 end
 
+                # Update best if this split is better
                 if g_val > g_best
                     g_best = g_val
                     b_best = Int32(b)
                 end
             end
 
+            # Store best split for this (node, feature) pair
             gains[f_idx, n_idx] = g_best
             bins[f_idx, n_idx] = b_best
         end
