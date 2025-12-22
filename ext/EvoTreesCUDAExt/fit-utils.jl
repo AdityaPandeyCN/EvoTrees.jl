@@ -497,21 +497,29 @@ end
 end
 
 """
-	find_best_split_parallel_kernel!(L, gains, bins, h∇, nodes_sum, active_nodes, js, feattypes, monotone_constraints, lambda, L2, min_weight, K, n_feats, sums_temp)
+	find_best_split_kernel!(L, best_gain, best_bin, best_feat, h∇, nodes_sum, 
+	    active_nodes, js, feattypes, monotone_constraints, lambda, L2, min_weight, K, n_feats, sums_temp)
 
-Evaluate all candidate split bins for each (active node, feature) pair and store:
-- `gains[f_idx, n_idx]`: best gain
-- `bins[f_idx, n_idx]`: best bin threshold/category id (0 if none)
+Find the best split for each active node by scanning all features and bins.
+Each thread handles one node, evaluates all features, and outputs the best split directly.
+
+Outputs (one per active node):
+- `best_gain[n_idx]`: gain of best split (or -Inf if none valid)
+- `best_bin[n_idx]`: bin threshold for best split (0 if none)  
+- `best_feat[n_idx]`: feature index of best split
 
 Notes:
-- Numeric features scan bins `1:nbins-1` (cumulative left).
-- Categorical features scan bins `1:nbins` (one-vs-rest per bin).
-- Monotone constraints apply only to `GradientRegression` and `MLE2P` losses.
+- Combines split evaluation and reduction into a single kernel
+- Numeric features scan bins `1:nbins-1` (cumulative left child)
+- Categorical features scan all bins (one-vs-rest per category)
+- Monotone constraints apply only to `GradientRegression` and `MLE2P` losses
+- For K>1 (multi-output), uses sums_temp for per-thread accumulator storage
 """
-@kernel function find_best_split_parallel_kernel!(
+@kernel function find_best_split_kernel!(
     ::Type{L},
-    gains::AbstractMatrix{T},
-    bins::AbstractMatrix{Int32},
+    best_gain,
+    best_bin,
+    best_feat,
     @Const(h∇),
     @Const(nodes_sum),
     @Const(active_nodes),
@@ -525,139 +533,124 @@ Notes:
     n_feats::Int,
     sums_temp::AbstractArray{T,2},
 ) where {T,L}
-    gidx = @index(Global)
+    n_idx = @index(Global)
     n_active = length(active_nodes)
     ε = T(1e-8)
 
-    @inbounds if gidx <= n_active * n_feats
-        # Decode thread index into (node, feature) pair
-        n_idx = (gidx - 1) ÷ n_feats + 1
-        f_idx = (gidx - 1) % n_feats + 1
+    @inbounds if n_idx <= n_active
         node = active_nodes[n_idx]
 
         if node == 0
-            # Invalid node, mark as no valid split
-            gains[f_idx, n_idx] = T(-Inf)
-            bins[f_idx, n_idx] = Int32(0)
+            # Invalid node slot
+            best_gain[n_idx] = T(-Inf)
+            best_bin[n_idx] = Int32(0)
+            best_feat[n_idx] = Int32(0)
         else
-            # Setup feature info and parent weight
-            f = js[f_idx]
             nbins = size(h∇, 2)
-            is_numeric = feattypes[f]
-            constraint = monotone_constraints[f]
             w_p = nodes_sum[2*K+1, node]
             λw = lambda * w_p
 
-            # Compute baseline gain before splitting
+            # Compute parent gain (baseline before splitting)
             gain_p = parent_gain(L, nodes_sum, node, K, λw, L2, w_p, ε)
 
-            # Track best split found for this (node, feature)
-            g_best = T(-Inf)
-            b_best = Int32(0)
+            # Track overall best split across all features
+            g_best_overall = T(-Inf)
+            b_best_overall = Int32(0)
+            f_best_overall = Int32(0)
 
-            # Unique temp storage column for this thread
-            temp_idx = (n_idx - 1) * n_feats + f_idx
+            # Thread-local temp storage index (for K>1)
+            temp_idx = n_idx
 
-            # Initialize left-side accumulators (cumulative sums)
-            acc1, acc2, accw = zero(T), zero(T), zero(T)
-            if K > 1
-                for kk in 1:(2*K+1)
-                    sums_temp[kk, temp_idx] = zero(T)
+            # Scan all features
+            for f_idx in 1:n_feats
+                f = js[f_idx]
+                is_numeric = feattypes[f]
+                constraint = monotone_constraints[f]
+
+                # Track best split for this feature
+                g_best_feat = T(-Inf)
+                b_best_feat = Int32(0)
+
+                # Initialize accumulators
+                acc1, acc2, accw = zero(T), zero(T), zero(T)
+                if K > 1
+                    for kk in 1:(2*K+1)
+                        sums_temp[kk, temp_idx] = zero(T)
+                    end
+                end
+
+                # Scan bins: numeric excludes last, categorical includes all
+                b_max = is_numeric ? (nbins - 1) : nbins
+
+                for b in 1:b_max
+                    if K == 1
+                        # K=1: use scalar accumulators
+                        if is_numeric
+                            acc1 += h∇[1, b, f, node]
+                            acc2 += h∇[2, b, f, node]
+                            accw += h∇[3, b, f, node]
+                        else
+                            acc1 = h∇[1, b, f, node]
+                            acc2 = h∇[2, b, f, node]
+                            accw = h∇[3, b, f, node]
+                        end
+                        w_l, w_r = accw, w_p - accw
+
+                        (w_l < min_weight || w_r < min_weight) && continue
+
+                        g_l, h_l = acc1, acc2
+                        g_r = nodes_sum[1, node] - g_l
+                        h_r = nodes_sum[2, node] - h_l
+
+                        check_monotone(L, constraint, g_l, h_l, g_r, h_r, w_l, w_r, lambda, L2, ε) && continue
+
+                        g_p = nodes_sum[1, node]
+                        h_p = nodes_sum[2, node]
+                        stats = SplitStats(g_l, h_l, w_l, g_r, h_r, w_r, g_p, h_p, w_p)
+                        g_val = split_gain(L, stats, gain_p, lambda, L2, ε)
+                    else
+                        # K>1: use sums_temp array
+                        for kk in 1:(2*K+1)
+                            if is_numeric
+                                sums_temp[kk, temp_idx] += h∇[kk, b, f, node]
+                            else
+                                sums_temp[kk, temp_idx] = h∇[kk, b, f, node]
+                            end
+                        end
+                        w_l = sums_temp[2*K+1, temp_idx]
+                        w_r = w_p - w_l
+
+                        (w_l < min_weight || w_r < min_weight) && continue
+
+                        # Check monotone on first dimension
+                        g_l1, h_l1 = sums_temp[1, temp_idx], sums_temp[K+1, temp_idx]
+                        g_r1 = nodes_sum[1, node] - g_l1
+                        h_r1 = nodes_sum[K+1, node] - h_l1
+                        check_monotone(L, constraint, g_l1, h_l1, g_r1, h_r1, w_l, w_r, lambda, L2, ε) && continue
+
+                        g_val = split_gain_multi(L, sums_temp, nodes_sum, node, temp_idx, K, w_l, w_r, gain_p, lambda, L2, ε)
+                    end
+
+                    # Update best for this feature
+                    if g_val > g_best_feat
+                        g_best_feat = g_val
+                        b_best_feat = Int32(b)
+                    end
+                end
+
+                # Update overall best if this feature is better
+                if g_best_feat > g_best_overall
+                    g_best_overall = g_best_feat
+                    b_best_overall = b_best_feat
+                    f_best_overall = Int32(f)
                 end
             end
 
-            # Scan bins: numeric excludes last bin, categorical includes all
-            b_max = is_numeric ? (nbins - 1) : nbins
-            for b in 1:b_max
-                if K == 1
-                    # Accumulate histogram into left-side sums
-                    acc1, acc2, accw = accumulate_hist_k1(h∇, f, b, node, is_numeric, acc1, acc2, accw)
-                    w_l, w_r = accw, w_p - accw
-
-                    # Skip if either child has insufficient weight
-                    (w_l < min_weight || w_r < min_weight) && continue
-
-                    # Compute right-side stats by subtraction
-                    g_l, h_l = acc1, acc2
-                    g_r = nodes_sum[1, node] - g_l
-                    h_r = nodes_sum[2, node] - h_l
-                    g_p = nodes_sum[1, node]
-                    h_p = nodes_sum[2, node]
-
-                    # Skip if split violates monotone constraint
-                    check_monotone(L, constraint, g_l, h_l, g_r, h_r, w_l, w_r, lambda, L2, ε) && continue
-
-                    # Compute split gain using loss-specific formula
-                    stats = SplitStats(g_l, h_l, w_l, g_r, h_r, w_r, g_p, h_p, w_p)
-                    g_val = split_gain(L, stats, gain_p, lambda, L2, ε)
-                else
-                    # K > 1: accumulate all gradient components
-                    accumulate_hist_kn!(sums_temp, h∇, f, b, node, K, is_numeric, temp_idx)
-                    w_l = sums_temp[2*K+1, temp_idx]
-                    w_r = w_p - w_l
-
-                    # Skip if either child has insufficient weight
-                    (w_l < min_weight || w_r < min_weight) && continue
-
-                    # Check monotone constraint using first output dimension
-                    g_l1 = sums_temp[1, temp_idx]
-                    h_l1 = sums_temp[K+1, temp_idx]
-                    g_r1 = nodes_sum[1, node] - g_l1
-                    h_r1 = nodes_sum[K+1, node] - h_l1
-                    check_monotone(L, constraint, g_l1, h_l1, g_r1, h_r1, w_l, w_r, lambda, L2, ε) && continue
-
-                    # Compute multi-output split gain
-                    g_val = split_gain_multi(L, sums_temp, nodes_sum, node, temp_idx, K, w_l, w_r, gain_p, lambda, L2, ε)
-                end
-
-                # Update best if this split is better
-                if g_val > g_best
-                    g_best = g_val
-                    b_best = Int32(b)
-                end
-            end
-
-            # Store best split for this (node, feature) pair
-            gains[f_idx, n_idx] = g_best
-            bins[f_idx, n_idx] = b_best
+            # Output best split for this node
+            best_gain[n_idx] = g_best_overall
+            best_bin[n_idx] = b_best_overall
+            best_feat[n_idx] = f_best_overall
         end
-    end
-end
-
-"""
-	reduce_best_split_kernel!(best_gain, best_bin, best_feat, gains, bins, js, n_feats)
-
-For each node-column in `gains`, find the feature index with maximum gain and output:
-- `best_gain[n_idx]`
-- `best_bin[n_idx]`
-- `best_feat[n_idx]` (actual feature id from `js`)
-"""
-@kernel function reduce_best_split_kernel!(
-    best_gain,
-    best_bin,
-    best_feat,
-    @Const(gains),
-    @Const(bins),
-    @Const(js),
-    n_feats::Int
-)
-    n_idx = @index(Global)
-
-    @inbounds if n_idx <= size(gains, 2)
-        best_f_idx = 1
-        best_g = gains[1, n_idx]
-
-        for f_idx in 2:n_feats
-            g = gains[f_idx, n_idx]
-            if g > best_g
-                best_g = g
-                best_f_idx = f_idx
-            end
-        end
-
-        best_gain[n_idx] = best_g
-        best_bin[n_idx] = bins[best_f_idx, n_idx]
-        best_feat[n_idx] = js[best_f_idx]
     end
 end
 
