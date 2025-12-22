@@ -22,11 +22,9 @@ end
 """
 	grow_otree!(tree, params, cache, is)
 
-Grow an **oblivious tree** on GPU.
+Grow an oblivious tree on GPU.
 
-Currently, the oblivious-tree GPU implementation is not available; this function
-**falls back** to `grow_tree!` (standard binary tree growth on GPU) and emits a
-warning (rate-limited).
+GPU oblivious-tree growth is not implemented yet; falls back to `grow_tree!` and emits a warning.
 
 Mutates:
 - `tree`: the resulting tree structure and leaf predictions
@@ -45,19 +43,11 @@ end
 """
 	grow_tree!(tree, params, cache, is)
 
-Grow a **binary decision tree** on GPU, level-by-level (breadth-first).
-
-High-level steps per depth:
-- Build / update histograms (`update_hist_gpu!`) for active nodes (with optional sibling subtraction).
-- Compute per-node gradient totals (`compute_nodes_sum_kernel!`).
-- Find the best split per (node, feature) in parallel (`find_best_split_parallel_kernel!`),
-  then reduce across features (`reduce_best_split_kernel!`).
-- Apply accepted splits and create children (`apply_splits_kernel!`).
-- Update observation-to-node assignments (`update_nodes_idx_kernel!`).
+Grow a binary decision tree on GPU, level-by-level (breadth-first).
 
 Mutates:
-- `tree`: filled with split structure and leaf predictions (copied back from GPU buffers).
-- `cache`: many preallocated GPU buffers used across the pipeline (histograms, node lists, gains, etc.).
+- `tree`: split structure and leaf predictions (copied back from GPU buffers)
+- `cache`: GPU working buffers (histograms, node lists, gains, etc.)
 """
 function grow_tree!(
     tree::EvoTrees.Tree{L,K},
@@ -120,7 +110,7 @@ function grow_tree!(
             view(cache.anodes_gpu, 1:1),
             cache.js, cache.feattypes_gpu, cache.monotone_constraints_gpu,
             params.lambda, params.L2, params.min_weight,
-            cache.K, n_feats, cache.sums_temp_par_gpu;
+            cache.K, n_feats, cache.split_sums_temp_gpu;
             ndrange=n_feats,
         )
         KernelAbstractions.synchronize(backend)
@@ -204,7 +194,7 @@ function grow_tree!(
                 active_nodes,
                 cache.js, cache.feattypes_gpu, cache.monotone_constraints_gpu,
                 params.lambda, params.L2, params.min_weight,
-                cache.K, n_feats, cache.sums_temp_par_gpu;
+                cache.K, n_feats, cache.split_sums_temp_gpu;
                 ndrange=n_active * n_feats,
             )
             KernelAbstractions.synchronize(backend)
