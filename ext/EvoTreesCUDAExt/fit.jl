@@ -19,7 +19,19 @@ function EvoTrees.grow_evotree!(m::EvoTree{L,K}, cache::EvoTrees.CacheGPU, param
     return nothing
 end
 
-# Oblivious tree fallback
+"""
+	grow_otree!(tree, params, cache, is)
+
+Grow an **oblivious tree** on GPU.
+
+Currently, the oblivious-tree GPU implementation is not available; this function
+**falls back** to `grow_tree!` (standard binary tree growth on GPU) and emits a
+warning (rate-limited).
+
+Mutates:
+- `tree`: the resulting tree structure and leaf predictions
+- `cache`: internal GPU working buffers used during growth
+"""
 function grow_otree!(
     tree::EvoTrees.Tree{L,K},
     params::EvoTrees.EvoTypes,
@@ -30,7 +42,23 @@ function grow_otree!(
     grow_tree!(tree, params, cache, is)
 end
 
-# Grow binary decision tree on GPU level-by-level
+"""
+	grow_tree!(tree, params, cache, is)
+
+Grow a **binary decision tree** on GPU, level-by-level (breadth-first).
+
+High-level steps per depth:
+- Build / update histograms (`update_hist_gpu!`) for active nodes (with optional sibling subtraction).
+- Compute per-node gradient totals (`compute_nodes_sum_kernel!`).
+- Find the best split per (node, feature) in parallel (`find_best_split_parallel_kernel!`),
+  then reduce across features (`reduce_best_split_kernel!`).
+- Apply accepted splits and create children (`apply_splits_kernel!`).
+- Update observation-to-node assignments (`update_nodes_idx_kernel!`).
+
+Mutates:
+- `tree`: filled with split structure and leaf predictions (copied back from GPU buffers).
+- `cache`: many preallocated GPU buffers used across the pipeline (histograms, node lists, gains, etc.).
+"""
 function grow_tree!(
     tree::EvoTrees.Tree{L,K},
     params::EvoTrees.EvoTypes,
@@ -273,7 +301,27 @@ function grow_tree!(
     return nothing
 end
 
-# Apply splits by creating child nodes if gain exceeds threshold
+"""
+	apply_splits_kernel!(tree_split, tree_cond_bin, tree_feat, tree_gain,
+	                     nodes_sum, n_next, n_next_active,
+	                     best_gain, best_bin, best_feat,
+	                     h∇, active_nodes, feattypes,
+	                     depth, max_depth, gamma, K_val)
+
+Apply the chosen best split for each active node and create its children.
+
+For each active node `node = active_nodes[n_idx]`, if `best_gain[n_idx] > gamma`
+and we are below `max_depth`, mark the node as split and:
+- Write split metadata (`tree_split`, `tree_feat`, `tree_cond_bin`, `tree_gain`)
+- Compute left-child gradient totals from histograms (`h∇`) and write them into `nodes_sum`
+- Compute right-child totals as `parent - left` (also into `nodes_sum`)
+- Append the two children to the next active-node list (`n_next`) using atomic allocation
+
+Mutates:
+- `tree_split`, `tree_cond_bin`, `tree_feat`, `tree_gain`
+- `nodes_sum` (writes child node totals)
+- `n_next`, `n_next_active`
+"""
 @kernel function apply_splits_kernel!(
     tree_split, tree_cond_bin, tree_feat, tree_gain,
     nodes_sum, n_next, n_next_active,

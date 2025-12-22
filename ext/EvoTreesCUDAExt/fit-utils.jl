@@ -420,6 +420,16 @@ end
     return g_val - gain_p
 end
 
+# Split gain for K>1: generic fallback for non-quadratic losses.
+# These losses are expected to be K==1 on GPU today, but the GPU compiler may
+# still need this method to exist while compiling the kernel.
+@inline function split_gain_multi(
+    ::Type{L}, sums_temp, nodes_sum, node, temp_idx,
+    K, w_l, w_r, gain_p, lambda, L2, ε::T
+) where {T,L}
+    return T(-Inf)
+end
+
 # Monotone constraint check: GradientRegression
 @inline function check_monotone(::Type{L}, constraint, g_l, h_l, g_r, h_r, w_l, w_r, lambda, L2, ε) where {L<:EvoTrees.GradientRegression}
     constraint == 0 && return false
