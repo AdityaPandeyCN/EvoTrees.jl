@@ -420,6 +420,30 @@ end
     return g_val - gain_p
 end
 
+# Split gain for K>1: MAE (stub - MAE always has K=1, but GPU compiler needs this)
+@inline function split_gain_multi(
+    ::Type{EvoTrees.MAE}, sums_temp, nodes_sum, node, temp_idx,
+    K, w_l, w_r, gain_p, lambda, L2, ε::T
+) where {T}
+    return zero(T)  # Never called; MAE uses K=1
+end
+
+# Split gain for K>1: Quantile (stub - Quantile always has K=1, but GPU compiler needs this)
+@inline function split_gain_multi(
+    ::Type{EvoTrees.Quantile}, sums_temp, nodes_sum, node, temp_idx,
+    K, w_l, w_r, gain_p, lambda, L2, ε::T
+) where {T}
+    return zero(T)  # Never called; Quantile uses K=1
+end
+
+# Split gain for K>1: Cred (stub - Cred always has K=1, but GPU compiler needs this)
+@inline function split_gain_multi(
+    ::Type{L}, sums_temp, nodes_sum, node, temp_idx,
+    K, w_l, w_r, gain_p, lambda, L2, ε::T
+) where {T,L<:EvoTrees.Cred}
+    return zero(T)  # Never called; Cred uses K=1
+end
+
 # Monotone constraint check: GradientRegression
 @inline function check_monotone(::Type{L}, constraint, g_l, h_l, g_r, h_r, w_l, w_r, lambda, L2, ε) where {L<:EvoTrees.GradientRegression}
     constraint == 0 && return false
