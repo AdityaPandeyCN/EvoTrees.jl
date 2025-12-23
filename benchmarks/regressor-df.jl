@@ -1,17 +1,19 @@
 using Statistics
-using StatsBase: sample
 using EvoTrees
 using DataFrames
-using BenchmarkTools
 using Random: seed!
 import CUDA
 
-nobs = Int(1e6)
-num_feat = Int(100)
-nrounds = 200
+# Tunables (via ENV to make quick repros easy)
+nobs = parse(Int, get(ENV, "EVOTREES_NOBS", "100000"))
+num_feat = parse(Int, get(ENV, "EVOTREES_NFEATS", "10"))
+nrounds = parse(Int, get(ENV, "EVOTREES_NROUNDS", "200"))
+colsample = parse(Float64, get(ENV, "EVOTREES_COLSAMPLE", "0.5"))
+rowsample = parse(Float64, get(ENV, "EVOTREES_ROWSAMPLE", "0.5"))
 T = Float64
 nthread = Base.Threads.nthreads()
 @info "testing with: $nobs observations | $num_feat features. nthread: $nthread"
+@info "rowsample=$rowsample colsample=$colsample nrounds=$nrounds"
 seed!(123)
 x_train = rand(T, nobs, num_feat)
 y_train = rand(T, size(x_train, 1))
@@ -42,8 +44,8 @@ params_evo = EvoTreeRegressor(;
     eta=0.05,
     max_depth=6,
     min_weight=1.0,
-    rowsample=0.5,
-    colsample=0.5, # reconcile if 1.0 - bug if 0.5
+    rowsample=rowsample,
+    colsample=colsample,
     nbins=64,
     rng=123,
 )
@@ -74,12 +76,10 @@ params_evo.device = _device
 @time pred_gpu = m_gpu(dtrain; device=_device);
 # @btime m_gpu($dtrain; _device);
 
-# cpu: 30.935
-sum([sum(tree.split) for tree in m_cpu.trees]) / (length(m_cpu.trees) - 1)
-
-# gpu: 16.43
-sum([sum(tree.split) for tree in m_gpu.trees]) / (length(m_gpu.trees) - 1)
-
-# cor: ~0.60 
-cor(pred_cpu, pred_gpu)
+avg_splits(m) = sum(sum(t.split) for t in m.trees) / max(1, (length(m.trees) - 1))
+cpu_splits = avg_splits(m_cpu)
+gpu_splits = avg_splits(m_gpu)
+@info "avg splits per tree (CPU) = $cpu_splits"
+@info "avg splits per tree (GPU) = $gpu_splits"
+@info "cor(pred_cpu, pred_gpu) = $(cor(pred_cpu, pred_gpu))"
 
