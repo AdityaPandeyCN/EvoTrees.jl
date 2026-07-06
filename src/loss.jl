@@ -33,77 +33,35 @@ const _loss2type_dict = Dict(
     :cred_std => CredStd
 )
 
-# MSE
-function update_grads!(∇::Matrix{T}, p::Matrix{T}, y::AbstractVecOrMat, ::Type{MSE}, params::EvoTypes) where {T}
-    K = size(p, 1)
-    w_row = 2 * K + 1
-    @threads for i in axes(p, 2)
-        @inbounds w = ∇[w_row, i]
-        @inbounds for k in 1:K
-            yk = y isa AbstractVector ? y[i] : y[k, i]
-            ∇[k, i]   = 2 * (p[k, i] - yk) * w
-            ∇[K+k, i] = 2 * w
-        end
-    end
+# Single-target gradient kernels plus generic observation/target driver.
+@inline grad_hess(::Type{MSE}, pk, yk) = (2 * (pk - yk), 2 * one(pk))
+@inline function grad_hess(::Type{LogLoss}, pk, yk)
+    pred = sigmoid(pk)
+    return (pred - yk, pred * (1 - pred))
+end
+@inline grad_hess(::Type{Poisson}, pk, yk) = (exp(pk) - yk, exp(pk))
+@inline function grad_hess(::Type{Gamma}, pk, yk)
+    pred = exp(pk)
+    return (2 * (1 - yk / pred), 2 * yk / pred)
+end
+@inline function grad_hess(::Type{Tweedie}, pk, yk)
+    rho = oftype(pk, 1.5)
+    pred = exp(pk)
+    return (
+        2 * (pred^(2 - rho) - yk * pred^(1 - rho)),
+        2 * ((2 - rho) * pred^(2 - rho) - (1 - rho) * yk * pred^(1 - rho)),
+    )
 end
 
-# LogLoss - on linear predictor
-function update_grads!(∇::Matrix{T}, p::Matrix{T}, y::AbstractVecOrMat, ::Type{LogLoss}, params::EvoTypes) where {T}
+function update_grads!(∇::Matrix{T}, p::Matrix{T}, y::AbstractVecOrMat, ::Type{L}, params::EvoTypes) where {T,L<:GradientRegression}
     K = size(p, 1)
     w_row = 2 * K + 1
     @threads for i in axes(p, 2)
         @inbounds w = ∇[w_row, i]
         @inbounds for k in 1:K
-            yk = y isa AbstractVector ? y[i] : y[k, i]
-            pred = sigmoid(p[k, i])
-            ∇[k, i]   = (pred - yk) * w
-            ∇[K+k, i] = pred * (1 - pred) * w
-        end
-    end
-end
-
-# Poisson
-function update_grads!(∇::Matrix{T}, p::Matrix{T}, y::AbstractVecOrMat, ::Type{Poisson}, params::EvoTypes) where {T}
-    K = size(p, 1)
-    w_row = 2 * K + 1
-    @threads for i in axes(p, 2)
-        @inbounds w = ∇[w_row, i]
-        @inbounds for k in 1:K
-            yk = y isa AbstractVector ? y[i] : y[k, i]
-            pred = exp(p[k, i])
-            ∇[k, i]   = (pred - yk) * w
-            ∇[K+k, i] = pred * w
-        end
-    end
-end
-
-# Gamma
-function update_grads!(∇::Matrix{T}, p::Matrix{T}, y::AbstractVecOrMat, ::Type{Gamma}, params::EvoTypes) where {T}
-    K = size(p, 1)
-    w_row = 2 * K + 1
-    @threads for i in axes(p, 2)
-        @inbounds w = ∇[w_row, i]
-        @inbounds for k in 1:K
-            yk = y isa AbstractVector ? y[i] : y[k, i]
-            pred = exp(p[k, i])
-            ∇[k, i]   = 2 * (1 - yk / pred) * w
-            ∇[K+k, i] = 2 * yk / pred * w
-        end
-    end
-end
-
-# Tweedie
-function update_grads!(∇::Matrix{T}, p::Matrix{T}, y::AbstractVecOrMat, ::Type{Tweedie}, params::EvoTypes) where {T}
-    K = size(p, 1)
-    w_row = 2 * K + 1
-    rho = T(1.5)
-    @threads for i in axes(p, 2)
-        @inbounds w = ∇[w_row, i]
-        @inbounds for k in 1:K
-            yk = y isa AbstractVector ? y[i] : y[k, i]
-            pred = exp(p[k, i])
-            ∇[k, i]   = 2 * (pred^(2 - rho) - yk * pred^(1 - rho)) * w
-            ∇[K+k, i] = 2 * ((2 - rho) * pred^(2 - rho) - (1 - rho) * yk * pred^(1 - rho)) * w
+            g, h = grad_hess(L, p[k, i], _target(y, k, i))
+            ∇[k, i] = g * w
+            ∇[K+k, i] = h * w
         end
     end
 end
@@ -129,18 +87,32 @@ function update_grads!(∇::Matrix{T}, p::Matrix{T}, y::Vector, ::Type{MLogLoss}
 end
 
 # MAE
-function update_grads!(∇::Matrix{T}, p::Matrix{T}, y::Vector{T}, ::Type{MAE}, params::EvoTypes) where {T}
-    @threads for i in eachindex(y)
-        @inbounds ∇[1, i] = (y[i] - p[1, i]) * ∇[3, i]
+@inline _target(y::AbstractVector, k, i) = y[i]
+@inline _target(y::AbstractMatrix, k, i) = y[k, i]
+
+function update_grads!(∇::Matrix{T}, p::Matrix{T}, y::AbstractVecOrMat{T}, ::Type{MAE}, params::EvoTypes) where {T}
+    K = size(p, 1)
+    w_row = 2 * K + 1
+    @threads for i in axes(p, 2)
+        @inbounds w = ∇[w_row, i]
+        @inbounds for k in 1:K
+            ∇[k, i] = (_target(y, k, i) - p[k, i]) * w
+        end
     end
 end
 
 # Quantile
-function update_grads!(∇::Matrix{T}, p::Matrix{T}, y::Vector{T}, ::Type{Quantile}, params::EvoTypes) where {T}
-    @threads for i in eachindex(y)
-        diff = (y[i] - p[1, i])
-        @inbounds ∇[1, i] = diff > 0 ? params.alpha * ∇[3, i] : (params.alpha - 1) * ∇[3, i]
-        @inbounds ∇[2, i] = diff
+function update_grads!(∇::Matrix{T}, p::Matrix{T}, y::AbstractVecOrMat{T}, ::Type{Quantile}, params::EvoTypes) where {T}
+    K = size(p, 1)
+    w_row = 2 * K + 1
+    alpha = T(params.alpha)
+    @threads for i in axes(p, 2)
+        @inbounds w = ∇[w_row, i]
+        @inbounds for k in 1:K
+            diff = _target(y, k, i) - p[k, i]
+            ∇[k, i] = diff > 0 ? alpha * w : (alpha - 1) * w
+            ∇[K + k, i] = diff
+        end
     end
 end
 
@@ -287,37 +259,38 @@ function get_gain(::Type{L}, params::EvoTypes, ∑::Vector{T}, ∑L::V, ∑R::V)
     return gain
 end
 
+@inline function _abs_gain(params::EvoTypes, parent, child, k, w_parent, w_child)
+    ϵ = eps(eltype(parent))
+    return abs(child[k] / w_child - parent[k] / w_parent) *
+           w_child / max(ϵ, (1 + params.lambda + params.L2 / w_child))
+end
+
+function _abs_error_gain(params::EvoTypes, ∑::Vector{T}, ∑L::V, ∑R::V) where {T,V<:AbstractVector}
+    K = (length(∑) - 1) ÷ 2
+    w_parent = ∑[end]
+    w_left = ∑L[end]
+    w_right = ∑R[end]
+    gain = zero(T)
+    @inbounds for k in 1:K
+        gain += _abs_gain(params, ∑, ∑L, k, w_parent, w_left)
+        gain += _abs_gain(params, ∑, ∑R, k, w_parent, w_right)
+    end
+    return gain
+end
+
 # MAE
 function get_gain(::Type{L}, params::EvoTypes, ∑::Vector{T}, ∑L::V, ∑R::V) where {L<:MAE,T,V<:AbstractVector}
-    ϵ = eps(T)
-    gain = abs(∑L[1] / ∑L[3] - ∑[1] / ∑[3]) * ∑L[3] / max(ϵ, (1 + params.lambda + params.L2 / ∑L[3])) +
-           abs(∑R[1] / ∑R[3] - ∑[1] / ∑[3]) * ∑R[3] / max(ϵ, (1 + params.lambda + params.L2 / ∑R[3]))
-    return gain
+    return _abs_error_gain(params, ∑, ∑L, ∑R)
 end
 
 # Quantile
 function get_gain(::Type{L}, params::EvoTypes, ∑::Vector{T}, ∑L::V, ∑R::V) where {L<:Quantile,T,V<:AbstractVector}
-    ϵ = eps(T)
-    gain = abs(∑L[1] / ∑L[3] - ∑[1] / ∑[3]) * ∑L[3] / max(ϵ, (1 + params.lambda + params.L2 / ∑L[3])) +
-           abs(∑R[1] / ∑R[3] - ∑[1] / ∑[3]) * ∑R[3] / max(ϵ, (1 + params.lambda + params.L2 / ∑R[3]))
-    return gain
+    return _abs_error_gain(params, ∑, ∑L, ∑R)
 end
 
 # MultiQuantile
 function get_gain(::Type{L}, params::EvoTypes, ∑::Vector{T}, ∑L::V, ∑R::V) where {L<:MultiQuantile,T,V<:AbstractVector}
-    ϵ = eps(T)
-    K = (length(∑) - 1) ÷ 2
-    w_p = ∑[end]
-    w_l = ∑L[end]
-    w_r = ∑R[end]
-    d_l = max(ϵ, (1 + params.lambda + params.L2 / w_l))
-    d_r = max(ϵ, (1 + params.lambda + params.L2 / w_r))
-    gain = zero(T)
-    @inbounds for k in 1:K
-        gain += abs(∑L[k] / w_l - ∑[k] / w_p) * w_l / d_l
-        gain += abs(∑R[k] / w_r - ∑[k] / w_p) * w_r / d_r
-    end
-    return gain
+    return _abs_error_gain(params, ∑, ∑L, ∑R)
 end
 
 # CredVar: ratio of variance

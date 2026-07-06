@@ -1,14 +1,59 @@
-function mse(p::AbstractMatrix{T}, y::AbstractVecOrMat{T}, w::AbstractVector{T}, eval::AbstractVector{T}; kwargs...) where {T}
+function mse end
+function mae end
+function logloss end
+function poisson end
+function gamma end
+function tweedie end
+function wmae end
+
+@inline obs_metric(::typeof(mse), pk, yk; kwargs...) = (pk - yk)^2
+@inline obs_metric(::typeof(mae), pk, yk; kwargs...) = abs(pk - yk)
+@inline function obs_metric(::typeof(logloss), pk, yk; kwargs...)
+    pred = sigmoid(pk)
+    return -yk * log(pred) + (yk - 1) * log(1 - pred)
+end
+@inline function obs_metric(::typeof(poisson), pk, yk; kwargs...)
+    pred = exp(pk)
+    return 2 * (yk * (log(yk) - log(pred)) + pred - yk)
+end
+@inline function obs_metric(::typeof(gamma), pk, yk; kwargs...)
+    pred = exp(pk)
+    return 2 * (log(pred / yk) + yk / pred - 1)
+end
+@inline function obs_metric(::typeof(tweedie), pk, yk; kwargs...)
+    rho = oftype(pk, 1.5)
+    pred = exp(pk)
+    return 2 * (
+        yk^(2 - rho) / (1 - rho) / (2 - rho) -
+        yk * pred^(1 - rho) / (1 - rho) +
+        pred^(2 - rho) / (2 - rho)
+    )
+end
+@inline function obs_metric(::typeof(wmae), pk, yk; alpha=0.5, kwargs...)
+    return alpha * max(yk - pk, zero(pk)) + (1 - alpha) * max(pk - yk, zero(pk))
+end
+
+function apply_metric(
+    metric,
+    p::AbstractMatrix{T},
+    y::AbstractVecOrMat{T},
+    w::AbstractVector{T},
+    eval::AbstractVector{T};
+    kwargs...
+) where {T}
     K = size(p, 1)
     @threads for i in eachindex(w)
         acc = zero(T)
         @inbounds for k in 1:K
-            yk = y isa AbstractVector ? y[i] : y[k, i]
-            acc += (p[k, i] - yk)^2
+            acc += obs_metric(metric, p[k, i], _target(y, k, i); kwargs...)
         end
         eval[i] = w[i] * acc / K
     end
     return sum(Float64, eval) / sum(Float64, w)
+end
+
+function mse(p::AbstractMatrix{T}, y::AbstractVecOrMat{T}, w::AbstractVector{T}, eval::AbstractVector{T}; kwargs...) where {T}
+    return apply_metric(mse, p, y, w, eval; kwargs...)
 end
 rmse(p::AbstractMatrix{T}, y::AbstractVecOrMat, w::AbstractVector, eval::AbstractVector; kwargs...) where {T} =
     sqrt(mse(p, y, w, eval::AbstractVector; kwargs...))
@@ -20,16 +65,7 @@ function mae(
     eval::AbstractVector{T};
     kwargs...
 ) where {T}
-    K = size(p, 1)
-    @threads for i in eachindex(w)
-        acc = zero(T)
-        @inbounds for k in 1:K
-            yk = y isa AbstractVector ? y[i] : y[k, i]
-            acc += abs(p[k, i] - yk)
-        end
-        eval[i] = w[i] * acc / K
-    end
-    return sum(Float64, eval) / sum(Float64, w)
+    return apply_metric(mae, p, y, w, eval; kwargs...)
 end
 
 function logloss(
@@ -39,17 +75,7 @@ function logloss(
     eval::AbstractVector{T};
     kwargs...
 ) where {T}
-    K = size(p, 1)
-    @threads for i in eachindex(w)
-        acc = zero(T)
-        @inbounds for k in 1:K
-            yk = y isa AbstractVector ? y[i] : y[k, i]
-            pred = sigmoid(p[k, i])
-            acc += -yk * log(pred) + (yk - 1) * log(1 - pred)
-        end
-        eval[i] = w[i] * acc / K
-    end
-    return sum(Float64, eval) / sum(Float64, w)
+    return apply_metric(logloss, p, y, w, eval; kwargs...)
 end
 
 function mlogloss(
@@ -77,17 +103,7 @@ function poisson(
     eval::AbstractVector{T};
     kwargs...
 ) where {T}
-    K = size(p, 1)
-    @threads for i in eachindex(w)
-        acc = zero(T)
-        @inbounds for k in 1:K
-            yk = y isa AbstractVector ? y[i] : y[k, i]
-            pred = exp(p[k, i])
-            acc += 2 * (yk * (log(yk) - log(pred)) + pred - yk)
-        end
-        eval[i] = w[i] * acc / K
-    end
-    return sum(Float64, eval) / sum(Float64, w)
+    return apply_metric(poisson, p, y, w, eval; kwargs...)
 end
 
 function gamma(
@@ -97,17 +113,7 @@ function gamma(
     eval::AbstractVector{T};
     kwargs...
 ) where {T}
-    K = size(p, 1)
-    @threads for i in eachindex(w)
-        acc = zero(T)
-        @inbounds for k in 1:K
-            yk = y isa AbstractVector ? y[i] : y[k, i]
-            pred = exp(p[k, i])
-            acc += 2 * (log(pred / yk) + yk / pred - 1)
-        end
-        eval[i] = w[i] * acc / K
-    end
-    return sum(Float64, eval) / sum(Float64, w)
+    return apply_metric(gamma, p, y, w, eval; kwargs...)
 end
 
 function tweedie(
@@ -117,23 +123,7 @@ function tweedie(
     eval::AbstractVector{T};
     kwargs...
 ) where {T}
-    rho = T(1.5)
-    K = size(p, 1)
-    @threads for i in eachindex(w)
-        acc = zero(T)
-        @inbounds for k in 1:K
-            yk = y isa AbstractVector ? y[i] : y[k, i]
-            pred = exp(p[k, i])
-            acc +=
-                2 *
-                (
-                    yk^(2 - rho) / (1 - rho) / (2 - rho) - yk * pred^(1 - rho) / (1 - rho) +
-                    pred^(2 - rho) / (2 - rho)
-                )
-        end
-        eval[i] = w[i] * acc / K
-    end
-    return sum(Float64, eval) / sum(Float64, w)
+    return apply_metric(tweedie, p, y, w, eval; kwargs...)
 end
 
 function gaussian_mle(
@@ -186,18 +176,7 @@ function wmae(
     alpha=0.5,
     kwargs...
 ) where {T}
-    K = size(p, 1)
-    @threads for i in eachindex(w)
-        acc = zero(T)
-        @inbounds for k in 1:K
-            yk = y isa AbstractVector ? y[i] : y[k, i]
-            acc +=
-                alpha * max(yk - p[k, i], zero(T)) +
-                (1 - alpha) * max(p[k, i] - yk, zero(T))
-        end
-        eval[i] = w[i] * acc / K
-    end
-    return sum(Float64, eval) / sum(Float64, w)
+    return apply_metric(wmae, p, y, w, eval; alpha, kwargs...)
 end
 
 function multiquantile(
