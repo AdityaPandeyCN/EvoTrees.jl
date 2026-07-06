@@ -4,23 +4,29 @@
 #####################
 # MAE
 #####################
-function kernel_mae_∇!(∇::CuDeviceMatrix, p::CuDeviceMatrix, y::CuDeviceVector)
+function kernel_mae_∇!(∇::CuDeviceMatrix{T}, p::CuDeviceMatrix{T}, y) where {T}
     i = threadIdx().x + (blockIdx().x - 1) * blockDim().x
-    if i <= length(y)
-        @inbounds ∇[1, i] = (y[i] - p[1, i]) * ∇[3, i]
+    if i <= size(p, 2)
+        K = size(p, 1)
+        w_row = 2 * K + 1
+        @inbounds w = ∇[w_row, i]
+        @inbounds for k in 1:K
+            ∇[k, i] = (_cuda_target(y, k, i) - p[k, i]) * w
+            ∇[K+k, i] = zero(T)
+        end
     end
     return
 end
 function EvoTrees.update_grads!(
     ∇::CuMatrix,
     p::CuMatrix,
-    y::CuVector,
+    y::Union{CuVector,CuMatrix},
     ::Type{EvoTrees.MAE},
     params::EvoTrees.EvoTypes;
     MAX_THREADS=1024,
 )
-    threads = min(MAX_THREADS, length(y))
-    blocks = cld(length(y), threads)
+    threads = min(MAX_THREADS, size(p, 2))
+    blocks = cld(size(p, 2), threads)
     @cuda blocks = blocks threads = threads kernel_mae_∇!(∇, p, y)
     CUDA.synchronize()
     return
@@ -55,26 +61,30 @@ end
 #####################
 # Quantile
 #####################
-function kernel_quantile_∇!(∇::CuDeviceMatrix{T}, p::CuDeviceMatrix{T}, y::CuDeviceVector{T}, alpha::T) where {T<:AbstractFloat}
+function kernel_quantile_∇!(∇::CuDeviceMatrix{T}, p::CuDeviceMatrix{T}, y, alpha::T) where {T<:AbstractFloat}
     i = threadIdx().x + (blockIdx().x - 1) * blockDim().x
-    if i <= length(y)
-        @inbounds ∇[1, i] = (y[i] - p[1, i]) * ∇[3, i]
-        diff = (y[i] - p[1, i])
-        @inbounds ∇[1, i] = diff > 0 ? alpha * ∇[3, i] : (alpha - 1) * ∇[3, i]
-        @inbounds ∇[2, i] = diff
+    if i <= size(p, 2)
+        K = size(p, 1)
+        w_row = 2 * K + 1
+        @inbounds w = ∇[w_row, i]
+        @inbounds for k in 1:K
+            diff = _cuda_target(y, k, i) - p[k, i]
+            ∇[k, i] = diff > 0 ? alpha * w : (alpha - 1) * w
+            ∇[K+k, i] = diff
+        end
     end
     return
 end
 function EvoTrees.update_grads!(
     ∇::CuMatrix{T},
     p::CuMatrix{T},
-    y::CuVector{T},
+    y::Union{CuVector{T},CuMatrix{T}},
     ::Type{EvoTrees.Quantile},
     params::EvoTrees.EvoTypes;
     MAX_THREADS=1024,
 ) where {T<:AbstractFloat}
-    threads = min(MAX_THREADS, length(y))
-    blocks = cld(length(y), threads)
+    threads = min(MAX_THREADS, size(p, 2))
+    blocks = cld(size(p, 2), threads)
     @cuda blocks = blocks threads = threads kernel_quantile_∇!(∇, p, y, T(params.alpha))
     CUDA.synchronize()
     return
