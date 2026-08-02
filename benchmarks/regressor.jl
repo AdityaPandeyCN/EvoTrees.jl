@@ -1,4 +1,4 @@
-#using CUDA
+using CUDA
 using DataFrames
 using CSV
 using Statistics
@@ -17,8 +17,8 @@ tree_type = :binary
 T = Float32
 nthreads = Base.Threads.nthreads()
 
-device_list = [:cpu]
-# device_list = [:gpu]
+#device_list = [:cpu]
+device_list = [:gpu]
 
 nobs_list = Int.([1e5, 1e6, 1e7])
 # nobs_list = Int.([1e6])
