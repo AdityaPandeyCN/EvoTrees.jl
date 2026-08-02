@@ -171,14 +171,8 @@ function grow_tree!(
             end
 
             # Compute larger children via subtraction
-            if subtract_count_val > 0
-                subtract_hist_kernel!(backend)(
-                    cache.h∇,
-                    view(cache.subtract_nodes_gpu, 1:subtract_count_val);
-                    ndrange=subtract_count_val * size(cache.h∇, 1) * size(cache.h∇, 2) * size(cache.h∇, 3),
-                )
-                KernelAbstractions.synchronize(backend)
-            end
+            subtract_count_val > 0 && EvoTrees.subtract_hist!(
+                cache.h∇, view(cache.subtract_nodes_gpu, 1:subtract_count_val), cache.js)
 
             compute_nodes_sum_kernel!(backend)(
                 cache.nodes_sum_gpu, cache.h∇, active_nodes, cache.js, cache.K;

@@ -87,10 +87,7 @@ function grow_tree!(
             @threads for n ∈ n_current[1:2:end]
                 update_hist!(L, nodes[n].h, ∇, x_bin, nodes[n].is, js)
             end
-            @threads for n ∈ n_current[2:2:end]
-                sib = n % 2 == 0 ? n + 1 : n - 1
-                subtract_hist!(h∇, n, n >> 1, sib, js)
-            end
+            subtract_hist!(h∇, view(n_current, 2:2:lastindex(n_current)), js)
             sort!(n_current)
             @threads for n ∈ n_current
                 tree.w[n] = last(nodes[n].∑) # set training weights reaching the node
@@ -193,10 +190,7 @@ function grow_otree!(
             @threads for n ∈ n_current[1:2:end]
                 update_hist!(L, nodes[n].h, ∇, x_bin, nodes[n].is, js)
             end
-            @threads for n ∈ n_current[2:2:end]
-                sib = n % 2 == 0 ? n + 1 : n - 1
-                subtract_hist!(h∇, n, n >> 1, sib, js)
-            end
+            subtract_hist!(h∇, view(n_current, 2:2:lastindex(n_current)), js)
             sort!(n_current)
             @threads for n ∈ n_current
                 tree.w[n] = last(nodes[n].∑) # set training weights reaching the node

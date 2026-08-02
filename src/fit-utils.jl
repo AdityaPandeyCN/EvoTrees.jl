@@ -312,16 +312,19 @@ function split_set_single!(
 end
 
 """
-    subtract_hist!(h∇, n, np, ns, js)
+    subtract_hist!(h∇, nodes, js)
 
-Subtract sibling histogram from parent into node `n` for features `js`.
-Explicit loops avoid broadcast unalias copies when all slices share one parent Array.
+`h∇[:, :, j, n] = h∇[:, :, j, n >> 1] - h∇[:, :, j, n ⊻ 1]` for `n ∈ nodes`, `j ∈ js`.
+Reshaped so the `(2K+1, nbins)` plane is one contiguous `@simd` run. Backends
+add methods on this signature.
 """
-function subtract_hist!(h∇::Array{Float64,4}, n::Integer, np::Integer, ns::Integer, js)
-    @inbounds for j in js
-        for b in axes(h∇, 2)
-            @simd for k in axes(h∇, 1)
-                h∇[k, b, j, n] = h∇[k, b, j, np] - h∇[k, b, j, ns]
+function subtract_hist!(h∇::Array{Float64,4}, nodes, js)
+    h = reshape(h∇, :, size(h∇, 3), size(h∇, 4))
+    @threads for n in nodes
+        np, ns = n >> 1, n ⊻ 1
+        @inbounds for j in js
+            @simd for i in axes(h, 1)
+                h[i, j, n] = h[i, j, np] - h[i, j, ns]
             end
         end
     end
