@@ -312,12 +312,29 @@ function split_set_single!(
 end
 
 """
+    subtract_hist!(h∇, n, np, ns, js)
+
+Subtract sibling histogram from parent into node `n` for features `js`.
+Explicit loops avoid broadcast unalias copies when all slices share one parent Array.
+"""
+function subtract_hist!(h∇::Array{Float64,4}, n::Integer, np::Integer, ns::Integer, js)
+    @inbounds for j in js
+        for b in axes(h∇, 2)
+            @simd for k in axes(h∇, 1)
+                h∇[k, b, j, n] = h∇[k, b, j, np] - h∇[k, b, j, ns]
+            end
+        end
+    end
+    return nothing
+end
+
+"""
     update_hist!
         GradientRegression
 """
 function update_hist!(
     ::Type{L},
-    hist::Array,
+    hist::AbstractArray,
     ∇::Matrix,
     x_bin::Matrix,
     is::AbstractVector,
@@ -353,7 +370,7 @@ Generic fallback - Softmax
 """
 function update_hist!(
     ::Type{L},
-    hist::Array,
+    hist::AbstractArray,
     ∇::Matrix,
     x_bin::Matrix,
     is::AbstractVector,
@@ -375,7 +392,9 @@ end
 """
     get_best_split(
         ::Type{L},
+        h∇, h∇L, h∇R,
         node::TrainNode,
+        n,
         js,
         params::EvoTypes,
         feattypes::Vector{Bool},
@@ -386,16 +405,20 @@ Generic fallback
 """
 function get_best_split(
     ::Type{L},
+    h∇::Array{Float64,4},
+    h∇L::Array{Float64,4},
+    h∇R::Array{Float64,4},
     node::TrainNode,
+    n::Integer,
     js,
     params::EvoTypes,
     feattypes::Vector{Bool},
     monotone_constraints,
 ) where {L<:LossType}
 
-    h = view(node.h, :, :, js)
-    hL = view(node.hL, :, :, js)
-    hR = view(node.hR, :, :, js)
+    h = view(h∇, :, :, js, n)
+    hL = view(h∇L, :, :, js, n)
+    hR = view(h∇R, :, :, js, n)
     constraints = view(monotone_constraints, js)
     num_flags = view(feattypes, js)
     ∑ = node.∑
@@ -443,7 +466,9 @@ end
 """
     update_gains!(
         ::Type{L},
+        h∇, h∇L, h∇R,
         node::TrainNode,
+        n,
         js,
         params::EvoTypes,
         feattypes::Vector{Bool},
@@ -452,16 +477,20 @@ end
 """
 function update_gains!(
     ::Type{L},
+    h∇::Array{Float64,4},
+    h∇L::Array{Float64,4},
+    h∇R::Array{Float64,4},
     node::TrainNode,
+    n::Integer,
     js,
     params::EvoTypes,
     feattypes::Vector{Bool},
     monotone_constraints,
 ) where {L<:LossType}
 
-    h = view(node.h, :, :, js)
-    hL = view(node.hL, :, :, js)
-    hR = view(node.hR, :, :, js)
+    h = view(h∇, :, :, js, n)
+    hL = view(h∇L, :, :, js, n)
+    hR = view(h∇R, :, :, js, n)
     gains = view(node.gains, :, js)
     constraints = view(monotone_constraints, js)
     num_flags = view(feattypes, js)

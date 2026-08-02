@@ -62,6 +62,9 @@ struct CacheBaseCPU{Y,N<:TrainNode} <: CacheCPU
     right::Vector{UInt32}
     js::Vector{UInt32}
     ∇::Matrix{Float32}
+    h∇::Array{Float64,4}
+    h∇L::Array{Float64,4}
+    h∇R::Array{Float64,4}
     feature_names::Vector{Symbol}
     featbins::Vector{UInt8}
     feattypes::Vector{Bool}
