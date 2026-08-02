@@ -399,21 +399,23 @@ function _hist_obs_major!(hist, ∇::Matrix{T}, x_bin_T::Matrix{UInt8}, is, js) 
     pxb = Ptr{UInt8}(pointer(x_bin_T))
     pgr = Ptr{UInt8}(pointer(∇))
     n = length(is)
-    @inbounds for idx in 1:n
-        i = Int(is[idx])
-        if idx + PREFETCH_ROWS <= n
-            ip = Int(is[idx+PREFETCH_ROWS])
-            pb = pxb + (ip - 1) * nfeats
-            _prefetch(pb)
-            nfeats > 64 && _prefetch(pb + 64)
-            _prefetch(pgr + (ip - 1) * stride)
-        end
-        g1, g2, g3 = ∇[1, i], ∇[2, i], ∇[3, i]
-        for j in js
-            bin = x_bin_T[j, i]
-            hist[1, bin, j] += g1
-            hist[2, bin, j] += g2
-            hist[3, bin, j] += g3
+    GC.@preserve x_bin_T ∇ begin
+        @inbounds for idx in 1:n
+            i = Int(is[idx])
+            if idx + PREFETCH_ROWS <= n
+                ip = Int(is[idx+PREFETCH_ROWS])
+                pb = pxb + (ip - 1) * nfeats
+                _prefetch(pb)
+                nfeats > 64 && _prefetch(pb + 64)
+                _prefetch(pgr + (ip - 1) * stride)
+            end
+            g1, g2, g3 = ∇[1, i], ∇[2, i], ∇[3, i]
+            for j in js
+                bin = x_bin_T[j, i]
+                hist[1, bin, j] += g1
+                hist[2, bin, j] += g2
+                hist[3, bin, j] += g3
+            end
         end
     end
     return nothing
