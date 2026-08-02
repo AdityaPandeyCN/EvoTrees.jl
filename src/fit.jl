@@ -31,6 +31,7 @@ function grow_evotree!(m::EvoTree{L,K}, cache::CacheCPU, params::EvoTypes) where
             cache.left,
             cache.right,
             cache.x_bin,
+            cache.x_bin_T,
             cache.feattypes,
             cache.monotone_constraints
         )
@@ -46,9 +47,9 @@ end
 function grow_tree!(
     tree::Tree{L,K},
     nodes::Vector{N},
-    h∇::Array{Float64,4},
-    h∇L::Array{Float64,4},
-    h∇R::Array{Float64,4},
+    h∇,
+    h∇L,
+    h∇R,
     params::EvoTypes,
     ∇::Matrix,
     js,
@@ -56,6 +57,7 @@ function grow_tree!(
     left,
     right,
     x_bin,
+    x_bin_T,
     feattypes::Vector{Bool},
     monotone_constraints
 ) where {L,K,N}
@@ -85,7 +87,7 @@ function grow_tree!(
         else
             # look for best split for each node
             @threads for n ∈ n_current[1:2:end]
-                update_hist!(L, nodes[n].h, ∇, x_bin, nodes[n].is, js)
+                update_hist!(nodes[n].h, ∇, x_bin, x_bin_T, nodes[n].is, js, depth)
             end
             subtract_hist!(h∇, view(n_current, 2:2:lastindex(n_current)), js)
             sort!(n_current)
@@ -150,9 +152,9 @@ end
 function grow_otree!(
     tree::Tree{L,K},
     nodes::Vector{N},
-    h∇::Array{Float64,4},
-    h∇L::Array{Float64,4},
-    h∇R::Array{Float64,4},
+    h∇,
+    h∇L,
+    h∇R,
     params::EvoTypes,
     ∇::Matrix,
     js,
@@ -160,6 +162,7 @@ function grow_otree!(
     left,
     right,
     x_bin,
+    x_bin_T,
     feattypes::Vector{Bool},
     monotone_constraints
 ) where {L,K,N}
@@ -188,7 +191,7 @@ function grow_otree!(
         else
             # look for best split for each node
             @threads for n ∈ n_current[1:2:end]
-                update_hist!(L, nodes[n].h, ∇, x_bin, nodes[n].is, js)
+                update_hist!(nodes[n].h, ∇, x_bin, x_bin_T, nodes[n].is, js, depth)
             end
             subtract_hist!(h∇, view(n_current, 2:2:lastindex(n_current)), js)
             sort!(n_current)

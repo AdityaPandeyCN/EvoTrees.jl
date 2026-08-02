@@ -145,7 +145,7 @@ Mark each node id in `active_nodes` as active by setting `mask[node] = 1`.
 end
 
 # Build histograms for active nodes
-function update_hist_gpu!(h∇, ∇, x_bin, nidx, js, is, active_nodes, K, target_mask, backend)
+function EvoTrees.update_hist!(h∇, ∇, x_bin, nidx, js, is, active_nodes, K, target_mask, backend)
     n_active = length(active_nodes)
 
     clear_mask_kernel!(backend)(target_mask; ndrange=length(target_mask))

@@ -148,6 +148,9 @@ function init_core(params::EvoTypes, ::Type{CPU}, data, feature_names, y_train, 
 
     edges, featbins, feattypes = get_edges(data; feature_names, nbins=params.nbins, rng)
     x_bin = binarize(data; feature_names, edges)
+    # observation-major copy: all features of one observation are contiguous,
+    # which is the layout the depth >= 2 histogram build reads.
+    x_bin_T = permutedims(x_bin)
     nobs, nfeats = size(x_bin)
 
     T = Float32
@@ -216,10 +219,12 @@ function init_core(params::EvoTypes, ::Type{CPU}, data, feature_names, y_train, 
     # build cache
     Y = typeof(y)
     N = typeof(first(nodes))
-    cache = CacheBaseCPU{Y,N}(
+    H = typeof(h∇)
+    cache = CacheBaseCPU{Y,N,H}(
         rng,
         K,
         x_bin,
+        x_bin_T,
         y,
         w,
         pred,
