@@ -70,6 +70,8 @@ function grow_tree!(
     nodes[1].∑ .= dropdims(sum(Float64, view(∇, :, nodes[1].is), dims=2), dims=2)
 
     # grow while there are remaining active nodes
+    offsets = Int[]
+
     while length(n_current) > 0 && depth <= params.max_depth
         offset = 0 # identifies breakpoint for each node set within a depth
         n_next = Int[]
@@ -106,41 +108,40 @@ function grow_tree!(
                 end
             end
 
-            for n ∈ n_current
-                if tree.split[n]
+            # Offsets are a prefix sum, so precompute them and the loop threads.
+            # Each splitting node owns a disjoint slice of `is` / left / right.
+            resize!(offsets, length(n_current))
+            for (k, n) in enumerate(n_current)
+                offsets[k] = offset
+                tree.split[n] && (offset += length(nodes[n].is))
+            end
 
+            @threads for k in eachindex(n_current)
+                n = n_current[k]
+                if tree.split[n]
                     best_feat = tree.feat[n]
                     best_bin = tree.cond_bin[n]
-
-                    _left, _right = split_set!(
-                        nodes[n].is,
-                        is,
-                        left,
-                        right,
-                        x_bin,
-                        tree.feat[n],
-                        tree.cond_bin[n],
-                        feattypes[best_feat],
-                        offset,
+                    nodes[n<<1].is, nodes[n<<1+1].is = split_set!(
+                        nodes[n].is, is, left, right, x_bin,
+                        best_feat, best_bin, feattypes[best_feat], offsets[k],
                     )
-                    offset += length(nodes[n].is)
-
-                    nodes[n<<1].is, nodes[n<<1+1].is = _left, _right
                     @views nodes[n<<1].∑ .= h∇L[:, best_bin, best_feat, n]
                     @views nodes[n<<1+1].∑ .= h∇R[:, best_bin, best_feat, n]
-
-                    if length(_right) >= length(_left)
-                        push!(n_next, n << 1)
-                        push!(n_next, n << 1 + 1)
-                    else
-                        push!(n_next, n << 1 + 1)
-                        push!(n_next, n << 1)
-                    end
+                elseif L <: Quantile
+                    pred_leaf_cpu!(tree.pred, n, nodes[n].∑, L, params, ∇, nodes[n].is)
                 else
-                    if L <: Quantile
-                        pred_leaf_cpu!(tree.pred, n, nodes[n].∑, L, params, ∇, nodes[n].is)
+                    pred_leaf_cpu!(tree.pred, n, nodes[n].∑, L, params)
+                end
+            end
+
+            for n ∈ n_current
+                if tree.split[n]
+                    if length(nodes[n<<1+1].is) >= length(nodes[n<<1].is)
+                        push!(n_next, n << 1)
+                        push!(n_next, n << 1 + 1)
                     else
-                        pred_leaf_cpu!(tree.pred, n, nodes[n].∑, L, params)
+                        push!(n_next, n << 1 + 1)
+                        push!(n_next, n << 1)
                     end
                 end
             end
@@ -179,6 +180,8 @@ function grow_otree!(
     nodes[1].∑ .= dropdims(sum(Float64, view(∇, :, nodes[1].is), dims=2), dims=2)
 
     # grow while there are remaining active nodes
+    offsets = Int[]
+
     while length(n_current) > 0 && depth <= params.max_depth
         offset = 0 # identifies breakpoint for each node set within a depth
         n_next = Int[]
@@ -231,30 +234,28 @@ function grow_otree!(
             best_bin = best[2][1]
             best_feat = js[best[2][2]]
             if best_gain > params.gamma
-                for n in n_current
+                resize!(offsets, length(n_current))
+                for (k, n) in enumerate(n_current)
                     tree.gain[n] = best_gain
                     tree.cond_bin[n] = best_bin
                     tree.feat[n] = best_feat
                     tree.split[n] = best_bin != 0
-
-                    _left, _right = split_set!(
-                        nodes[n].is,
-                        is,
-                        left,
-                        right,
-                        x_bin,
-                        tree.feat[n],
-                        tree.cond_bin[n],
-                        feattypes[best_feat],
-                        offset,
-                    )
+                    offsets[k] = offset
                     offset += length(nodes[n].is)
+                end
 
-                    nodes[n<<1].is, nodes[n<<1+1].is = _left, _right
+                @threads for k in eachindex(n_current)
+                    n = n_current[k]
+                    nodes[n<<1].is, nodes[n<<1+1].is = split_set!(
+                        nodes[n].is, is, left, right, x_bin,
+                        best_feat, best_bin, feattypes[best_feat], offsets[k],
+                    )
                     @views nodes[n<<1].∑ .= h∇L[:, best_bin, best_feat, n]
                     @views nodes[n<<1+1].∑ .= h∇R[:, best_bin, best_feat, n]
+                end
 
-                    if length(_right) >= length(_left)
+                for n in n_current
+                    if length(nodes[n<<1+1].is) >= length(nodes[n<<1].is)
                         push!(n_next, n << 1)
                         push!(n_next, n << 1 + 1)
                     else

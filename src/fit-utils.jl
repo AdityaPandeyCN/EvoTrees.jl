@@ -287,22 +287,25 @@ function split_set_single!(
 )
     count_left, count_right = 0, 0
 
+    # Scratch is indexed from `offset`, not from 1, so that two nodes with
+    # disjoint `is` ranges also touch disjoint regions of left/right. That is
+    # what allows the caller to thread over nodes.
     @inbounds for i in is_view
         cond = feattype ? x_bin[i, feat] <= cond_bin : x_bin[i, feat] == cond_bin
         if cond
             count_left += 1
-            left[count_left] = i
+            left[offset+count_left] = i
         else
             count_right += 1
-            right[count_right] = i
+            right[offset+count_right] = i
         end
     end
 
     @inbounds for i in 1:count_left
-        is[offset+i] = left[i]
+        is[offset+i] = left[offset+i]
     end
     @inbounds for i in 1:count_right
-        is[offset+count_left+i] = right[i]
+        is[offset+count_left+i] = right[offset+i]
     end
 
     return (
