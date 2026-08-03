@@ -332,35 +332,54 @@ function subtract_hist!(h∇::Array, nodes, js)
 end
 
 # Software prefetch (LLVM `llvm.prefetch`, read / locality T0 / data cache).
-# Mirrors XGBoost's PREFETCH_READ_T0 in RowsWiseBuildHistKernel.
-@static if VERSION >= v"1.11"
-    @inline _prefetch(p::Ptr{UInt8}) = ccall("llvm.prefetch.p0", llvmcall, Cvoid,
-        (Ptr{UInt8}, Int32, Int32, Int32), p, Int32(0), Int32(3), Int32(1))
-else
-    @inline _prefetch(p::Ptr{UInt8}) = ccall("llvm.prefetch.p0i8", llvmcall, Cvoid,
-        (Ptr{UInt8}, Int32, Int32, Int32), p, Int32(0), Int32(3), Int32(1))
-end
+# Mirrors XGBoost's PREFETCH_READ_T0; probe at load time (no VERSION guess).
+# Probe runs inside a closure — top-level llvmcall during precompile can SEGV.
+# If the intrinsic is unavailable, PREFETCH_OK is false and _prefetch is a no-op.
+const PREFETCH_OK = (function ()
+    try
+        buf = zeros(UInt8, 64)
+        GC.@preserve buf begin
+            ccall("llvm.prefetch.p0", llvmcall, Cvoid,
+                (Ptr{UInt8}, Int32, Int32, Int32),
+                pointer(buf), Int32(0), Int32(3), Int32(1))
+        end
+        return true
+    catch
+        return false
+    end
+end)()
 
 const PREFETCH_ROWS = 10
+const PREFETCH_CACHELINE = 64  # bytes; step across a full x_bin_T row
+
+@inline function _prefetch(p::Ptr{UInt8})
+    if PREFETCH_OK
+        ccall("llvm.prefetch.p0", llvmcall, Cvoid,
+            (Ptr{UInt8}, Int32, Int32, Int32), p, Int32(0), Int32(3), Int32(1))
+    end
+    return nothing
+end
 
 """
-    update_hist!(hist, ∇, x_bin, x_bin_T, is, js, depth)
+    update_hist!(hist, ∇, x_bin, x_bin_T, is, js, obs_major)
 
 Accumulate gradients into one node's histogram slice.
 
 Two internal bodies, selected at run time:
 
   - `_hist_feat_major!` walks one feature at a time over `x_bin` and threads
-    over `js`. Used at `depth == 1`, where there is a single node and the
-    outer node loop cannot supply parallelism, and for `2K+1 != 3`.
+    over `js`. Used when the caller cannot saturate threads with the node
+    loop (`obs_major == false`), and for `2K+1 != 3`.
   - `_hist_obs_major!` walks one observation at a time over `x_bin_T`, where
     all of a row's bins are contiguous, and software-prefetches
-    `PREFETCH_ROWS` ahead. Serial; the caller threads over nodes.
+    `PREFETCH_ROWS` ahead (skipped when `is` is contiguous — HW prefetch
+    suffices — matching XGBoost RowsWiseBuildHistKernel). Serial; the caller
+    threads over nodes when `length(build_nodes) >= nthreads()`.
 
 Both accumulate in ascending `is` order, so results are bitwise identical.
 """
-function update_hist!(hist, ∇, x_bin, x_bin_T, is, js, depth)
-    if depth > 1 && size(hist, 1) == 3
+function update_hist!(hist, ∇, x_bin, x_bin_T, is, js, obs_major::Bool)
+    if obs_major && size(hist, 1) == 3
         _hist_obs_major!(hist, ∇, x_bin_T, is, js)
     else
         _hist_feat_major!(hist, ∇, x_bin, is, js)
@@ -392,6 +411,17 @@ function _hist_feat_major!(hist, ∇, x_bin, is, js)
     return nothing
 end
 
+@inline function _hist_obs_accumulate_row!(hist, ∇, x_bin_T, i, js)
+    g1, g2, g3 = ∇[1, i], ∇[2, i], ∇[3, i]
+    @inbounds for j in js
+        bin = x_bin_T[j, i]
+        hist[1, bin, j] += g1
+        hist[2, bin, j] += g2
+        hist[3, bin, j] += g3
+    end
+    return nothing
+end
+
 function _hist_obs_major!(hist, ∇::Matrix{T}, x_bin_T::Matrix{UInt8}, is, js) where {T}
     hist .= 0
     nfeats = size(x_bin_T, 1)
@@ -399,22 +429,28 @@ function _hist_obs_major!(hist, ∇::Matrix{T}, x_bin_T::Matrix{UInt8}, is, js) 
     pxb = Ptr{UInt8}(pointer(x_bin_T))
     pgr = Ptr{UInt8}(pointer(∇))
     n = length(is)
+    # Contiguous ascending `is` → HW prefetch is enough (XGBoost contiguousBlock).
+    contiguous = n < 2 || (Int(is[n]) - Int(is[1])) == n - 1
+    do_prefetch = PREFETCH_OK && !contiguous && n > PREFETCH_ROWS
     GC.@preserve x_bin_T ∇ begin
-        @inbounds for idx in 1:n
-            i = Int(is[idx])
-            if idx + PREFETCH_ROWS <= n
+        if do_prefetch
+            n_pf = n - PREFETCH_ROWS
+            @inbounds for idx in 1:n_pf
+                i = Int(is[idx])
                 ip = Int(is[idx+PREFETCH_ROWS])
                 pb = pxb + (ip - 1) * nfeats
-                _prefetch(pb)
-                nfeats > 64 && _prefetch(pb + 64)
+                for off in 0:PREFETCH_CACHELINE:(nfeats - 1)
+                    _prefetch(pb + off)
+                end
                 _prefetch(pgr + (ip - 1) * stride)
+                _hist_obs_accumulate_row!(hist, ∇, x_bin_T, i, js)
             end
-            g1, g2, g3 = ∇[1, i], ∇[2, i], ∇[3, i]
-            for j in js
-                bin = x_bin_T[j, i]
-                hist[1, bin, j] += g1
-                hist[2, bin, j] += g2
-                hist[3, bin, j] += g3
+            @inbounds for idx in (n_pf + 1):n
+                _hist_obs_accumulate_row!(hist, ∇, x_bin_T, Int(is[idx]), js)
+            end
+        else
+            @inbounds for idx in 1:n
+                _hist_obs_accumulate_row!(hist, ∇, x_bin_T, Int(is[idx]), js)
             end
         end
     end

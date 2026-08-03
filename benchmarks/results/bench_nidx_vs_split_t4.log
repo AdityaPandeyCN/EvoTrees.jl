@@ -1,0 +1,39 @@
+LOADED
+[32m[1mPrecompiling[22m[39m packages...
+  37594.1 ms[32m  ✓ [39mEvoTrees
+  1 dependency successfully precompiled in 40 seconds. 105 already precompiled.
+threads = 4
+loadavg = 8.56 4.40 2.57 16/985 470974
+=== PHASE nobs=1000000 nfeats=100 depth=6 rounds=20 threads=4 ===
+wall=26.076s  accounted=18.073s
+  hist         14.801s  81.9%
+  subtract     0.149s  0.8%
+  split_find   0.931s  5.1%
+  split_set    1.714s  9.5%
+  other        0.478s  2.6%
+=== PHASE nobs=1000000 nfeats=100 depth=11 rounds=20 threads=4 ===
+wall=44.352s  accounted=38.354s
+  hist         23.13s  60.3%
+  subtract     0.819s  2.1%
+  split_find   9.625s  25.1%
+  split_set    4.37s  11.4%
+  other        0.41s  1.1%
+=== MEMBERSHIP nobs=1000000 depth_level=6 nodes=32 ===
+  split_set!  25.58 ms
+  nidx mutate 5.02 ms
+  split/nidx  5.1×
+=== MEMBERSHIP nobs=1000000 depth_level=11 nodes=1024 ===
+  split_set!  5.54 ms
+  nidx mutate 9.13 ms
+  split/nidx  0.61×
+=== HIST nobs=1000000 nfeats=100 depth_level=6 build=16 ===
+  max|dense - nidx| = 0.0
+  dense is hist  254.33 ms
+  nidx scan hist 834.63 ms
+  nidx/dense     3.28×
+=== HIST nobs=1000000 nfeats=100 depth_level=11 build=512 ===
+  max|dense - nidx| = 0.0
+  dense is hist  485.17 ms
+  nidx scan hist 979.0 ms
+  nidx/dense     2.02×
+DONE
