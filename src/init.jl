@@ -202,6 +202,7 @@ function init_core(params::EvoTypes, ::Type{CPU}, data, feature_names, y_train, 
     h∇ = zeros(Float64, 2 * K + 1, nbins, nfeats, nnodes)
     h∇L = zeros(Float64, 2 * K + 1, nbins, nfeats, nnodes)
     h∇R = zeros(Float64, 2 * K + 1, nbins, nfeats, nnodes)
+    h∇_tls = [zeros(Float64, 2 * K + 1, nbins, nfeats) for _ in 1:HIST_TASKS]
     nodes = [TrainNode(zero(Float64), view(is, 1:0), zeros(Float64, 2 * K + 1), view(h∇, :, :, :, n), view(h∇L, :, :, :, n), view(h∇R, :, :, :, n), zeros(nbins, nfeats)) for n = 1:nnodes]
     bias = [Tree{L,K}(μ)]
     m = EvoTree{L,K}(L, K, bias, info)
@@ -210,7 +211,8 @@ function init_core(params::EvoTypes, ::Type{CPU}, data, feature_names, y_train, 
     Y = typeof(y)
     N = typeof(first(nodes))
     H = typeof(h∇)
-    cache = CacheBaseCPU{Y,N,H}(
+    HT = typeof(first(h∇_tls))
+    cache = CacheBaseCPU{Y,N,H,HT}(
         rng,
         K,
         x_bin,
@@ -228,6 +230,7 @@ function init_core(params::EvoTypes, ::Type{CPU}, data, feature_names, y_train, 
         h∇,
         h∇L,
         h∇R,
+        h∇_tls,
         feature_names,
         featbins,
         feattypes,
