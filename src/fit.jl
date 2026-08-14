@@ -90,7 +90,7 @@ function grow_tree!(
         else
             # look for best split for each node
             build_nodes = view(n_current, 1:2:lastindex(n_current))
-            update_hist!(nodes, build_nodes, ∇, x_bin, x_bin_T, js, h∇_tls)
+            update_hist!(nodes, build_nodes, ∇, x_bin, x_bin_T, js, h∇_tls, Val(2K + 1))
             subtract_hist!(h∇, view(n_current, 2:2:lastindex(n_current)), js)
             sort!(n_current)
             @threads for n ∈ n_current
@@ -194,7 +194,7 @@ function grow_otree!(
         else
             # look for best split for each node
             build_nodes = view(n_current, 1:2:lastindex(n_current))
-            update_hist!(nodes, build_nodes, ∇, x_bin, x_bin_T, js, h∇_tls)
+            update_hist!(nodes, build_nodes, ∇, x_bin, x_bin_T, js, h∇_tls, Val(2K + 1))
             subtract_hist!(h∇, view(n_current, 2:2:lastindex(n_current)), js)
             sort!(n_current)
             @threads for n ∈ n_current

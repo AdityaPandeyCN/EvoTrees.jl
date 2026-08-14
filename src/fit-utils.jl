@@ -342,9 +342,15 @@ else
 end
 
 """
-    update_hist!(nodes, build_nodes, ∇, x_bin, x_bin_T, js, h∇_tls)
+    update_hist!(nodes, build_nodes, ∇, x_bin, x_bin_T, js, h∇_tls, ::Val{NK})
 
-Build `nodes[n].h` for each `n` in `build_nodes`. Dispatches on `hist_strategy`:
+Build `nodes[n].h` for each `n` in `build_nodes`. `NK == 2K+1` is the gradient
+row count, passed as a `Val` so every kernel unrolls its innermost loop at
+compile time -- this is the only place the loss's output dimension enters, and
+it selects a codegen width, never an algorithm. Strategy is chosen by
+`hist_strategy` from node sizes and the scratch pool -- note that pool is a
+memory guard, not a profitability model; see `_hist_obs!` for where the layout
+stops paying:
 
 | strategy         | kernel        | layout    | h∇_tls |
 |:-----------------|:--------------|:----------|:-------|
@@ -352,51 +358,58 @@ Build `nodes[n].h` for each `n` in `build_nodes`. Dispatches on `hist_strategy`:
 | `HistByNode`     | `_hist_obs!`  | `x_bin_T` | no     |
 | `HistByRowBlock` | `_hist_obs!`  | `x_bin_T` | yes    |
 """
-function update_hist!(nodes, build_nodes, ∇, x_bin, x_bin_T, js, h∇_tls)
+function update_hist!(nodes, build_nodes, ∇, x_bin, x_bin_T, js, h∇_tls, ::Val{NK}) where {NK}
     isempty(build_nodes) && return nothing
-    _build_hist!(hist_strategy(build_nodes, nodes), nodes, build_nodes, ∇, x_bin, x_bin_T, js, h∇_tls)
+    strategy = hist_strategy(build_nodes, nodes, length(h∇_tls))
+    _build_hist!(strategy, nodes, build_nodes, ∇, x_bin, x_bin_T, js, h∇_tls, Val(NK))
 end
 
-function _hist_blocks(build_nodes, nodes)
-    stride = max(1, HIST_TASKS ÷ length(build_nodes))
+function _hist_blocks(build_nodes, nodes, ntls)
+    stride = max(1, ntls ÷ length(build_nodes))
     nblocks = [min(stride, max(1, cld(length(nodes[n].is), MIN_BLOCK_ROWS))) for n in build_nodes]
     return stride, nblocks
 end
 
-# Obs-major is single-target only, tested as `size(h, 1) == 2K+1 == 3`.
-# Row-blocking kicks in once nodes are large enough to split (see `MIN_BLOCK_ROWS`).
-function hist_strategy(build_nodes, nodes)
-    size(nodes[first(build_nodes)].h, 1) == 3 || return HistByFeature()
-    _, nblocks = _hist_blocks(build_nodes, nodes)
+# Row-blocking kicks in once nodes are large enough to split (see `MIN_BLOCK_ROWS`)
+# and the scratch pool can back one buffer per task. An empty pool means the
+# obs-major layout was never materialized, so fall back to the feature-major build.
+function hist_strategy(build_nodes, nodes, ntls)
+    ntls == 0 && return HistByFeature()
+    _, nblocks = _hist_blocks(build_nodes, nodes, ntls)
     return any(>(1), nblocks) ? HistByRowBlock() : HistByNode()
 end
 
-function _build_hist!(::HistByFeature, nodes, build_nodes, ∇, x_bin, _x_bin_T, js, _h∇_tls)
+function _build_hist!(::HistByFeature, nodes, build_nodes, ∇, x_bin, _x_bin_T, js, _h∇_tls, ::Val{NK}) where {NK}
     n_build, nj = length(build_nodes), length(js)
     @threads for n in build_nodes
         fill!(nodes[n].h, 0)
     end
+    # `@threads` hands each thread one contiguous chunk of the range, so the
+    # flattening order *is* the scheduling policy. Feature-major: the cost of
+    # pair `(n, j)` is `length(nodes[n].is)`, which summed over all `n` for a
+    # fixed `j` is the depth's total row count -- identical for every feature.
+    # Node-major chunks would instead be as skewed as the node sizes.
     @threads for t = 1:(n_build * nj)
-        ni, ji = fldmod1(t, nj)
+        ji, ni = fldmod1(t, n_build)
         n = build_nodes[ni]
-        _hist_feat!(nodes[n].h, ∇, x_bin, nodes[n].is, js[ji])
+        _hist_feat!(nodes[n].h, ∇, x_bin, nodes[n].is, js[ji], Val(NK))
     end
     return nothing
 end
 
-function _build_hist!(::HistByNode, nodes, build_nodes, ∇, _x_bin, x_bin_T, js, _h∇_tls)
+function _build_hist!(::HistByNode, nodes, build_nodes, ∇, _x_bin, x_bin_T, js, _h∇_tls, ::Val{NK}) where {NK}
     @threads for n in build_nodes
         hist = nodes[n].h
         fill!(hist, 0)
         is_n = nodes[n].is
-        isempty(is_n) || _hist_obs!(hist, ∇, x_bin_T, is_n, js, 1, length(is_n))
+        isempty(is_n) || _hist_obs!(hist, ∇, x_bin_T, is_n, js, 1, length(is_n), Val(NK))
     end
     return nothing
 end
 
-function _build_hist!(::HistByRowBlock, nodes, build_nodes, ∇, _x_bin, x_bin_T, js, h∇_tls)
+function _build_hist!(::HistByRowBlock, nodes, build_nodes, ∇, _x_bin, x_bin_T, js, h∇_tls, ::Val{NK}) where {NK}
     n_build = length(build_nodes)
-    stride, nblocks = _hist_blocks(build_nodes, nodes)
+    stride, nblocks = _hist_blocks(build_nodes, nodes, length(h∇_tls))
     ntasks = n_build * stride
     @assert length(h∇_tls) >= ntasks
     @threads for n in build_nodes
@@ -412,7 +425,7 @@ function _build_hist!(::HistByRowBlock, nodes, build_nodes, ∇, _x_bin, x_bin_T
         hi = min(bi * chunk, nobs)
         partial = h∇_tls[tid]
         fill!(partial, 0)
-        lo <= hi && _hist_obs!(partial, ∇, x_bin_T, is_n, js, lo, hi)
+        lo <= hi && _hist_obs!(partial, ∇, x_bin_T, is_n, js, lo, hi, Val(NK))
     end
     @threads for j in js
         for ni in 1:n_build
@@ -426,14 +439,14 @@ function _build_hist!(::HistByRowBlock, nodes, build_nodes, ∇, _x_bin, x_bin_T
 end
 
 """
-    _hist_feat!(hist, ∇, x_bin, is, j)
+    _hist_feat!(hist, ∇, x_bin, is, j, ::Val{NK})
 
-Add feature `j` for rows `is` into `hist[:, :, j]`.
+Add feature `j` for rows `is` into `hist[:, :, j]`, reading feature-major `x_bin`.
 """
-@inline function _hist_feat!(hist, ∇, x_bin, is, j)
+@inline function _hist_feat!(hist, ∇, x_bin, is, j, ::Val{NK}) where {NK}
     @inbounds for i in is
         bin = x_bin[i, j]
-        @simd for k in axes(∇, 1)
+        @simd for k in 1:NK
             hist[k, bin, j] += ∇[k, i]
         end
     end
@@ -441,14 +454,25 @@ Add feature `j` for rows `is` into `hist[:, :, j]`.
 end
 
 """
-    _hist_obs!(hist, ∇, x_bin_T, is, js, idx0, idx1)
+    _hist_obs!(hist, ∇, x_bin_T, is, js, idx0, idx1, ::Val{NK})
 
-Add rows `is[idx0:idx1]` into `hist` from observation-major `x_bin_T`.
-Single-target only (`K == 1`): reads `∇[1:3, i]` directly. Guarded by `hist_strategy`.
+Add rows `is[idx0:idx1]` into `hist` from observation-major `x_bin_T`, where the
+`js` bins of one observation share cache lines and a row's `NK` gradients are
+read once per row rather than once per feature.
+
+The tradeoff runs the other way as `NK` grows: this kernel touches all `js`
+features per row, so its working set is the whole `NK * nbins * nfeats` hist,
+while `_hist_feat!` only ever touches one `hist[:, :, j]` slice. Measured at
+nobs=2e5, nfeats=100, nbins=64, single-threaded, obs-major wins 1.6x at `NK=3`
+and 2.0x at `NK=11`, is level at `NK=21`, and loses ~3% at `NK=41` once the
+hist passes 2 MB. Profitability is the caller's call, not this kernel's.
 """
-function _hist_obs!(hist, ∇::Matrix{T}, x_bin_T::Matrix{UInt8}, is, js, idx0, idx1) where {T}
+function _hist_obs!(hist, ∇::Matrix{T}, x_bin_T::Matrix{UInt8}, is, js, idx0, idx1, ::Val{NK}) where {T,NK}
+    # `NK` drives raw pointer arithmetic below; a mismatched `Val` would
+    # prefetch out of bounds rather than merely compute the wrong hist.
+    @assert size(∇, 1) == NK
     nfeats = size(x_bin_T, 1)
-    gstride = size(∇, 1) * sizeof(T)
+    gstride = NK * sizeof(T)
     pxb = Ptr{UInt8}(pointer(x_bin_T))
     pgr = Ptr{UInt8}(pointer(∇))
     GC.@preserve x_bin_T ∇ begin
@@ -461,12 +485,14 @@ function _hist_obs!(hist, ∇::Matrix{T}, x_bin_T::Matrix{UInt8}, is, js, idx0, 
                 nfeats > 64 && _prefetch(pb + 64)
                 _prefetch(pgr + (ip - 1) * gstride)
             end
-            g1, g2, g3 = ∇[1, i], ∇[2, i], ∇[3, i]
+            # `NK` is static, so this is a register tuple and the inner `k` loop
+            # below unrolls -- matching the old hand-written 3-accumulator body.
+            g = ntuple(k -> @inbounds(∇[k, i]), Val(NK))
             for j in js
                 bin = x_bin_T[j, i]
-                hist[1, bin, j] += g1
-                hist[2, bin, j] += g2
-                hist[3, bin, j] += g3
+                for k in 1:NK
+                    hist[k, bin, j] += g[k]
+                end
             end
         end
     end
