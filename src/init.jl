@@ -199,15 +199,8 @@ function init_core(params::EvoTypes, ::Type{CPU}, data, feature_names, y_train, 
     h∇ = zeros(Float64, 2 * K + 1, nbins, nfeats, nnodes)
     h∇L = zeros(Float64, 2 * K + 1, nbins, nfeats, nnodes)
     h∇R = zeros(Float64, 2 * K + 1, nbins, nfeats, nnodes)
-    # Per-task scratch for the row-blocked build, sized by a byte budget rather
-    # than by `K`: one buffer scales with `2K+1`, so a fixed count would be
-    # cheap for mse and multi-GB for a wide mlogloss.
     n_tls = clamp(HIST_TLS_BUDGET ÷ (sizeof(Float64) * (2 * K + 1) * nbins * nfeats), 0, HIST_TASKS)
     h∇_tls = [zeros(Float64, 2 * K + 1, nbins, nfeats) for _ in 1:n_tls]
-    # Observation-major copy: all features of one observation are contiguous,
-    # which is the layout `_hist_obs!` reads. Only `HistByNode` /
-    # `HistByRowBlock` touch it, and `hist_strategy` can only pick those when
-    # the scratch pool is non-empty -- so skip the transpose when it is.
     x_bin_T = n_tls > 0 ? permutedims(x_bin) : Matrix{UInt8}(undef, 0, 0)
     nodes = [TrainNode(zero(Float64), view(is, 1:0), zeros(Float64, 2 * K + 1), view(h∇, :, :, :, n), view(h∇L, :, :, :, n), view(h∇R, :, :, :, n), zeros(nbins, nfeats)) for n = 1:nnodes]
     bias = [Tree{L,K}(μ)]

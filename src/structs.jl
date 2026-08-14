@@ -23,12 +23,7 @@ const PREFETCH_ROWS = 10      # rows ahead to prefetch; ~L1 latency / per-row wo
 const HIST_OBS_CHUNK = 16
 const HIST_TASKS = 64         # task pool ceiling for row-blocked builds
 const MIN_BLOCK_ROWS = 2_048  # don't row-block below this; raise if small-node builds regress
-# Ceiling on the per-task hist scratch pool (`h∇_tls`). One buffer is
-# `(2K+1) * nbins * nfeats * 8` bytes, so the pool size has to be derived from
-# `K` rather than fixed: mlogloss with many classes would otherwise ask for
-# gigabytes. When the budget affords fewer than one buffer the row-blocked
-# build is simply not offered (see `hist_strategy`).
-const HIST_TLS_BUDGET = 64 * 1024 * 1024
+const HIST_TLS_BUDGET = 64 * 1024 * 1024  # max bytes for h∇_tls; 0 buffers => HistByFeature
 
 abstract type HistStrategy end
 struct HistByFeature <: HistStrategy end   # _hist_feat!; parallel over (node × feature)
@@ -85,7 +80,7 @@ struct CacheBaseCPU{Y,N<:TrainNode,H<:AbstractArray{<:AbstractFloat,4},HT<:Abstr
     h∇::H
     h∇L::H
     h∇R::H
-    # HistByRowBlock: per-task hist buffers (empty when HIST_TLS_BUDGET cannot fit one).
+    # Row-block scratch; empty if the budget cannot fit one buffer.
     h∇_tls::Vector{HT}
     feature_names::Vector{Symbol}
     featbins::Vector{UInt8}
