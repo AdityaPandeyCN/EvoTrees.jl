@@ -199,9 +199,8 @@ function init_core(params::EvoTypes, ::Type{CPU}, data, feature_names, y_train, 
     h∇ = zeros(Float64, 2 * K + 1, nbins, nfeats, nnodes)
     h∇L = zeros(Float64, 2 * K + 1, nbins, nfeats, nnodes)
     h∇R = zeros(Float64, 2 * K + 1, nbins, nfeats, nnodes)
-    n_tls = clamp(HIST_TLS_BUDGET ÷ (sizeof(Float64) * (2 * K + 1) * nbins * nfeats), 0, HIST_TASKS)
-    h∇_tls = [zeros(Float64, 2 * K + 1, nbins, nfeats) for _ in 1:n_tls]
-    x_bin_T = n_tls > 0 ? permutedims(x_bin) : Matrix{UInt8}(undef, 0, 0)
+    # observation-major copy: a row's bins are contiguous, the layout `_hist!` reads
+    x_bin_T = permutedims(x_bin)
     nodes = [TrainNode(zero(Float64), view(is, 1:0), zeros(Float64, 2 * K + 1), view(h∇, :, :, :, n), view(h∇L, :, :, :, n), view(h∇R, :, :, :, n), zeros(nbins, nfeats)) for n = 1:nnodes]
     bias = [Tree{L,K}(μ)]
     m = EvoTree{L,K}(L, K, bias, info)
@@ -210,8 +209,7 @@ function init_core(params::EvoTypes, ::Type{CPU}, data, feature_names, y_train, 
     Y = typeof(y)
     N = typeof(first(nodes))
     H = typeof(h∇)
-    HT = eltype(h∇_tls)
-    cache = CacheBaseCPU{Y,N,H,HT}(
+    cache = CacheBaseCPU{Y,N,H}(
         rng,
         K,
         x_bin,
@@ -229,7 +227,6 @@ function init_core(params::EvoTypes, ::Type{CPU}, data, feature_names, y_train, 
         h∇,
         h∇L,
         h∇R,
-        h∇_tls,
         feature_names,
         featbins,
         feattypes,
