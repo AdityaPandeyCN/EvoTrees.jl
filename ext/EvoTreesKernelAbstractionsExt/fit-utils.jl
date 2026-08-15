@@ -275,7 +275,13 @@ Writes into `nodes_sum[:, node]` for each node in `active_nodes`.
     end
 end
 
-# Monotone constraint check: GradientRegression
+"""
+    check_monotone(L, constraint, g_l, h_l, g_r, h_r, w_l, w_r, lambda, L2, ε) -> Bool
+
+Return `true` if the split violates `constraint` and should be skipped.
+Always `false` when `constraint == 0`, and for losses that do not support
+monotone constraints.
+"""
 @inline function check_monotone(::Type{L}, constraint, g_l, h_l, g_r, h_r, w_l, w_r, lambda, L2, ε) where {L<:EvoTrees.GradientRegression}
     constraint == 0 && return false
     d_l = max(h_l + lambda * w_l + L2, ε)
@@ -285,7 +291,6 @@ end
     return (constraint == -1 && pred_l <= pred_r) || (constraint == 1 && pred_l >= pred_r)
 end
 
-# Monotone constraint check: MLE2P
 @inline function check_monotone(::Type{L}, constraint, g_l, h_l, g_r, h_r, w_l, w_r, lambda, L2, ε) where {L<:EvoTrees.MLE2P}
     constraint == 0 && return false
     d_l = max(h_l + lambda * w_l + L2, ε)
@@ -295,59 +300,83 @@ end
     return (constraint == -1 && pred_l <= pred_r) || (constraint == 1 && pred_l >= pred_r)
 end
 
-# Monotone constraint check: MLogLoss (no constraints)
 @inline check_monotone(::Type{EvoTrees.MLogLoss}, constraint, args...) = false
-
-# Monotone constraint check: MAE (no constraints)
 @inline check_monotone(::Type{EvoTrees.MAE}, constraint, args...) = false
-
-# Monotone constraint check: Quantile (no constraints)
 @inline check_monotone(::Type{<:EvoTrees.Quantile}, constraint, args...) = false
-
-# Monotone constraint check: Cred (no constraints)
 @inline check_monotone(::Type{L}, constraint, args...) where {L<:EvoTrees.Cred} = false
 
 """
-Advance left-side hist sums to bin `b` and return `(gain, acc1, acc2, accw)`.
+    _eval_split_bin(L, h∇, nodes_sum, node, f, b, ...) -> (gain, acc1, acc2, accw)
+
+Advance left-side histogram sums to bin `b` and return net split gain
+(`split_gain - gain_p`).
+
+`K == 1` keeps `g`, `h`, `w` in `acc1`, `acc2`, `accw`. `K > 1` writes column
+`temp_idx` of `sums_temp`. Ineligible bins return `-Inf` but still update the
+accumulators.
 """
 Base.@propagate_inbounds function _eval_split_bin(
-    ::Type{L}, h∇, nodes_sum, node, f, b, is_numeric, constraint,
-    acc1::T, acc2::T, accw::T, w_p::T, gain_p::T,
-    lambda::T, L2::T, min_weight::T, K::Int, sums_temp, temp_idx::Int, ε::T,
+    ::Type{L},
+    h∇,
+    nodes_sum,
+    node,
+    f,
+    b,
+    is_numeric,
+    constraint,
+    acc1::T,
+    acc2::T,
+    accw::T,
+    w_p::T,
+    gain_p::T,
+    lambda::T,
+    L2::T,
+    min_weight::T,
+    K::Int,
+    sums_temp,
+    temp_idx::Int,
+    ε::T,
 ) where {T,L}
     if K == 1
-        acc1, acc2, accw = EvoTrees._accumulate_hist_k1(h∇, f, b, node, is_numeric, acc1, acc2, accw)
+        acc1, acc2, accw = EvoTrees._accumulate_hist_k1(
+            h∇, f, b, node, is_numeric, acc1, acc2, accw,
+        )
         w_l, w_r = accw, w_p - accw
         (w_l < min_weight || w_r < min_weight) && return (T(-Inf), acc1, acc2, accw)
-        check_monotone(L, constraint, acc1, acc2, nodes_sum[1, node] - acc1, nodes_sum[2, node] - acc2, w_l, w_r, lambda, L2, ε) &&
-            return (T(-Inf), acc1, acc2, accw)
+        check_monotone(
+            L, constraint,
+            acc1, acc2,
+            nodes_sum[1, node] - acc1, nodes_sum[2, node] - acc2,
+            w_l, w_r, lambda, L2, ε,
+        ) && return (T(-Inf), acc1, acc2, accw)
         ∑ = (nodes_sum[1, node], nodes_sum[2, node], nodes_sum[3, node])
         ∑L = (acc1, acc2, accw)
-        return (EvoTrees.split_gain(L, ∑, ∑L, w_l, w_r, lambda, L2, ε) - gain_p, acc1, acc2, accw)
+        gain = EvoTrees.split_gain(L, ∑, ∑L, w_l, w_r, lambda, L2, ε) - gain_p
+        return (gain, acc1, acc2, accw)
     else
         EvoTrees._acc_left!(sums_temp, temp_idx, h∇, f, b, node, 2 * K + 1, is_numeric)
         w_l = sums_temp[2*K+1, temp_idx]
         w_r = w_p - w_l
         (w_l < min_weight || w_r < min_weight) && return (T(-Inf), acc1, acc2, accw)
-        check_monotone(L, constraint, sums_temp[1, temp_idx], sums_temp[K+1, temp_idx],
-            nodes_sum[1, node] - sums_temp[1, temp_idx], nodes_sum[K+1, node] - sums_temp[K+1, temp_idx],
-            w_l, w_r, lambda, L2, ε) && return (T(-Inf), acc1, acc2, accw)
-        g = EvoTrees.split_gain(L, nodes_sum, node, sums_temp, temp_idx, K, w_l, w_r, lambda, L2, ε) - gain_p
-        return (g, acc1, acc2, accw)
+        check_monotone(
+            L, constraint,
+            sums_temp[1, temp_idx], sums_temp[K+1, temp_idx],
+            nodes_sum[1, node] - sums_temp[1, temp_idx],
+            nodes_sum[K+1, node] - sums_temp[K+1, temp_idx],
+            w_l, w_r, lambda, L2, ε,
+        ) && return (T(-Inf), acc1, acc2, accw)
+        gain = EvoTrees.split_gain(
+            L, nodes_sum, node, sums_temp, temp_idx, K, w_l, w_r, lambda, L2, ε,
+        ) - gain_p
+        return (gain, acc1, acc2, accw)
     end
 end
 
 """
-	find_best_split_parallel_kernel!(L, gains, bins, h∇, nodes_sum, active_nodes, js, feattypes, monotone_constraints, lambda, L2, min_weight, K, n_feats, sums_temp)
+    find_best_split_parallel_kernel!(L, gains, bins, h∇, nodes_sum, active_nodes, js, feattypes, monotone_constraints, lambda, L2, min_weight, K, n_feats, sums_temp)
 
-Evaluate all candidate split bins for each (active node, feature) pair and store:
-- `gains[f_idx, n_idx]`: best gain
-- `bins[f_idx, n_idx]`: best bin threshold/category id (0 if none)
-
-Notes:
-- Numeric features scan bins `1:nbins-1` (cumulative left).
-- Categorical features scan bins `1:nbins` (one-vs-rest per bin).
-- Monotone constraints apply only to `GradientRegression` and `MLE2P` losses.
+One thread per `(active node, feature)`. Write the best bin into `gains[f, n]`
+and `bins[f, n]` (`0` if none).
 """
 @kernel function find_best_split_parallel_kernel!(
     ::Type{L},
@@ -407,26 +436,11 @@ Notes:
 end
 
 """
-	accumulate_obliv_gains_kernel!(
-		::Type{L},
-		gains_accum,
-		count_accum,
-		h∇,
-		nodes_sum,
-		active_nodes,
-		js,
-		feattypes,
-		monotone_constraints,
-		lambda,
-		L2,
-		min_weight,
-		K,
-		n_feats,
-		sums_temp,
-	)
+    accumulate_obliv_gains_kernel!(L, gains_accum, count_accum, h∇, nodes_sum, active_nodes, js, feattypes, monotone_constraints, lambda, L2, min_weight, K, n_feats, sums_temp)
 
-Sum eligible bin gains across active nodes into `gains_accum[bin, f]` and bump
-`count_accum[bin, f]`. A split is valid only when `count_accum == n_active`.
+Sum eligible bin gains across active nodes into `gains_accum[bin, f]` and
+increment `count_accum[bin, f]`. A split is valid only when
+`count_accum[bin, f] == n_active`.
 """
 @kernel function accumulate_obliv_gains_kernel!(
     ::Type{L},
