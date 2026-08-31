@@ -52,14 +52,17 @@ function CallBack(
     device::Type{<:Device};
     target_name,
     weight_name=nothing,
-    offset_name=nothing) where {L,K}
+    offset_name=nothing,
+    x_bin=nothing) where {L,K}
 
     T = Float32
     _weight_name = isnothing(weight_name) ? Symbol("") : Symbol(weight_name)
     _offset_name = isnothing(offset_name) ? Symbol("") : Symbol(offset_name)
     _target_names = target_name isa AbstractVector ? Symbol.(target_name) : [Symbol(target_name)]
 
-    x_bin = binarize(deval; feature_names=m.info[:feature_names], edges=m.info[:edges])
+    if isnothing(x_bin)
+        x_bin = binarize(device, deval; feature_names=m.info[:feature_names], edges=m.info[:edges])
+    end
     nobs = length(Tables.getcolumn(deval, 1))
     p = zeros(T, K, nobs)
 
@@ -103,10 +106,13 @@ function CallBack(
     y_eval,
     device::Type{<:Device};
     w_eval=nothing,
-    offset_eval=nothing) where {L,K}
+    offset_eval=nothing,
+    x_bin=nothing) where {L,K}
 
     T = Float32
-    x_bin = binarize(x_eval; feature_names=m.info[:feature_names], edges=m.info[:edges])
+    if isnothing(x_bin)
+        x_bin = binarize(device, x_eval; feature_names=m.info[:feature_names], edges=m.info[:edges])
+    end
     p = zeros(T, K, size(x_eval, 1))
 
     if L == MLogLoss
