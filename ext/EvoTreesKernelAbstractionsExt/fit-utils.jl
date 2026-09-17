@@ -47,16 +47,19 @@ Count the number of observations assigned to each node (raw counts), using atomi
 end
 
 """
-	hist_kernel!(h∇, ∇, x_bin, nidx, js, is, K, chunk_size, target_mask)
+	hist_kernel!(h∇, ∇, scale, x_bin, nidx, js, is, K, chunk_size, target_mask)
 
-Build per-node gradient histograms using atomic updates.
+Build per-node fixed-point gradient histograms using integer atomic updates.
 
 - `h∇` layout: [2K+1, nbins, n_feats, n_nodes]
+- Each gradient is quantised as `trunc(Int64, ∇ * scale)`. A positive hessian that
+  truncates to zero is floored to 1 so positive curvature survives quantisation.
 - Each thread processes one (feature, observation-chunk) pair to reduce contention.
 """
 @kernel function hist_kernel!(
-    h∇::AbstractArray{T,4},
+    h∇::AbstractArray{Int64,4},
     @Const(∇),
+    scale::Float64,
     @Const(x_bin),
     @Const(nidx),
     @Const(js),
@@ -64,7 +67,7 @@ Build per-node gradient histograms using atomic updates.
     K::Int,
     chunk_size::Int,
     @Const(target_mask)
-) where {T}
+)
     gidx = @index(Global, Linear)
     n_feats = length(js)
     n_obs = length(is)
@@ -86,7 +89,10 @@ Build per-node gradient histograms using atomic updates.
                 bin = x_bin[obs, feat]
                 if bin > 0 && bin <= size(h∇, 2)
                     for k in 1:(2*K+1)
-                        Atomix.@atomic h∇[k, bin, feat, node] += ∇[k, obs]
+                        v = ∇[k, obs]
+                        q = unsafe_trunc(Int64, Float64(v) * scale)
+                        (K < k <= 2K && v > 0 && q == 0) && (q = one(Int64))
+                        Atomix.@atomic h∇[k, bin, feat, node] += q
                     end
                 end
             end
@@ -145,7 +151,7 @@ Mark each node id in `active_nodes` as active by setting `mask[node] = 1`.
 end
 
 # Build histograms for active nodes
-function EvoTrees.update_hist!(h∇, ∇, x_bin, nidx, js, is, active_nodes, K, target_mask, backend)
+function EvoTrees.update_hist!(h∇, ∇, scale, x_bin, nidx, js, is, active_nodes, K, target_mask, backend)
     n_active = length(active_nodes)
 
     clear_mask_kernel!(backend)(target_mask; ndrange=length(target_mask))
@@ -167,7 +173,7 @@ function EvoTrees.update_hist!(h∇, ∇, x_bin, nidx, js, is, active_nodes, K, 
     num_threads = length(js) * n_obs_chunks
 
     hist_kernel!(backend)(
-        h∇, ∇, x_bin, nidx, js, is, K, chunk_size, target_mask;
+        h∇, ∇, scale, x_bin, nidx, js, is, K, chunk_size, target_mask;
         ndrange=num_threads,
     )
     KernelAbstractions.synchronize(backend)

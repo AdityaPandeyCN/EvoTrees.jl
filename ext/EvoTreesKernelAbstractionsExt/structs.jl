@@ -18,7 +18,8 @@ end
 Backend-neutral GPU training cache holding preallocated buffers used during tree growth.
 
 ### Quick reference (selected buffers)
-- `h∇`: gradient histogram, indexed as `[2K+1, nbins, n_feats, splittable node]` (`2^max_depth - 1`)
+- `h∇`: fixed-point `Int64` gradient histogram, indexed as `[2K+1, nbins, n_feats, splittable node]`
+  (`2^max_depth - 1`); see `grow_tree!` for the per-tree scale
 - `nodes_sum_gpu`: per-node gradient totals `[2K+1, node]`
 - `gains_per_feat_gpu`, `bins_per_feat_gpu`: per-(feature,node) best split results
 - `best_gain_gpu`, `best_bin_gpu`, `best_feat_gpu`: reduced best split per node
@@ -50,8 +51,6 @@ struct CacheBaseGPU{Y,N<:EvoTrees.TrainNode,G} <: EvoTrees.CacheGPU
     cond_bins::Vector{UInt8}
     cond_bins_gpu::CuVector{UInt8}
     monotone_constraints_gpu::CuVector{Int32}
-    left_nodes_buf::CuVector{Int32}
-    right_nodes_buf::CuVector{Int32}
     target_mask_buf::CuVector{UInt8}
 
     tree_split_gpu::CuVector{Bool}
@@ -71,7 +70,6 @@ struct CacheBaseGPU{Y,N<:EvoTrees.TrainNode,G} <: EvoTrees.CacheGPU
     build_count::CuVector{Int32}
     subtract_count::CuVector{Int32}
     node_counts_gpu::CuVector{Int32}
-    sums_temp_gpu::CuArray{Float64,2}        # Scratch: [2K+1, max_tree_nodes]
     gains_per_feat_gpu::CuMatrix{Float64}    # Output: best gain per (feature,node)  [n_sampled_feats, max_tree_nodes]
     bins_per_feat_gpu::CuMatrix{Int32}       # Output: best bin per (feature,node)   [n_sampled_feats, max_tree_nodes]
     split_sums_temp_gpu::CuMatrix{Float64}   # Temp: per-(node,feature) accumulators [2K+1, n_sampled_feats*max_tree_nodes]

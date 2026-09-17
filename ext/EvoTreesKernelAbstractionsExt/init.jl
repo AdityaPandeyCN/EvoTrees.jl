@@ -18,7 +18,7 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, device::Type{<:EvoTrees.G
     !isnothing(offset) && (pred .+= _to_device(backend, collect(offset')))
 
     ∇ = KernelAbstractions.zeros(backend, T, 2 * K + 1, nobs)
-    h∇ = KernelAbstractions.zeros(backend, Float64, 2 * K + 1, maximum(featbins), length(featbins), 2^params.max_depth - 1)
+    h∇ = KernelAbstractions.zeros(backend, Int64, 2 * K + 1, maximum(featbins), length(featbins), 2^params.max_depth - 1)
     @assert (size(y, ndims(y)) == length(w) && minimum(w) > 0)
     ∇[end, :] .= w
 
@@ -56,9 +56,6 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, device::Type{<:EvoTrees.G
     monotone_constraints_gpu = _to_device(backend, monotone_constraints)
 
     max_tree_nodes = 2^(params.max_depth + 1) - 1
-    left_nodes_buf = KernelAbstractions.zeros(backend, Int32, max_tree_nodes)
-    right_nodes_buf = KernelAbstractions.zeros(backend, Int32, max_tree_nodes)
-
     target_mask_buf = KernelAbstractions.zeros(backend, UInt8, max_tree_nodes)
     tree_split_gpu = KernelAbstractions.zeros(backend, Bool, max_tree_nodes)
     tree_cond_bin_gpu = KernelAbstractions.zeros(backend, UInt8, max_tree_nodes)
@@ -78,7 +75,6 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, device::Type{<:EvoTrees.G
     subtract_nodes_gpu = KernelAbstractions.zeros(backend, Int32, max_tree_nodes)
     build_count = KernelAbstractions.zeros(backend, Int32, 1)
     subtract_count = KernelAbstractions.zeros(backend, Int32, 1)
-    sums_temp_gpu = KernelAbstractions.zeros(backend, Float64, 2 * K + 1, max_tree_nodes)
 
     n_sampled_feats = max(1, ceil(Int, params.colsample * nfeats))
     gains_per_feat_gpu = KernelAbstractions.zeros(backend, Float64, n_sampled_feats, max_tree_nodes)
@@ -132,8 +128,6 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, device::Type{<:EvoTrees.G
         cond_bins,
         cond_bins_gpu,
         monotone_constraints_gpu,
-        left_nodes_buf,
-        right_nodes_buf,
         target_mask_buf,
         tree_split_gpu,
         tree_cond_bin_gpu,
@@ -152,7 +146,7 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, device::Type{<:EvoTrees.G
         build_count,
         subtract_count,
         node_counts_gpu,
-        sums_temp_gpu, gains_per_feat_gpu,
+        gains_per_feat_gpu,
         bins_per_feat_gpu,
         split_sums_temp_gpu,
         obliv_gains_gpu,
