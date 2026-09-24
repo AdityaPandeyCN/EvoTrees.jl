@@ -20,6 +20,12 @@ function gpu_backend end
 const PREFETCH_ROWS = 10
 const HIST_OBS_CHUNK = 16
 
+# GPU hist_shared_kernel!: Float32 local-memory slots (30 KiB), max build nodes, workgroup size, max row groups.
+const HIST_SHARED_LMEM = 7680
+const HIST_SHARED_MAX_NODES = 4
+const HIST_SHARED_WG = 256
+const HIST_SHARED_MAX_GROUPS = 512
+
 """
     TrainNode{S,V,M}
     

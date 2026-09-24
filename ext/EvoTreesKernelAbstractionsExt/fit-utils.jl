@@ -101,6 +101,95 @@ Zero histogram entries in `h∇` for the `n_active` nodes listed in `active_node
     end
 end
 
+@inline function _shared_tile(gid, n_tiles, ft, n_feats)
+    t = (gid - 1) % n_tiles
+    f0 = t * ft
+    return (gid - 1) ÷ n_tiles, f0, min(ft, n_feats - f0)
+end
+
+"""
+	hist_shared_kernel!(h∇, ∇, x_bin, nidx, js, is, active_nodes, target_mask, K, ft, n_tiles, rows_per_group, ::Val{LMEM})
+
+Histograms for a few build nodes. Each workgroup takes one range of `is` and one tile of `ft`
+features, accumulates it in a Float32 local-memory histogram, then adds each non-zero cell to
+`h∇` with one global atomic. `target_mask[node]` is the node's slot in `active_nodes`.
+"""
+@kernel function hist_shared_kernel!(
+    h∇::AbstractArray{T,4},
+    @Const(∇),
+    @Const(x_bin),
+    @Const(nidx),
+    @Const(js),
+    @Const(is),
+    @Const(active_nodes),
+    @Const(target_mask),
+    K::Int,
+    ft::Int,
+    n_tiles::Int,
+    rows_per_group::Int,
+    ::Val{LMEM},
+) where {T,LMEM}
+    lid = @index(Local, Linear)
+    gid = @index(Group, Linear)
+    @uniform wg = @groupsize()[1]
+    @uniform nk = 2 * K + 1
+    @uniform nbins = size(h∇, 2)
+    @uniform n_feats = length(js)
+    @uniform n_slots = length(active_nodes)
+
+    hloc = @localmem Float32 (LMEM,)
+
+    used = nk * nbins * ft * n_slots
+    i = lid
+    @inbounds while i <= used
+        hloc[i] = 0f0
+        i += wg
+    end
+    @synchronize
+
+    rg, f0, nft = _shared_tile(gid, n_tiles, ft, n_feats)
+    r = rg * rows_per_group + lid
+    r_hi = min((rg + 1) * rows_per_group, length(is))
+    @inbounds while r <= r_hi
+        obs = is[r]
+        node = nidx[obs]
+        s = (node > 0 && node <= length(target_mask)) ? Int(target_mask[node]) : 0
+        if s != 0
+            for fl in 1:nft
+                bin = Int(x_bin[obs, js[f0+fl]])
+                if bin > 0 && bin <= nbins
+                    base = nk * ((bin - 1) + nbins * ((fl - 1) + ft * (s - 1)))
+                    for k in 1:nk
+                        Atomix.@atomic hloc[base+k] += Float32(∇[k, obs])
+                    end
+                end
+            end
+        end
+        r += wg
+    end
+    @synchronize
+
+    # The KA CPU backend does not carry plain locals across `@synchronize`.
+    rg, f0, nft = _shared_tile(gid, n_tiles, ft, n_feats)
+    used = nk * nbins * ft * n_slots
+    i = lid
+    @inbounds while i <= used
+        v = hloc[i]
+        if v != 0f0
+            k = (i - 1) % nk + 1
+            rest = (i - 1) ÷ nk
+            b = rest % nbins + 1
+            rest ÷= nbins
+            fl = rest % ft + 1
+            s = rest ÷ ft + 1
+            if fl <= nft
+                Atomix.@atomic h∇[k, b, js[f0+fl], active_nodes[s]] += T(v)
+            end
+        end
+        i += wg
+    end
+end
+
 """
 	clear_mask_kernel!(mask)
 
@@ -116,14 +205,15 @@ end
 """
 	mark_active_nodes_kernel!(mask, active_nodes)
 
-Mark each node id in `active_nodes` as active by setting `mask[node] = 1`.
+Mark each node id in `active_nodes` as active by setting `mask[node]` to its slot in
+`active_nodes`, capped at 255.
 """
 @kernel function mark_active_nodes_kernel!(mask, @Const(active_nodes))
     idx = @index(Global)
     @inbounds if idx <= length(active_nodes)
         node = active_nodes[idx]
         if node > 0 && node <= length(mask)
-            mask[node] = 1
+            mask[node] = UInt8(min(idx, 255))
         end
     end
 end
@@ -146,14 +236,30 @@ function EvoTrees.update_hist!(h∇, ∇, x_bin, nidx, js, is, active_nodes, K, 
         KernelAbstractions.synchronize(backend)
     end
 
-    chunk_size = EvoTrees.HIST_OBS_CHUNK
-    n_obs_chunks = cld(length(is), chunk_size)
-    num_threads = length(js) * n_obs_chunks
+    nk = 2 * K + 1
+    nbins = size(h∇, 2)
+    n_feats = length(js)
+    ft = 0 < n_active <= EvoTrees.HIST_SHARED_MAX_NODES ?
+         min(n_feats, EvoTrees.HIST_SHARED_LMEM ÷ (nk * nbins * n_active)) : 0
 
-    hist_kernel!(backend)(
-        h∇, ∇, x_bin, nidx, js, is, K, chunk_size, target_mask;
-        ndrange=num_threads,
-    )
+    if ft > 0
+        n_tiles = cld(n_feats, ft)
+        n_rg = clamp(cld(length(is), 1024), 1, EvoTrees.HIST_SHARED_MAX_GROUPS)
+        rows_per_group = cld(length(is), n_rg)
+        hist_shared_kernel!(backend, EvoTrees.HIST_SHARED_WG)(
+            h∇, ∇, x_bin, nidx, js, is, active_nodes, target_mask,
+            K, ft, n_tiles, rows_per_group, Val(EvoTrees.HIST_SHARED_LMEM);
+            ndrange=n_rg * n_tiles * EvoTrees.HIST_SHARED_WG,
+        )
+    else
+        chunk_size = EvoTrees.HIST_OBS_CHUNK
+        n_obs_chunks = cld(length(is), chunk_size)
+        num_threads = length(js) * n_obs_chunks
+        hist_kernel!(backend)(
+            h∇, ∇, x_bin, nidx, js, is, K, chunk_size, target_mask;
+            ndrange=num_threads,
+        )
+    end
     KernelAbstractions.synchronize(backend)
 end
 
