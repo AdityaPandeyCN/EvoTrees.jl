@@ -16,13 +16,12 @@ end
 
 function gpu_backend end
 
-# PREFETCH_ROWS: CPU hist. HIST_OBS_CHUNK: GPU hist_kernel! row chunk.
+# PREFETCH_ROWS: CPU hist.
 const PREFETCH_ROWS = 10
-const HIST_OBS_CHUNK = 16
 
 # GPU hist_shared_kernel!: Float32 local-memory slots (30 KiB), max build nodes, workgroup size, max row groups.
 const HIST_SHARED_LMEM = 7680
-const HIST_SHARED_MAX_NODES = 4
+const HIST_SHARED_MAX_NODES = 1
 const HIST_SHARED_WG = 256
 const HIST_SHARED_MAX_GROUPS = 512
 

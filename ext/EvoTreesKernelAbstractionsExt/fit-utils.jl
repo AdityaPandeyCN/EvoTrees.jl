@@ -31,12 +31,13 @@ Update observation-to-node assignments by traversing splits (left child = node*2
 end
 
 """
-	hist_kernel!(h∇, ∇, x_bin, nidx, js, is, K, chunk_size, target_mask)
+	hist_kernel!(h∇, ∇, x_bin, nidx, js, is, K, target_mask)
 
-Build per-node gradient histograms using atomic updates.
+Build per-node gradient histograms with atomic updates, one thread per row of `is`.
+Each row's node and gradients are read once; neighbouring threads read neighbouring
+rows of the same feature column.
 
 - `h∇` layout: [2K+1, nbins, n_feats, n_nodes]
-- Each thread processes one (feature, observation-chunk) pair to reduce contention.
 """
 @kernel function hist_kernel!(
     h∇::AbstractArray{T,4},
@@ -46,27 +47,15 @@ Build per-node gradient histograms using atomic updates.
     @Const(js),
     @Const(is),
     K::Int,
-    chunk_size::Int,
-    @Const(target_mask)
+    @Const(target_mask),
 ) where {T}
-    gidx = @index(Global, Linear)
-    n_feats = length(js)
-    n_obs = length(is)
-    total_chunks = cld(n_obs, chunk_size)
-    total_threads = n_feats * total_chunks
-
-    @inbounds if gidx <= total_threads
-        feat_idx = (gidx - 1) % n_feats + 1
-        chunk_idx = (gidx - 1) ÷ n_feats
-        feat = js[feat_idx]
-
-        start_obs = chunk_idx * chunk_size + 1
-        end_obs = min(start_obs + chunk_size - 1, n_obs)
-
-        for obs_idx in start_obs:end_obs
-            obs = is[obs_idx]
-            node = nidx[obs]
-            if node > 0 && node <= size(h∇, 4) && target_mask[node] != 0
+    i = @index(Global, Linear)
+    @inbounds if i <= length(is)
+        obs = is[i]
+        node = nidx[obs]
+        if node > 0 && node <= size(h∇, 4) && target_mask[node] != 0
+            for fi in 1:length(js)
+                feat = js[fi]
                 bin = x_bin[obs, feat]
                 if bin > 0 && bin <= size(h∇, 2)
                     for k in 1:(2*K+1)
@@ -252,12 +241,9 @@ function EvoTrees.update_hist!(h∇, ∇, x_bin, nidx, js, is, active_nodes, K, 
             ndrange=n_rg * n_tiles * EvoTrees.HIST_SHARED_WG,
         )
     else
-        chunk_size = EvoTrees.HIST_OBS_CHUNK
-        n_obs_chunks = cld(length(is), chunk_size)
-        num_threads = length(js) * n_obs_chunks
         hist_kernel!(backend)(
-            h∇, ∇, x_bin, nidx, js, is, K, chunk_size, target_mask;
-            ndrange=num_threads,
+            h∇, ∇, x_bin, nidx, js, is, K, target_mask;
+            ndrange=length(is),
         )
     end
     KernelAbstractions.synchronize(backend)
