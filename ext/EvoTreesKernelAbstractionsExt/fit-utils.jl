@@ -43,7 +43,7 @@ Build per-node fixed-point gradient histograms using integer atomic updates.
 @kernel function hist_kernel!(
     h∇::AbstractArray{Int64,4},
     @Const(∇),
-    scale::Float64,
+    scale::Float32,
     @Const(x_bin),
     @Const(nidx),
     @Const(js),
@@ -74,7 +74,7 @@ Build per-node fixed-point gradient histograms using integer atomic updates.
                 if bin > 0 && bin <= size(h∇, 2)
                     for k in 1:(2*K+1)
                         v = ∇[k, obs]
-                        q = unsafe_trunc(Int64, Float64(v) * scale)
+                        q = unsafe_trunc(Int64, v * scale)
                         (K < k <= 2K && v > 0 && q == 0) && (q = one(Int64))
                         Atomix.@atomic h∇[k, bin, feat, node] += q
                     end
@@ -157,7 +157,7 @@ function EvoTrees.update_hist!(h∇, ∇, scale, x_bin, nidx, js, is, active_nod
     num_threads = length(js) * n_obs_chunks
 
     hist_kernel!(backend)(
-        h∇, ∇, scale, x_bin, nidx, js, is, K, chunk_size, target_mask;
+        h∇, ∇, Float32(scale), x_bin, nidx, js, is, K, chunk_size, target_mask;
         ndrange=num_threads,
     )
     KernelAbstractions.synchronize(backend)
