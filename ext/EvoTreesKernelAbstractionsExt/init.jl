@@ -56,9 +56,6 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, device::Type{<:EvoTrees.G
     monotone_constraints_gpu = _to_device(backend, monotone_constraints)
 
     max_tree_nodes = 2^(params.max_depth + 1) - 1
-    left_nodes_buf = KernelAbstractions.zeros(backend, Int32, max_tree_nodes)
-    right_nodes_buf = KernelAbstractions.zeros(backend, Int32, max_tree_nodes)
-
     is_buf = KernelAbstractions.zeros(backend, UInt32, nobs)
     part_flag = KernelAbstractions.zeros(backend, UInt32, nobs)
     part_scan = KernelAbstractions.zeros(backend, UInt32, nobs + 1)
@@ -82,7 +79,6 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, device::Type{<:EvoTrees.G
     subtract_nodes_gpu = KernelAbstractions.zeros(backend, Int32, max_tree_nodes)
     build_count = KernelAbstractions.zeros(backend, Int32, 1)
     subtract_count = KernelAbstractions.zeros(backend, Int32, 1)
-    sums_temp_gpu = KernelAbstractions.zeros(backend, Float64, 2 * K + 1, max_tree_nodes)
 
     n_sampled_feats = max(1, ceil(Int, params.colsample * nfeats))
     gains_per_feat_gpu = KernelAbstractions.zeros(backend, Float64, n_sampled_feats, max_tree_nodes)
@@ -136,8 +132,6 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, device::Type{<:EvoTrees.G
         cond_bins,
         cond_bins_gpu,
         monotone_constraints_gpu,
-        left_nodes_buf,
-        right_nodes_buf,
         is_buf,
         part_flag,
         part_scan,
@@ -160,7 +154,7 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, device::Type{<:EvoTrees.G
         subtract_nodes_gpu,
         build_count,
         subtract_count,
-        sums_temp_gpu, gains_per_feat_gpu,
+        gains_per_feat_gpu,
         bins_per_feat_gpu,
         split_sums_temp_gpu,
         obliv_gains_gpu,
