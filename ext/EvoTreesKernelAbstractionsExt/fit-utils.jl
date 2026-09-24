@@ -159,7 +159,7 @@ end
 end
 
 """
-    hist_kernel!(h∇, ∇, x_bin, js, is, build_nodes, n_build, node_off, node_cnt, chunk_end,
+    hist_kernel!(h∇, ∇, scale, x_bin, js, is, build_nodes, n_build, node_off, node_cnt, chunk_end,
                  K, k_tile, feat_tile, rows_per_group, ::Val{LMEM})
 
 Per-node gradient histograms. Each workgroup reads one chunk of one build node's rows of `is`,
@@ -169,11 +169,14 @@ fastest, so the launch needs `sum(cld.(node_cnt[build_nodes], rows_per_group)) *
 surplus groups do nothing.
 
 - `h∇`: histogram `[2K+1, nbins, n_feats, n_nodes]`, accumulated into.
+- Each gradient is quantised as `trunc(Int64, ∇ * scale)`. A positive hessian that
+  truncates to zero is floored to 1 so positive curvature survives quantisation.
 - `k_tile * nbins * feat_tile <= LMEM`.
 """
 @kernel function hist_kernel!(
-    h∇::AbstractArray{T,4},
+    h∇::AbstractArray{Int64,4},
     @Const(∇),
+    scale::Float64,
     @Const(x_bin),
     @Const(js),
     @Const(is),
@@ -187,7 +190,7 @@ surplus groups do nothing.
     feat_tile::Int,
     rows_per_group::Int,
     ::Val{LMEM},
-) where {T,LMEM}
+) where {LMEM}
     lid = @index(Local, Linear)
     gid = @index(Group, Linear)
     @uniform wg = @groupsize()[1]
@@ -197,7 +200,7 @@ surplus groups do nothing.
     @uniform n_ftiles = cld(n_feats, feat_tile)
     @uniform n_tiles = n_ftiles * cld(nk, k_tile)
 
-    hloc = @localmem T (LMEM,)
+    hloc = @localmem Int64 (LMEM,)
 
     # The CPU backend does not carry plain locals across `@synchronize`, so the group-derived
     # values are recomputed in each phase.
@@ -205,7 +208,7 @@ surplus groups do nothing.
     used = nkk * nbins * nf
     i = lid
     @inbounds while i <= used
-        hloc[i] = zero(T)
+        hloc[i] = zero(Int64)
         i += wg
     end
     @synchronize
@@ -220,7 +223,11 @@ surplus groups do nothing.
             if bin > 0 && bin <= nbins
                 base = nkk * ((bin - 1) + nbins * (fl - 1))
                 for kk in 1:nkk
-                    Atomix.@atomic hloc[base+kk] += T(∇[k0+kk, obs])
+                    k = k0 + kk
+                    v = ∇[k, obs]
+                    q = unsafe_trunc(Int64, Float64(v) * scale)
+                    (K < k <= 2K && v > 0 && q == 0) && (q = one(Int64))
+                    Atomix.@atomic hloc[base+kk] += q
                 end
             end
         end
@@ -234,7 +241,7 @@ surplus groups do nothing.
     i = lid
     @inbounds while i <= used
         v = hloc[i]
-        if v != zero(T)
+        if v != zero(Int64)
             kk = (i - 1) % nkk + 1
             rest = (i - 1) ÷ nkk
             b = rest % nbins + 1
@@ -269,7 +276,7 @@ Zero histogram entries in `h∇` for the `n_active` nodes listed in `active_node
 end
 
 # Build histograms for `build_nodes`, each from its own range of `is`
-function EvoTrees.update_hist!(h∇, ∇, x_bin, js, is, build_nodes, node_off, node_cnt, chunk_end, K, backend)
+function EvoTrees.update_hist!(h∇, ∇, scale, x_bin, js, is, build_nodes, node_off, node_cnt, chunk_end, K, backend)
     n_build = length(build_nodes)
     n_build == 0 && return nothing
 
@@ -291,7 +298,7 @@ function EvoTrees.update_hist!(h∇, ∇, x_bin, js, is, build_nodes, node_off, 
     # Upper bound on the chunks, known without reading `chunk_end` back.
     n_groups = (cld(length(is), rows) + n_build) * n_tiles
     hist_kernel!(backend, EvoTrees.HIST_WG)(
-        h∇, ∇, x_bin, js, is, build_nodes, n_build, node_off, node_cnt, chunk_end,
+        h∇, ∇, scale, x_bin, js, is, build_nodes, n_build, node_off, node_cnt, chunk_end,
         K, k_tile, feat_tile, rows, Val(lmem);
         ndrange=n_groups * EvoTrees.HIST_WG,
     )
