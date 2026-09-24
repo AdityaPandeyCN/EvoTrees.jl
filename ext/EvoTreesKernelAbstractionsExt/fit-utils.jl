@@ -160,7 +160,7 @@ features, accumulates it in a Float32 local-memory histogram, then adds each non
                 if bin > 0 && bin <= nbins
                     base = nk * ((bin - 1) + nbins * ((fl - 1) + ft * (s - 1)))
                     for k in 1:nk
-                        Atomix.@atomic hloc[base+k] += Float32(∇[k, obs])
+                        Atomix.@atomic :monotonic hloc[base+k] += Float32(∇[k, obs])
                     end
                 end
             end
@@ -183,7 +183,7 @@ features, accumulates it in a Float32 local-memory histogram, then adds each non
             fl = rest % ft + 1
             s = rest ÷ ft + 1
             if fl <= nft
-                Atomix.@atomic h∇[k, b, js[f0+fl], active_nodes[s]] += T(v)
+                Atomix.@atomic :monotonic h∇[k, b, js[f0+fl], active_nodes[s]] += T(v)
             end
         end
         i += wg
