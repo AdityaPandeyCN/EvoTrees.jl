@@ -45,8 +45,7 @@ end
 	_select_binary_split!(cache, backend, L, params, scale, active_nodes, n_feats, n_active)
 
 Best split per active node into `best_gain` / `best_bin` / `best_feat`.
-`scale` is the tree's fixed-point scale: `L2` and `min_weight` are quantised
-with it so the scan runs on raw histogram values and returns gains scaled by it.
+`L2` and `min_weight` are multiplied by the histogram `scale`.
 """
 function _select_binary_split!(
     cache::EvoTrees.CacheGPU, backend, ::Type{L}, params::EvoTrees.EvoTypes, scale::Float64,
@@ -161,15 +160,12 @@ function grow_tree!(
         ∇_gpu[(cache.K+1):(2*cache.K), :] .= 1.0f0
     end
 
-    # Fixed-point histogram scale: one power of two per tree, chosen so that
-    # nobs * max|∇| * scale ≤ 2^52. Every bin, partial sum and node total then fits
-    # an Int64 with headroom, integer atomics make the histogram deterministic, and
-    # every value converts to Float64 exactly. Gains are homogeneous of degree one in
-    # the stats, so the split scan runs on raw quantised values with `L2`, `min_weight`
-    # and `gamma` scaled alongside; `nodes_sum` and `tree_gain` are divided back at the end.
-    maxabs = Float64(maximum(abs, ∇_gpu))
-    iszero(maxabs) && (maxabs = 1.0)
-    scale = exp2(52) / nextpow(2, maxabs * size(∇_gpu, 2))
+    # Power-of-two scale so every histogram sum stays ≤ 2^52 and is exact in Float64.
+    pos = Float64(maximum(sum(x -> max(x, zero(x)), ∇_gpu; dims=2)))
+    neg = Float64(minimum(sum(x -> min(x, zero(x)), ∇_gpu; dims=2)))
+    worst = max(pos, -neg)
+    iszero(worst) && (worst = 1.0)
+    scale = exp2(52) / nextpow(2, worst)
 
     # Initialize cache arrays
     cache.tree_split_gpu .= false
@@ -291,7 +287,7 @@ function grow_tree!(
         end
     end
 
-    # Back to floating point; `scale` is a power of two so both divisions are exact.
+    # Undo the histogram scale.
     cache.nodes_sum_gpu ./= scale
     cache.tree_gain_gpu ./= scale
 
