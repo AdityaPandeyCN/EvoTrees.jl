@@ -18,7 +18,7 @@ function EvoTrees.init_core(params::EvoTrees.EvoTypes, device::Type{<:EvoTrees.G
     !isnothing(offset) && (pred .+= _to_device(backend, collect(offset')))
 
     ∇ = KernelAbstractions.zeros(backend, T, 2 * K + 1, nobs)
-    h∇ = KernelAbstractions.zeros(backend, Float64, 2 * K + 1, maximum(featbins), length(featbins), 2^params.max_depth - 1)
+    h∇ = KernelAbstractions.zeros(backend, Int64, 2 * K + 1, maximum(featbins), length(featbins), 2^params.max_depth - 1)
     @assert (size(y, ndims(y)) == length(w) && minimum(w) > 0)
     ∇[end, :] .= w
 

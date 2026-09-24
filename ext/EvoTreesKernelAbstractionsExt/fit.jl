@@ -42,12 +42,14 @@ function grow_otree!(
 end
 
 """
-	_select_binary_split!(cache, backend, L, params, active_nodes, n_feats, n_active)
+	_select_binary_split!(cache, backend, L, params, scale, active_nodes, n_feats, n_active)
 
 Best split per active node into `best_gain` / `best_bin` / `best_feat`.
+`scale` is the tree's fixed-point scale: `L2` and `min_weight` are quantised
+with it so the scan runs on raw histogram values and returns gains scaled by it.
 """
 function _select_binary_split!(
-    cache::EvoTrees.CacheGPU, backend, ::Type{L}, params::EvoTrees.EvoTypes,
+    cache::EvoTrees.CacheGPU, backend, ::Type{L}, params::EvoTrees.EvoTypes, scale::Float64,
     active_nodes, n_feats::Integer, n_active::Integer,
 ) where {L}
     gains = view(cache.gains_per_feat_gpu, 1:n_feats, 1:n_active)
@@ -57,7 +59,7 @@ function _select_binary_split!(
         L, gains, bins,
         cache.h∇, cache.nodes_sum_gpu, active_nodes,
         cache.js, cache.feattypes_gpu, cache.monotone_constraints_gpu,
-        params.lambda, params.L2, params.min_weight,
+        params.lambda, params.L2 * scale, params.min_weight * scale,
         cache.K, n_feats, cache.split_sums_temp_gpu;
         ndrange=n_active * n_feats,
     )
@@ -73,13 +75,14 @@ function _select_binary_split!(
 end
 
 """
-	_select_obliv_split!(cache, backend, L, params, active_nodes, n_feats, n_active, js_cpu)
+	_select_obliv_split!(cache, backend, L, params, scale, active_nodes, n_feats, n_active, js_cpu)
 
 One shared split for the depth, broadcast into every active-node `best_*` slot.
-`js_cpu` is the host copy of `cache.js` for this tree.
+`js_cpu` is the host copy of `cache.js` for this tree; `scale` as in
+[`_select_binary_split!`](@ref).
 """
 function _select_obliv_split!(
-    cache::EvoTrees.CacheGPU, backend, ::Type{L}, params::EvoTrees.EvoTypes,
+    cache::EvoTrees.CacheGPU, backend, ::Type{L}, params::EvoTrees.EvoTypes, scale::Float64,
     active_nodes, n_feats::Integer, n_active::Integer, js_cpu,
 ) where {L}
     gains = view(cache.obliv_gains_gpu, :, 1:n_feats)
@@ -91,7 +94,7 @@ function _select_obliv_split!(
         L, gains, counts,
         cache.h∇, cache.nodes_sum_gpu, active_nodes,
         cache.js, cache.feattypes_gpu, cache.monotone_constraints_gpu,
-        params.lambda, params.L2, params.min_weight,
+        params.lambda, params.L2 * scale, params.min_weight * scale,
         cache.K, n_feats, cache.split_sums_temp_gpu;
         ndrange=n_active * n_feats,
     )
@@ -158,6 +161,16 @@ function grow_tree!(
         ∇_gpu[(cache.K+1):(2*cache.K), :] .= 1.0f0
     end
 
+    # Fixed-point histogram scale: one power of two per tree, chosen so that
+    # nobs * max|∇| * scale ≤ 2^52. Every bin, partial sum and node total then fits
+    # an Int64 with headroom, integer atomics make the histogram deterministic, and
+    # every value converts to Float64 exactly. Gains are homogeneous of degree one in
+    # the stats, so the split scan runs on raw quantised values with `L2`, `min_weight`
+    # and `gamma` scaled alongside; `nodes_sum` and `tree_gain` are divided back at the end.
+    maxabs = Float64(maximum(abs, ∇_gpu))
+    iszero(maxabs) && (maxabs = 1.0)
+    scale = exp2(52) / nextpow(2, maxabs * size(∇_gpu, 2))
+
     # Initialize cache arrays
     cache.tree_split_gpu .= false
     cache.tree_cond_bin_gpu .= 0
@@ -178,7 +191,7 @@ function grow_tree!(
 
     # Root node processing
     EvoTrees.update_hist!(
-        cache.h∇, ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
+        cache.h∇, ∇_gpu, scale, cache.x_bin, cache.nidx, cache.js, is,
         view(cache.anodes_gpu, 1:1), cache.K, cache.target_mask_buf, backend,
     )
 
@@ -189,9 +202,9 @@ function grow_tree!(
     KernelAbstractions.synchronize(backend)
 
     if OBLIVIOUS
-        _select_obliv_split!(cache, backend, L, params, view(cache.anodes_gpu, 1:1), n_feats, 1, js_cpu)
+        _select_obliv_split!(cache, backend, L, params, scale, view(cache.anodes_gpu, 1:1), n_feats, 1, js_cpu)
     else
-        _select_binary_split!(cache, backend, L, params, view(cache.anodes_gpu, 1:1), n_feats, 1)
+        _select_binary_split!(cache, backend, L, params, scale, view(cache.anodes_gpu, 1:1), n_feats, 1)
     end
 
     n_active = 1
@@ -224,7 +237,7 @@ function grow_tree!(
             # Build histograms for smaller children
             if build_count_val > 0
                 EvoTrees.update_hist!(
-                    cache.h∇, ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
+                    cache.h∇, ∇_gpu, scale, cache.x_bin, cache.nidx, cache.js, is,
                     view(cache.build_nodes_gpu, 1:build_count_val),
                     cache.K, cache.target_mask_buf, backend,
                 )
@@ -241,9 +254,9 @@ function grow_tree!(
             KernelAbstractions.synchronize(backend)
 
             if OBLIVIOUS
-                _select_obliv_split!(cache, backend, L, params, active_nodes, n_feats, n_active, js_cpu)
+                _select_obliv_split!(cache, backend, L, params, scale, active_nodes, n_feats, n_active, js_cpu)
             else
-                _select_binary_split!(cache, backend, L, params, active_nodes, n_feats, n_active)
+                _select_binary_split!(cache, backend, L, params, scale, active_nodes, n_feats, n_active)
             end
         end
 
@@ -256,7 +269,7 @@ function grow_tree!(
             view(cache.best_bin_gpu, 1:n_active),
             view(cache.best_feat_gpu, 1:n_active),
             cache.h∇, active_nodes, cache.feattypes_gpu,
-            depth, params.max_depth, Float32(params.gamma),
+            depth, params.max_depth, params.gamma * scale,
             cache.K;
             ndrange=max(n_active, 1),
         )
@@ -277,6 +290,10 @@ function grow_tree!(
             KernelAbstractions.synchronize(backend)
         end
     end
+
+    # Back to floating point; `scale` is a power of two so both divisions are exact.
+    cache.nodes_sum_gpu ./= scale
+    cache.tree_gain_gpu ./= scale
 
     # Copy tree to CPU and compute leaf predictions
     copyto!(tree.split, cache.tree_split_gpu)
@@ -388,7 +405,7 @@ Mutates:
                     sum_val += h∇[kk, b, feat, node]
                 end
             else
-                sum_val = h∇[kk, bin, feat, node]
+                sum_val += h∇[kk, bin, feat, node]
             end
             nodes_sum[kk, child_l] = sum_val
             nodes_sum[kk, child_r] = nodes_sum[kk, node] - sum_val

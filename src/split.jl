@@ -44,7 +44,7 @@ Base.@propagate_inbounds function _accumulate_hist_k1(h∇, f, b, node, is_numer
     if is_numeric
         return (acc1 + h∇[1, b, f, node], acc2 + h∇[2, b, f, node], accw + h∇[3, b, f, node])
     else
-        return (h∇[1, b, f, node], h∇[2, b, f, node], h∇[3, b, f, node])
+        return (oftype(acc1, h∇[1, b, f, node]), oftype(acc2, h∇[2, b, f, node]), oftype(accw, h∇[3, b, f, node]))
     end
 end
 

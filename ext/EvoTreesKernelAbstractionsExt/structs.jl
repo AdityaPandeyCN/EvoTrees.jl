@@ -18,7 +18,8 @@ end
 Backend-neutral GPU training cache holding preallocated buffers used during tree growth.
 
 ### Quick reference (selected buffers)
-- `h∇`: gradient histogram, indexed as `[2K+1, nbins, n_feats, splittable node]` (`2^max_depth - 1`)
+- `h∇`: fixed-point `Int64` gradient histogram, indexed as `[2K+1, nbins, n_feats, splittable node]`
+  (`2^max_depth - 1`); see `grow_tree!` for the per-tree scale
 - `nodes_sum_gpu`: per-node gradient totals `[2K+1, node]`
 - `gains_per_feat_gpu`, `bins_per_feat_gpu`: per-(feature,node) best split results
 - `best_gain_gpu`, `best_bin_gpu`, `best_feat_gpu`: reduced best split per node
