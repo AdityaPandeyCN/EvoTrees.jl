@@ -267,11 +267,11 @@ function grow_otree!(
     return nothing
 end
 
-# A no-op on the CPU, but on the GPU we perform garbage collection
 # The trees appended by the round just grown. `grow_evotree!` pushes `bagging_size` of them.
 _round_trees(m, n) = view(m.trees, (lastindex(m.trees)-n+1):lastindex(m.trees))
 
-post_fit_gc(::Type{<:CPU}) = nothing
+# Release the training cache after fit: a no-op on the CPU.
+post_fit_gc(::Type{<:CPU}, cache) = nothing
 
 """
     fit(
@@ -353,7 +353,7 @@ function fit(
             (logger[:iter_since_best] >= logger[:early_stopping_rounds]) && break
         end
     end
-    post_fit_gc(_device)
+    post_fit_gc(_device, cache)
     m.info[:logger] = logger
 
     return m
@@ -452,7 +452,7 @@ function fit(
             (logger[:iter_since_best] >= logger[:early_stopping_rounds]) && break
         end
     end
-    post_fit_gc(_device)
+    post_fit_gc(_device, cache)
     m.info[:logger] = logger
 
     return m

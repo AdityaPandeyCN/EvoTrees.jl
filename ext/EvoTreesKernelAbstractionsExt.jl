@@ -20,7 +20,7 @@ _to_device(backend, x::AbstractArray) =
 
 EvoTrees.device_ones(device::Type{<:EvoTrees.GPU}, ::Type{T}, n::Int) where {T} =
     KA.ones(_gpu_backend(device), T, n)
-function EvoTrees.post_fit_gc(::Type{<:EvoTrees.GPU})
+function EvoTrees.post_fit_gc(::Type{<:EvoTrees.GPU}, cache)
     GC.gc(true)
 end
 
