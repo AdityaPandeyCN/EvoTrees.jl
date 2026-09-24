@@ -50,8 +50,6 @@ struct CacheBaseGPU{Y,N<:EvoTrees.TrainNode,G} <: EvoTrees.CacheGPU
     cond_bins::Vector{UInt8}
     cond_bins_gpu::CuVector{UInt8}
     monotone_constraints_gpu::CuVector{Int32}
-    left_nodes_buf::CuVector{Int32}
-    right_nodes_buf::CuVector{Int32}
     target_mask_buf::CuVector{UInt8}
 
     tree_split_gpu::CuVector{Bool}
@@ -70,7 +68,6 @@ struct CacheBaseGPU{Y,N<:EvoTrees.TrainNode,G} <: EvoTrees.CacheGPU
     subtract_nodes_gpu::CuVector{Int32}
     build_count::CuVector{Int32}
     subtract_count::CuVector{Int32}
-    sums_temp_gpu::CuArray{Float64,2}        # Scratch: [2K+1, max_tree_nodes]
     gains_per_feat_gpu::CuMatrix{Float64}    # Output: best gain per (feature,node)  [n_sampled_feats, max_tree_nodes]
     bins_per_feat_gpu::CuMatrix{Int32}       # Output: best bin per (feature,node)   [n_sampled_feats, max_tree_nodes]
     split_sums_temp_gpu::CuMatrix{Float64}   # Temp: per-(node,feature) accumulators [2K+1, n_sampled_feats*max_tree_nodes]
