@@ -176,7 +176,7 @@ surplus groups do nothing.
 @kernel function hist_kernel!(
     h∇::AbstractArray{Int64,4},
     @Const(∇),
-    scale::Float64,
+    scale::Float32,
     @Const(x_bin),
     @Const(js),
     @Const(is),
@@ -225,7 +225,7 @@ surplus groups do nothing.
                 for kk in 1:nkk
                     k = k0 + kk
                     v = ∇[k, obs]
-                    q = unsafe_trunc(Int64, Float64(v) * scale)
+                    q = unsafe_trunc(Int64, v * scale)
                     (K < k <= 2K && v > 0 && q == 0) && (q = one(Int64))
                     Atomix.@atomic hloc[base+kk] += q
                 end
@@ -298,7 +298,7 @@ function EvoTrees.update_hist!(h∇, ∇, scale, x_bin, js, is, build_nodes, nod
     # Upper bound on the chunks, known without reading `chunk_end` back.
     n_groups = (cld(length(is), rows) + n_build) * n_tiles
     hist_kernel!(backend, EvoTrees.HIST_WG)(
-        h∇, ∇, scale, x_bin, js, is, build_nodes, n_build, node_off, node_cnt, chunk_end,
+        h∇, ∇, Float32(scale), x_bin, js, is, build_nodes, n_build, node_off, node_cnt, chunk_end,
         K, k_tile, feat_tile, rows, Val(lmem);
         ndrange=n_groups * EvoTrees.HIST_WG,
     )

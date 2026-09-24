@@ -163,8 +163,7 @@ function grow_tree!(
     # Power-of-two scale so every histogram sum stays ≤ 2^52 and is exact in Float64.
     pos = Float64(maximum(sum(x -> max(x, zero(x)), ∇_gpu; dims=2)))
     neg = Float64(minimum(sum(x -> min(x, zero(x)), ∇_gpu; dims=2)))
-    worst = max(pos, -neg)
-    iszero(worst) && (worst = 1.0)
+    worst = max(pos, -neg, exp2(-60))
     scale = exp2(52) / nextpow(2, worst)
 
     # Initialize cache arrays
