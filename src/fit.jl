@@ -335,7 +335,8 @@ function fit(
     if !isnothing(deval)
         deval = Tables.columntable(deval)
         cb = CallBack(params, m, deval, _device; target_name, weight_name, offset_name,
-            group_name=eval_group_name, x_bin=_eval_is_train ? cache.x_bin : nothing)
+            group_name=eval_group_name, x_bin=_eval_is_train ? cache.x_bin : nothing,
+            pred=_eval_is_train ? cache.pred : nothing)
         logger = init_logger(; metric=params.metric, maximise=is_maximise(cb.feval), params.early_stopping_rounds, params.early_stopping_tolerance)
         cb(logger, 0)
         (verbosity > 0) && @info "initialization" metric = logger[:metrics][end]
@@ -346,7 +347,8 @@ function fit(
     for i = 1:params.nrounds
         grow_evotree!(m, cache, params)
         if !isnothing(logger)
-            cb(logger, i, _round_trees(m, params.bagging_size))
+            # a shared `cb.p` was already updated by `grow_evotree!`
+            _eval_is_train ? cb(logger, i) : cb(logger, i, _round_trees(m, params.bagging_size))
             if i % print_every_n == 0 && verbosity > 0
                 @info "iter $i" metric = logger[:metrics][end]
             end
@@ -428,13 +430,15 @@ function fit(
     # initialize callback and logger if tracking eval data
     metric = params.metric
     logging_flag = !isnothing(x_eval) && !isnothing(y_eval)
+    _eval_is_train = x_eval === x_train && offset_eval === offset_train
     any_flag = !isnothing(x_eval) || !isnothing(y_eval)
     if !logging_flag && any_flag
         @warn "To track eval metric in logger, both `x_eval` and `y_eval` must be provided."
     end
     if logging_flag
         cb = CallBack(params, m, x_eval, y_eval, _device; w_eval, offset_eval, group_eval,
-            x_bin=x_eval === x_train ? cache.x_bin : nothing)
+            x_bin=x_eval === x_train ? cache.x_bin : nothing,
+            pred=_eval_is_train ? cache.pred : nothing)
         logger = init_logger(; metric=params.metric, maximise=is_maximise(cb.feval), params.early_stopping_rounds, params.early_stopping_tolerance)
         cb(logger, 0)
         (verbosity > 0) && @info "initialization" metric = logger[:metrics][end]
@@ -445,7 +449,8 @@ function fit(
     for i = 1:params.nrounds
         grow_evotree!(m, cache, params)
         if !isnothing(logger)
-            cb(logger, i, _round_trees(m, params.bagging_size))
+            # a shared `cb.p` was already updated by `grow_evotree!`
+            _eval_is_train ? cb(logger, i) : cb(logger, i, _round_trees(m, params.bagging_size))
             if i % print_every_n == 0 && verbosity > 0
                 @info "iter $i" metric = logger[:metrics][end]
             end

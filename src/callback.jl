@@ -54,7 +54,8 @@ function CallBack(
     weight_name=nothing,
     offset_name=nothing,
     group_name=nothing,
-    x_bin=nothing) where {L,K}
+    x_bin=nothing,
+    pred=nothing) where {L,K}
 
     T = Float32
     _weight_name = isnothing(weight_name) ? Symbol("") : Symbol(weight_name)
@@ -103,7 +104,9 @@ function CallBack(
         p .+= offset'
     end
 
-    return CallBack(feval, convert(V, x_bin), convert(V, p), convert(V, y), w, similar(w), convert(V, m.info[:feattypes]), metric_kwargs)
+    # `pred` is the training cache's prediction, shared when the eval set is the training set
+    p = isnothing(pred) ? convert(V, p) : pred
+    return CallBack(feval, convert(V, x_bin), p, convert(V, y), w, similar(w), convert(V, m.info[:feattypes]), metric_kwargs)
 end
 
 function CallBack(
@@ -115,7 +118,8 @@ function CallBack(
     w_eval=nothing,
     offset_eval=nothing,
     group_eval=nothing,
-    x_bin=nothing) where {L,K}
+    x_bin=nothing,
+    pred=nothing) where {L,K}
 
     T = Float32
     nobs = size(x_eval, 1)
@@ -156,7 +160,9 @@ function CallBack(
         p .+= offset'
     end
 
-    return CallBack(feval, convert(V, x_bin), convert(V, p), convert(V, y), w, similar(w), convert(V, m.info[:feattypes]), metric_kwargs)
+    # `pred` is the training cache's prediction, shared when the eval set is the training set
+    p = isnothing(pred) ? convert(V, p) : pred
+    return CallBack(feval, convert(V, x_bin), p, convert(V, y), w, similar(w), convert(V, m.info[:feattypes]), metric_kwargs)
 end
 
 function (cb::CallBack)(logger, iter)
