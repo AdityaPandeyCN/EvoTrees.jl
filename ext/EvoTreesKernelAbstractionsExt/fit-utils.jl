@@ -79,11 +79,11 @@ Build per-node gradient histograms using atomic updates.
 end
 
 # Root histogram: each workgroup sums F features over a slice of rows in local memory, then adds
-# its totals to h∇ once, instead of one global atomic per row, feature and value. `∇q` is the
-# gradients in fixed point, split into two Int32 halves per slot so the local adds are native
-# integer atomics.
+# its totals to h∇ once, instead of one global atomic per row, feature and value. Each row's
+# gradients are turned into fixed point `round(∇ * scale)` once, then split into two Int32 halves
+# per slot so the local adds are native integer atomics.
 @kernel function hist_root_kernel!(
-    h∇, @Const(∇q), @Const(scale), @Const(x_bin), @Const(js), @Const(is),
+    h∇, @Const(∇), @Const(scale), @Const(x_bin), @Const(js), @Const(is),
     ::Val{NK}, ::Val{NB}, ::Val{F}, rows::Int,
 ) where {NK,NB,F}
     tid = @index(Local, Linear)
@@ -94,18 +94,19 @@ end
         sh[i] = Int32(0)
     end
     @synchronize
-    r0 = (slice - 1) * rows
+    r0, s = (slice - 1) * rows, ntuple(k -> scale[k], Val(NK))
     @inbounds for r in (r0+tid):wg:min(r0 + rows, length(is))
         obs = is[r]
+        q = ntuple(k -> unsafe_trunc(Int64, round(∇[k, obs] * s[k])), Val(NK)) # |q| <= 2^37 by `scale`
         for f in 1:F
             jj = (fg - 1) * F + f
             jj > length(js) && break
             bin = x_bin[obs, js[jj]]
             0 < bin <= NB || continue
             for k in 1:NK
-                i, q = k + NK * (bin - 1) + NK * NB * (f - 1), ∇q[k, obs]
-                Atomix.@atomic sh[2i-1] += Int32(q >> 19)
-                Atomix.@atomic sh[2i] += Int32(q & 0x7ffff)
+                i = k + NK * (bin - 1) + NK * NB * (f - 1)
+                Atomix.@atomic sh[2i-1] += Int32(q[k] >> 19)
+                Atomix.@atomic sh[2i] += Int32(q[k] & 0x7ffff)
             end
         end
     end
@@ -206,13 +207,12 @@ function hist_root!(h∇, ∇, x_bin, js, is, backend)
     NK, NB = size(h∇, 1), size(h∇, 2)
     F = 24_576 ÷ (NK * NB * 8) # 8 bytes: two Int32 halves per slot
     F == 0 && return false
-    # Fixed point once per tree: |∇q| <= 2^37, and with 4096 rows per workgroup neither Int32 half overflows
+    # Fixed point |round(∇ * scale)| <= 2^37: with 4096 rows per workgroup neither Int32 half overflows
     scale = map(g -> iszero(g) ? 1.0 : 2.0^37 / g, vec(Float64.(maximum(abs, ∇; dims=2))))
-    ∇q = round.(Int64, ∇ .* scale)
     rows = 4_096
     view(h∇, :, :, :, 1) .= 0
     hist_root_kernel!(backend, (256, 1))(
-        h∇, ∇q, scale, x_bin, js, is, Val(NK), Val(NB), Val(F), rows;
+        h∇, ∇, scale, x_bin, js, is, Val(NK), Val(NB), Val(F), rows;
         ndrange=(256 * cld(length(is), rows), cld(length(js), F)),
     )
     KernelAbstractions.synchronize(backend)
