@@ -79,13 +79,13 @@ Build per-node gradient histograms using atomic updates.
 end
 
 """
-	clear_hist_kernel!(h∇, active_nodes, n_active)
+	clear_hist_kernel!(h∇, active_nodes, js, n_active)
 
-Zero histogram entries in `h∇` for the `n_active` nodes listed in `active_nodes`.
+Zero histogram entries in `h∇` for the sampled features `js` of the `n_active` nodes listed in `active_nodes`.
 """
-@kernel function clear_hist_kernel!(h∇, @Const(active_nodes), n_active)
+@kernel function clear_hist_kernel!(h∇, @Const(active_nodes), @Const(js), n_active)
     idx = @index(Global, Linear)
-    n_elements = size(h∇, 1) * size(h∇, 2) * size(h∇, 3)
+    n_elements = size(h∇, 1) * size(h∇, 2) * length(js)
     total = n_elements * n_active
 
     @inbounds if idx <= total
@@ -95,7 +95,7 @@ Zero histogram entries in `h∇` for the `n_active` nodes listed in `active_node
         if node > 0
             k = element_idx % size(h∇, 1) + 1
             b = (element_idx ÷ size(h∇, 1)) % size(h∇, 2) + 1
-            j = element_idx ÷ (size(h∇, 1) * size(h∇, 2)) + 1
+            j = js[element_idx ÷ (size(h∇, 1) * size(h∇, 2)) + 1]
             h∇[k, b, j, node] = zero(eltype(h∇))
         end
     end
@@ -140,8 +140,8 @@ function EvoTrees.update_hist!(h∇, ∇, x_bin, nidx, js, is, active_nodes, K, 
 
     if n_active > 0
         clear_hist_kernel!(backend)(
-            h∇, active_nodes, n_active;
-            ndrange=n_active * size(h∇, 1) * size(h∇, 2) * size(h∇, 3),
+            h∇, active_nodes, js, n_active;
+            ndrange=n_active * size(h∇, 1) * size(h∇, 2) * length(js),
         )
         KernelAbstractions.synchronize(backend)
     end
