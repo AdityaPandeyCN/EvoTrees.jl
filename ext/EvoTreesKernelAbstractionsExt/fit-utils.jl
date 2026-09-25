@@ -78,6 +78,49 @@ Build per-node gradient histograms using atomic updates.
     end
 end
 
+# Root histogram: each workgroup sums F features over a slice of rows in local memory, then adds
+# its totals to h∇ once, instead of one global atomic per row, feature and value. `∇q` is the
+# gradients in fixed point, split into two Int32 halves per slot so the local adds are native
+# integer atomics.
+@kernel function hist_root_kernel!(
+    h∇, @Const(∇q), @Const(scale), @Const(x_bin), @Const(js), @Const(is),
+    ::Val{NK}, ::Val{NB}, ::Val{F}, rows::Int,
+) where {NK,NB,F}
+    tid = @index(Local, Linear)
+    slice, fg = @index(Group, NTuple)
+    wg = @groupsize()[1]
+    sh = @localmem Int32 (2 * NK * NB * F,)
+    for i in tid:wg:(2*NK*NB*F)
+        sh[i] = Int32(0)
+    end
+    @synchronize
+    r0 = (slice - 1) * rows
+    @inbounds for r in (r0+tid):wg:min(r0 + rows, length(is))
+        obs = is[r]
+        for f in 1:F
+            jj = (fg - 1) * F + f
+            jj > length(js) && break
+            bin = x_bin[obs, js[jj]]
+            0 < bin <= NB || continue
+            for k in 1:NK
+                i, q = k + NK * (bin - 1) + NK * NB * (f - 1), ∇q[k, obs]
+                Atomix.@atomic sh[2i-1] += Int32(q >> 19)
+                Atomix.@atomic sh[2i] += Int32(q & 0x7ffff)
+            end
+        end
+    end
+    @synchronize
+    tid = @index(Local, Linear)
+    slice, fg = @index(Group, NTuple)
+    @inbounds for i in tid:wg:(NK*NB*F)
+        jj, k = (fg - 1) * F + (i - 1) ÷ (NK * NB) + 1, (i - 1) % NK + 1
+        v = (Int64(sh[2i-1]) << 19) + sh[2i]
+        if jj <= length(js) && !iszero(v)
+            Atomix.@atomic h∇[k, (i-1)÷NK%NB+1, js[jj], 1] += v / scale[k]
+        end
+    end
+end
+
 """
 	clear_hist_kernel!(h∇, active_nodes, n_active)
 
@@ -155,6 +198,25 @@ function EvoTrees.update_hist!(h∇, ∇, x_bin, nidx, js, is, active_nodes, K, 
         ndrange=num_threads,
     )
     KernelAbstractions.synchronize(backend)
+end
+
+# Build the root histogram with `hist_root_kernel!`. Returns `false` when one feature's
+# histogram does not fit in 24 KB of local memory, so the caller falls back to `update_hist!`.
+function hist_root!(h∇, ∇, x_bin, js, is, backend)
+    NK, NB = size(h∇, 1), size(h∇, 2)
+    F = 24_576 ÷ (NK * NB * 8) # 8 bytes: two Int32 halves per slot
+    F == 0 && return false
+    # Fixed point once per tree: |∇q| <= 2^37, and with 4096 rows per workgroup neither Int32 half overflows
+    scale = map(g -> iszero(g) ? 1.0 : 2.0^37 / g, vec(Float64.(maximum(abs, ∇; dims=2))))
+    ∇q = round.(Int64, ∇ .* scale)
+    rows = 4_096
+    view(h∇, :, :, :, 1) .= 0
+    hist_root_kernel!(backend, (256, 1))(
+        h∇, ∇q, scale, x_bin, js, is, Val(NK), Val(NB), Val(F), rows;
+        ndrange=(256 * cld(length(is), rows), cld(length(js), F)),
+    )
+    KernelAbstractions.synchronize(backend)
+    return true
 end
 
 """

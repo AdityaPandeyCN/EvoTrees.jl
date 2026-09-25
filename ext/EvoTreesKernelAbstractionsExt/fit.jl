@@ -177,7 +177,7 @@ function grow_tree!(
     n_feats = length(cache.js)
 
     # Root node processing
-    EvoTrees.update_hist!(
+    hist_root!(cache.h∇, ∇_gpu, cache.x_bin, cache.js, is, backend) || EvoTrees.update_hist!(
         cache.h∇, ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
         view(cache.anodes_gpu, 1:1), cache.K, cache.target_mask_buf, backend,
     )
