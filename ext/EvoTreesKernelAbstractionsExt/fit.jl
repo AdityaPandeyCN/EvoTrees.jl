@@ -267,8 +267,8 @@ function grow_tree!(
             copyto!(view(cache.anodes_gpu, 1:n_active), view(cache.n_next_gpu, 1:n_active))
         end
 
-        # Update observation->node assignments
-        if n_active > 0
+        # Update observation->node assignments; after the last depth only Quantile reads them
+        if n_active > 0 && (depth < params.max_depth || L <: EvoTrees.Quantile)
             update_nodes_idx_kernel!(backend)(
                 cache.nidx, is, cache.x_bin, cache.tree_feat_gpu,
                 cache.tree_cond_bin_gpu, cache.feattypes_gpu;
