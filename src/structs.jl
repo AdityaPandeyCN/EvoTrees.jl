@@ -16,9 +16,8 @@ end
 
 function gpu_backend end
 
-# PREFETCH_ROWS: CPU hist. HIST_OBS_CHUNK: GPU hist_kernel! row chunk.
+# PREFETCH_ROWS: CPU hist.
 const PREFETCH_ROWS = 10
-const HIST_OBS_CHUNK = 16
 
 """
     TrainNode{S,V,M}

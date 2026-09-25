@@ -124,12 +124,10 @@ end
 	grow_tree!(tree, params, cache, is, js_cpu)
 	grow_tree!(tree, params, cache, is, js_cpu, ::Val{oblivious})
 
-Grow a binary decision tree on GPU, level-by-level (breadth-first).
+Grow a tree on GPU depth by depth, following the CPU `grow_tree!`: build the smaller child's
+histogram, subtract for its sibling, find splits, then partition each node's rows into its children.
+Each node's rows are the slice `is[start[n]+1:start[n]+len[n]]`, tracked on the host.
 Pass `Val(true)` for oblivious (shared split per depth).
-
-Mutates:
-- `tree`: split structure and leaf predictions (copied back from GPU buffers)
-- `cache`: GPU working buffers (histograms, node lists, gains, etc.)
 """
 function grow_tree!(
     tree::EvoTrees.Tree{L,K},
@@ -157,125 +155,74 @@ function grow_tree!(
         ∇_gpu = copy(cache.∇)
         ∇_gpu[(cache.K+1):(2*cache.K), :] .= 1.0f0
     end
+    # 64-bit fixed point for `hist_kernel!`, following XGBoost's quantiser: a power-of-two scale with
+    # 2^62 / scale >= sum(|∇|) per channel, so no partial sum of rows can overflow an Int64.
+    scale = map(s -> iszero(s) ? 1.0 : 2.0^62 / nextpow(2, s), vec(Float64.(sum(abs, ∇_gpu; dims=2))))
+    ∇q = round.(Int64, ∇_gpu .* scale) # once per tree, not per row × feature in the kernel
 
-    # Initialize cache arrays
     cache.tree_split_gpu .= false
     cache.tree_cond_bin_gpu .= 0
     cache.tree_feat_gpu .= 0
     cache.tree_gain_gpu .= 0
-    cache.tree_pred_gpu .= 0
     cache.nodes_sum_gpu .= 0
-    cache.anodes_gpu .= 0
-    cache.n_next_gpu .= 0
-    cache.n_next_active_gpu .= 0
-    cache.best_gain_gpu .= 0
-    cache.best_bin_gpu .= 0
-    cache.best_feat_gpu .= 0
-    cache.nidx .= 1
-    view(cache.anodes_gpu, 1:1) .= 1
 
     n_feats = length(cache.js)
-
-    # Root node processing
-    EvoTrees.update_hist!(
-        cache.h∇, ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
-        view(cache.anodes_gpu, 1:1), cache.K, cache.target_mask_buf, backend,
-    )
-
-    compute_nodes_sum_kernel!(backend)(
-        cache.nodes_sum_gpu, cache.h∇, view(cache.anodes_gpu, 1:1), cache.js, cache.K;
-        ndrange=(2 * cache.K + 1),
-    )
-    KernelAbstractions.synchronize(backend)
-
-    if OBLIVIOUS
-        _select_obliv_split!(cache, backend, L, params, view(cache.anodes_gpu, 1:1), n_feats, 1, js_cpu)
-    else
-        _select_binary_split!(cache, backend, L, params, view(cache.anodes_gpu, 1:1), n_feats, 1)
+    start, len = zeros(Int, length(tree.split)), zeros(Int, length(tree.split))
+    len[1] = length(is)
+    out = similar(is)
+    leaf_is = Dict{Int,Vector{UInt32}}()
+    leaf_rows!(nodes) = L <: EvoTrees.Quantile && for n in nodes
+        leaf_is[n] = Array(view(is, (start[n]+1):(start[n]+len[n])))
     end
 
-    n_active = 1
-
-    # Main loop: build tree level by level
-    for depth in 1:params.max_depth
-        iszero(n_active) && break
-
-        view(cache.n_next_active_gpu, 1:1) .= 0
+    n_current = [1]
+    depth = 0
+    while !isempty(n_current) && depth <= params.max_depth
+        if depth == params.max_depth
+            leaf_rows!(n_current)
+            break
+        end
+        n_active = length(n_current)
         active_nodes = view(cache.anodes_gpu, 1:n_active)
+        copyto!(active_nodes, Int32.(n_current))
 
-        # Histogram subtraction (depth >= 2)
-        if depth >= 2
-            cache.build_nodes_gpu .= 0
-            cache.subtract_nodes_gpu .= 0
-            cache.build_count .= 0
-            cache.subtract_count .= 0
+        # smaller child of each pair is built, its sibling is parent - smaller
+        EvoTrees.update_hist!(cache.h∇, ∇q, cache.x_bin, cache.js, is, n_current[1:2:end], start, len, scale, backend)
+        n_active > 1 && EvoTrees.subtract_hist!(cache.h∇, _to_device(backend, Int32.(n_current[2:2:end])), cache.js)
+        depth == 0 && root_sum_kernel!(backend)(cache.nodes_sum_gpu, cache.h∇, cache.js; ndrange=2K + 1)
 
-            separate_nodes_kernel!(backend)(
-                cache.build_nodes_gpu, cache.build_count,
-                cache.subtract_nodes_gpu, cache.subtract_count,
-                active_nodes, cache.nodes_sum_gpu;
-                ndrange=n_active
-            )
-            KernelAbstractions.synchronize(backend)
-
-            build_count_val = Array(cache.build_count)[1]
-            subtract_count_val = Array(cache.subtract_count)[1]
-
-            # Build histograms for smaller children
-            if build_count_val > 0
-                EvoTrees.update_hist!(
-                    cache.h∇, ∇_gpu, cache.x_bin, cache.nidx, cache.js, is,
-                    view(cache.build_nodes_gpu, 1:build_count_val),
-                    cache.K, cache.target_mask_buf, backend,
-                )
-            end
-
-            # Compute larger children via subtraction
-            subtract_count_val > 0 && EvoTrees.subtract_hist!(
-                cache.h∇, view(cache.subtract_nodes_gpu, 1:subtract_count_val), cache.js)
-
-            compute_nodes_sum_kernel!(backend)(
-                cache.nodes_sum_gpu, cache.h∇, active_nodes, cache.js, cache.K;
-                ndrange=n_active * (2 * cache.K + 1),
-            )
-            KernelAbstractions.synchronize(backend)
-
-            if OBLIVIOUS
-                _select_obliv_split!(cache, backend, L, params, active_nodes, n_feats, n_active, js_cpu)
-            else
-                _select_binary_split!(cache, backend, L, params, active_nodes, n_feats, n_active)
-            end
+        if OBLIVIOUS
+            _select_obliv_split!(cache, backend, L, params, active_nodes, n_feats, n_active, js_cpu)
+        else
+            _select_binary_split!(cache, backend, L, params, active_nodes, n_feats, n_active)
         end
 
-        # Apply splits
         apply_splits_kernel!(backend)(
             cache.tree_split_gpu, cache.tree_cond_bin_gpu, cache.tree_feat_gpu,
             cache.tree_gain_gpu, cache.nodes_sum_gpu,
-            cache.n_next_gpu, cache.n_next_active_gpu,
             view(cache.best_gain_gpu, 1:n_active),
             view(cache.best_bin_gpu, 1:n_active),
             view(cache.best_feat_gpu, 1:n_active),
-            cache.h∇, active_nodes, cache.feattypes_gpu,
-            depth, params.max_depth, Float32(params.gamma),
-            cache.K;
-            ndrange=max(n_active, 1),
+            cache.h∇, active_nodes, cache.feattypes_gpu, Float32(params.gamma);
+            ndrange=n_active,
         )
-        KernelAbstractions.synchronize(backend)
+        split = Array(cache.tree_split_gpu)
+        leaf_rows!(filter(n -> !split[n], n_current))
+        n_split = filter(n -> split[n], n_current)
 
-        n_active = Int(Array(cache.n_next_active_gpu)[1])
-        if n_active > 0
-            copyto!(view(cache.anodes_gpu, 1:n_active), view(cache.n_next_gpu, 1:n_active))
-        end
-
-        # Update observation->node assignments
-        if n_active > 0
-            update_nodes_idx_kernel!(backend)(
-                cache.nidx, is, cache.x_bin, cache.tree_feat_gpu,
-                cache.tree_cond_bin_gpu, cache.feattypes_gpu;
-                ndrange=length(is),
+        # children's rows are only needed for their histograms, or for quantile leaves
+        if !isempty(n_split) && (depth + 1 < params.max_depth || L <: EvoTrees.Quantile)
+            is, out = EvoTrees.split_set!(
+                out, is, cache.x_bin, cache.tree_feat_gpu, cache.tree_cond_bin_gpu,
+                cache.feattypes_gpu, n_split, start, len, backend,
             )
-            KernelAbstractions.synchronize(backend)
         end
+        n_current = Int[]
+        for n in n_split
+            l, r = n << 1, n << 1 + 1
+            append!(n_current, len[r] >= len[l] ? (l, r) : (r, l))
+        end
+        depth += 1
     end
 
     # Copy tree to CPU and compute leaf predictions
@@ -295,44 +242,23 @@ function grow_tree!(
             lo <<= 1
         end
     end
-    copyto!(tree.w, view(cache.nodes_sum_gpu, size(cache.nodes_sum_gpu, 1), 1:length(tree.w)))
+    nodes_sum_cpu = Array(cache.nodes_sum_gpu)
+    copyto!(tree.w, view(nodes_sum_cpu, size(nodes_sum_cpu, 1), 1:length(tree.w)))
 
     leaf_nodes = findall(!, tree.split)
-
     if L <: EvoTrees.Quantile
-        cpu_data = (
-            nidx=Array(cache.nidx),
-            is=Array(is),
-            ∇=Array(cache.∇),
-            nodes_sum=Array(cache.nodes_sum_gpu),
-        )
-
-        leaf_map = Dict{Int,Vector{UInt32}}()
-        sizehint!(leaf_map, length(leaf_nodes))
-        for i in 1:length(cpu_data.is)
-            leaf_id = cpu_data.nidx[cpu_data.is[i]]
-            if leaf_id > 0 && leaf_id <= length(tree.split) && !tree.split[leaf_id]
-                if !haskey(leaf_map, leaf_id)
-                    leaf_map[leaf_id] = UInt32[]
-                end
-                push!(leaf_map[leaf_id], cpu_data.is[i])
-            end
-        end
-
+        ∇_cpu = Array(cache.∇)
         Threads.@threads for n in leaf_nodes
-            node_sum_view = view(cpu_data.nodes_sum, :, n)
-            node_is = get(leaf_map, n, UInt32[])
+            node_is = get(leaf_is, n, UInt32[])
             if !isempty(node_is)
-                EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_view, L, params, cpu_data.∇, node_is)
+                EvoTrees.pred_leaf_cpu!(tree.pred, n, view(nodes_sum_cpu, :, n), L, params, ∇_cpu, node_is)
             else
                 tree.pred[:, n] .= 0
             end
         end
     else
-        nodes_sum_cpu = Array(cache.nodes_sum_gpu)
         Threads.@threads for n in leaf_nodes
-            node_sum_view = view(nodes_sum_cpu, :, n)
-            EvoTrees.pred_leaf_cpu!(tree.pred, n, node_sum_view, L, params)
+            EvoTrees.pred_leaf_cpu!(tree.pred, n, view(nodes_sum_cpu, :, n), L, params)
         end
     end
 
@@ -340,62 +266,34 @@ function grow_tree!(
 end
 
 """
-	apply_splits_kernel!(tree_split, tree_cond_bin, tree_feat, tree_gain,
-	                     nodes_sum, n_next, n_next_active,
-	                     best_gain, best_bin, best_feat,
-	                     h∇, active_nodes, feattypes,
-	                     depth, max_depth, gamma, K_val)
+    apply_splits_kernel!(tree_split, tree_cond_bin, tree_feat, tree_gain, nodes_sum,
+                         best_gain, best_bin, best_feat, h∇, active_nodes, feattypes, gamma)
 
-Apply the chosen best split for each active node and create its children.
-
-For each active node `node = active_nodes[n_idx]`, if `best_gain[n_idx] > gamma`
-and `depth <= max_depth`, mark the node as split and:
-- Write split metadata (`tree_split`, `tree_feat`, `tree_cond_bin`, `tree_gain`)
-- Compute left-child gradient totals from histograms (`h∇`) and write them into `nodes_sum`
-- Compute right-child totals as `parent - left` (also into `nodes_sum`)
-- Append the two children to the next active-node list (`n_next`) using atomic allocation
-
-Mutates:
-- `tree_split`, `tree_cond_bin`, `tree_feat`, `tree_gain`
-- `nodes_sum` (writes child node totals)
-- `n_next`, `n_next_active`
+For each active node whose `best_gain` exceeds `gamma`, record the split and write both
+children's totals into `nodes_sum`: left from the parent histogram, right as `parent - left`.
 """
 @kernel function apply_splits_kernel!(
-    tree_split, tree_cond_bin, tree_feat, tree_gain,
-    nodes_sum, n_next, n_next_active,
-    best_gain, best_bin, best_feat, h∇, active_nodes, feattypes,
-    depth, max_depth, gamma, K_val,
+    tree_split, tree_cond_bin, tree_feat, tree_gain, nodes_sum,
+    @Const(best_gain), @Const(best_bin), @Const(best_feat), @Const(h∇), @Const(active_nodes), @Const(feattypes),
+    gamma,
 )
     n_idx = @index(Global)
     node = active_nodes[n_idx]
 
-    @inbounds if depth <= max_depth && best_gain[n_idx] > gamma
+    @inbounds if best_gain[n_idx] > gamma
+        feat, bin = Int(best_feat[n_idx]), Int(best_bin[n_idx])
         tree_split[node] = true
-        tree_cond_bin[node] = best_bin[n_idx]
-        tree_feat[node] = best_feat[n_idx]
+        tree_cond_bin[node] = bin
+        tree_feat[node] = feat
         tree_gain[node] = best_gain[n_idx]
 
-        child_l = node << 1
-        child_r = (node << 1) + 1
-        feat = Int(tree_feat[node])
-        bin = Int(tree_cond_bin[node])
-        is_numeric = feattypes[feat]
-
-        for kk in 1:(2*K_val+1)
+        for kk in axes(h∇, 1)
             sum_val = zero(eltype(nodes_sum))
-            if is_numeric
-                for b in 1:bin
-                    sum_val += h∇[kk, b, feat, node]
-                end
-            else
-                sum_val = h∇[kk, bin, feat, node]
+            for b in (feattypes[feat] ? (1:bin) : (bin:bin))
+                sum_val += h∇[kk, b, feat, node]
             end
-            nodes_sum[kk, child_l] = sum_val
-            nodes_sum[kk, child_r] = nodes_sum[kk, node] - sum_val
+            nodes_sum[kk, node<<1] = sum_val
+            nodes_sum[kk, node<<1+1] = nodes_sum[kk, node] - sum_val
         end
-
-        idx_base = Atomix.@atomic n_next_active[1] += 2
-        n_next[idx_base-1] = child_l
-        n_next[idx_base] = child_r
     end
 end

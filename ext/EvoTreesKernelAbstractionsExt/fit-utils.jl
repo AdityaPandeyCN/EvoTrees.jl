@@ -1,195 +1,167 @@
 using KernelAbstractions
 using Atomix
 
-"""
-	update_nodes_idx_kernel!(nidx, is, x_bin, cond_feats, cond_bins, feattypes)
+# Rows of a node read by one histogram workgroup, and by one partition workgroup (one row per thread).
+const HIST_ROWS = 4096
+const SPLIT_ROWS = 256
+# Slots in a workgroup's local histogram tile (32 KB: one 64-bit integer per slot, as two UInt32 words).
+const HIST_LOCAL = 4096
 
-Update observation-to-node assignments by traversing splits (left child = node*2, right child = node*2+1).
 """
-@kernel function update_nodes_idx_kernel!(
-    nidx::AbstractVector{T},
-    @Const(is),
-    @Const(x_bin),
-    @Const(cond_feats),
-    @Const(cond_bins),
-    @Const(feattypes),
-) where {T<:Unsigned}
-    gidx = @index(Global)
-    @inbounds if gidx <= length(is)
-        obs = is[gidx]
-        node = nidx[obs]
-        if node > 0
-            feat = cond_feats[node]
-            bin = cond_bins[node]
-            if bin != 0
-                feattype = feattypes[feat]
-                is_left = feattype ? (x_bin[obs, feat] <= bin) : (x_bin[obs, feat] == bin)
-                nidx[obs] = (node << 1) + T(Int(!is_left))
+    hist_kernel!(h∇, ∇, x_bin, js, is, items, scale, ck, nf)
+
+One workgroup per `(item, tile)`. Item `items[:, i] = (node, lo, hi)` is the rows `is[lo+1:hi]`
+of `node`. A tile is `nf` features by `ck` of the `2K+1` channels. The workgroup sums its rows in
+local memory, then adds the tile into `h∇` once (two-phase privatized histogram). `∇` is the
+gradients in 64-bit fixed point, `round(∇ * scale)`; integer sums are exact and independent of
+order. Each 64-bit add is done as two native 32-bit atomics with the carry propagated, as in
+XGBoost's `AtomicAdd64As32`.
+"""
+@kernel function hist_kernel!(h∇, @Const(∇), @Const(x_bin), @Const(js), @Const(is), @Const(items), @Const(scale), ck::Int, nf::Int)
+    sh = @localmem UInt32 (2 * HIST_LOCAL,)
+    tid = @index(Local, Linear)
+    wg = @groupsize()[1]
+    for i in tid:wg:(2*HIST_LOCAL)
+        sh[i] = 0
+    end
+    @synchronize
+    # indices are re-read after each @synchronize: the CPU backend does not carry locals across it
+    tid = @index(Local, Linear)
+    wg = @groupsize()[1]
+    it, t = @index(Group, NTuple)
+    NK, NB, nct = size(h∇, 1), size(h∇, 2), cld(size(h∇, 1), ck)
+    ct, ft = (t - 1) % nct, (t - 1) ÷ nct
+    @inbounds for r in (items[2, it]+tid):wg:items[3, it]
+        obs = is[r]
+        for f in 1:nf
+            jj = ft * nf + f
+            jj > length(js) && break
+            bin = x_bin[obs, js[jj]]
+            for c in 1:ck
+                k = ct * ck + c
+                k > NK && break
+                i, x = c + ck * (bin - 1 + NB * (f - 1)), reinterpret(UInt64, ∇[k, obs])
+                lo, hi = x % UInt32, (x >> 32) % UInt32
+                low = Atomix.@atomic sh[2i-1] += lo # returns the new low word
+                Atomix.@atomic sh[2i] += hi + UInt32(low < lo) # plus the carry out of the low word
             end
         end
     end
-end
-
-"""
-	hist_kernel!(h∇, ∇, x_bin, nidx, js, is, K, chunk_size, target_mask)
-
-Build per-node gradient histograms using atomic updates.
-
-- `h∇` layout: [2K+1, nbins, n_feats, n_nodes]
-- Each thread processes one (feature, observation-chunk) pair to reduce contention.
-"""
-@kernel function hist_kernel!(
-    h∇::AbstractArray{T,4},
-    @Const(∇),
-    @Const(x_bin),
-    @Const(nidx),
-    @Const(js),
-    @Const(is),
-    K::Int,
-    chunk_size::Int,
-    @Const(target_mask)
-) where {T}
-    gidx = @index(Global, Linear)
-    n_feats = length(js)
-    n_obs = length(is)
-    total_chunks = cld(n_obs, chunk_size)
-    total_threads = n_feats * total_chunks
-
-    @inbounds if gidx <= total_threads
-        feat_idx = (gidx - 1) % n_feats + 1
-        chunk_idx = (gidx - 1) ÷ n_feats
-        feat = js[feat_idx]
-
-        start_obs = chunk_idx * chunk_size + 1
-        end_obs = min(start_obs + chunk_size - 1, n_obs)
-
-        for obs_idx in start_obs:end_obs
-            obs = is[obs_idx]
-            node = nidx[obs]
-            if node > 0 && node <= size(h∇, 4) && target_mask[node] != 0
-                bin = x_bin[obs, feat]
-                if bin > 0 && bin <= size(h∇, 2)
-                    for k in 1:(2*K+1)
-                        Atomix.@atomic h∇[k, bin, feat, node] += ∇[k, obs]
-                    end
-                end
-            end
+    @synchronize
+    tid = @index(Local, Linear)
+    wg = @groupsize()[1]
+    it, t = @index(Group, NTuple)
+    NK, NB, nct = size(h∇, 1), size(h∇, 2), cld(size(h∇, 1), ck)
+    ct, ft = (t - 1) % nct, (t - 1) ÷ nct
+    @inbounds for i in tid:wg:(ck*NB*nf)
+        c, b, f = (i - 1) % ck + 1, (i - 1) ÷ ck % NB + 1, (i - 1) ÷ (ck * NB) + 1
+        jj, k, v = ft * nf + f, ct * ck + c, reinterpret(Int64, UInt64(sh[2i]) << 32 | UInt64(sh[2i-1]))
+        if jj <= length(js) && k <= NK && !iszero(v)
+            Atomix.@atomic h∇[k, b, js[jj], items[1, it]] += v / scale[k]
         end
     end
 end
 
-"""
-	clear_hist_kernel!(h∇, active_nodes, n_active)
+@kernel function clear_hist_kernel!(h, @Const(js), @Const(nodes))
+    i, jj, nn = @index(Global, NTuple)
+    @inbounds h[i, js[jj], nodes[nn]] = 0
+end
 
-Zero histogram entries in `h∇` for the `n_active` nodes listed in `active_nodes`.
-"""
-@kernel function clear_hist_kernel!(h∇, @Const(active_nodes), n_active)
-    idx = @index(Global, Linear)
-    n_elements = size(h∇, 1) * size(h∇, 2) * size(h∇, 3)
-    total = n_elements * n_active
-
-    @inbounds if idx <= total
-        node_idx = (idx - 1) ÷ n_elements + 1
-        element_idx = (idx - 1) % n_elements
-        node = active_nodes[node_idx]
-        if node > 0
-            k = element_idx % size(h∇, 1) + 1
-            b = (element_idx ÷ size(h∇, 1)) % size(h∇, 2) + 1
-            j = element_idx ÷ (size(h∇, 1) * size(h∇, 2)) + 1
-            h∇[k, b, j, node] = zero(eltype(h∇))
-        end
+# Row slices `(node, lo, hi)` of `step` rows covering each node in `nodes`, one column per slice.
+function _slices(nodes, start, len, step, nrows)
+    plan, c = zeros(Int32, nrows, sum(n -> cld(len[n], step), nodes; init=0)), 0
+    for n in nodes, lo in start[n]:step:(start[n]+len[n]-1)
+        c += 1
+        plan[1, c], plan[2, c], plan[3, c] = n, lo, min(lo + step, start[n] + len[n])
     end
+    return plan
 end
 
 """
-	clear_mask_kernel!(mask)
+    update_hist!(h∇, ∇, x_bin, js, is, nodes, start, len, scale, backend)
 
-Set all entries of `mask` to 0.
+Build the histograms of `nodes`, whose rows are `is[start[n]+1:start[n]+len[n]]`.
 """
-@kernel function clear_mask_kernel!(mask)
-    idx = @index(Global)
-    @inbounds if idx <= length(mask)
-        mask[idx] = 0
-    end
-end
-
-"""
-	mark_active_nodes_kernel!(mask, active_nodes)
-
-Mark each node id in `active_nodes` as active by setting `mask[node] = 1`.
-"""
-@kernel function mark_active_nodes_kernel!(mask, @Const(active_nodes))
-    idx = @index(Global)
-    @inbounds if idx <= length(active_nodes)
-        node = active_nodes[idx]
-        if node > 0 && node <= length(mask)
-            mask[node] = 1
-        end
-    end
-end
-
-# Build histograms for active nodes
-function EvoTrees.update_hist!(h∇, ∇, x_bin, nidx, js, is, active_nodes, K, target_mask, backend)
-    n_active = length(active_nodes)
-
-    clear_mask_kernel!(backend)(target_mask; ndrange=length(target_mask))
-    KernelAbstractions.synchronize(backend)
-
-    mark_active_nodes_kernel!(backend)(target_mask, active_nodes; ndrange=n_active)
-    KernelAbstractions.synchronize(backend)
-
-    if n_active > 0
-        clear_hist_kernel!(backend)(
-            h∇, active_nodes, n_active;
-            ndrange=n_active * size(h∇, 1) * size(h∇, 2) * size(h∇, 3),
-        )
-        KernelAbstractions.synchronize(backend)
-    end
-
-    chunk_size = EvoTrees.HIST_OBS_CHUNK
-    n_obs_chunks = cld(length(is), chunk_size)
-    num_threads = length(js) * n_obs_chunks
-
-    hist_kernel!(backend)(
-        h∇, ∇, x_bin, nidx, js, is, K, chunk_size, target_mask;
-        ndrange=num_threads,
+function EvoTrees.update_hist!(h∇, ∇, x_bin, js, is, nodes, start, len, scale, backend)
+    NK, NB = size(h∇, 1), size(h∇, 2)
+    ck = min(NK, HIST_LOCAL ÷ NB)
+    nf = ck == NK ? HIST_LOCAL ÷ (NK * NB) : 1
+    h = reshape(h∇, :, size(h∇, 3), size(h∇, 4))
+    clear_hist_kernel!(backend)(h, js, _to_device(backend, Int32.(nodes)); ndrange=(size(h, 1), length(js), length(nodes)))
+    items = _slices(nodes, start, len, HIST_ROWS, 3)
+    hist_kernel!(backend, (256, 1))(
+        h∇, ∇, x_bin, js, is, _to_device(backend, items), scale, ck, nf;
+        ndrange=(256 * size(items, 2), cld(NK, ck) * cld(length(js), nf)),
     )
-    KernelAbstractions.synchronize(backend)
+end
+
+@inline _goes_left(x_bin, i, f, b, numeric) = numeric ? x_bin[i, f] <= b : x_bin[i, f] == b
+
+# One workgroup per slice `(node, lo, hi, left_at, right_at)`, one row per thread. Rows going left set
+# a bit in a local mask. The count pass writes the slice's left count; the scatter pass writes each row
+# after the left or right rows before it, so both children keep row order.
+@kernel function split_kernel!(out, lefts, @Const(is), @Const(x_bin), @Const(plan), @Const(feat), @Const(cond_bin), @Const(feattypes), scatter::Bool)
+    bits = @localmem UInt32 (SPLIT_ROWS ÷ 32,)
+    tid = @index(Local, Linear)
+    tid <= SPLIT_ROWS ÷ 32 && (bits[tid] = 0)
+    @synchronize
+    tid = @index(Local, Linear)
+    s = @index(Group, Linear)
+    @inbounds begin
+        n, p = plan[1, s], plan[2, s] + tid
+        if p <= plan[3, s] && _goes_left(x_bin, is[p], feat[n], cond_bin[n], feattypes[feat[n]])
+            Atomix.@atomic bits[(tid-1)>>5+1] += UInt32(1) << ((tid - 1) & 31)
+        end
+    end
+    @synchronize
+    tid = @index(Local, Linear)
+    s = @index(Group, Linear)
+    w, b = (tid - 1) >> 5 + 1, (tid - 1) & 31
+    l = 0
+    @inbounds for k in 1:(scatter ? w - 1 : SPLIT_ROWS ÷ 32)
+        l += count_ones(bits[k])
+    end
+    @inbounds if !scatter
+        tid == 1 && (lefts[s] = l)
+    elseif plan[2, s] + tid <= plan[3, s]
+        l += count_ones(bits[w] & ((UInt32(1) << b) - UInt32(1)))
+        at = isodd(bits[w] >> b) ? plan[4, s] + l : plan[5, s] + tid - 1 - l
+        out[at+1] = is[plan[2, s]+tid]
+    end
 end
 
 """
-	separate_nodes_kernel!(build_nodes, build_count, subtract_nodes, subtract_count, active_nodes, nodes_sum)
+    split_set!(out, is, x_bin, feat, cond_bin, feattypes, nodes, start, len, backend)
 
-Split active sibling nodes into:
-- **build_nodes**: nodes whose histograms should be built via observation scan (lighter sibling)
-- **subtract_nodes**: nodes whose histograms should be computed as `parent - sibling` (heavier sibling)
-
-Node size is the weight sum `nodes_sum[end, node]`, already written by `apply_splits_kernel!`
-when the parent was split. Ties are broken by node id.
+Stable partition of the rows of each node in `nodes` into its left then right child, written to
+`out`, like the CPU `split_set!`: count left rows per slice, prefix-sum the counts on the host,
+then scatter. Sets `start` and `len` of the children.
 """
-@kernel function separate_nodes_kernel!(
-    build_nodes, build_count,
-    subtract_nodes, subtract_count,
-    @Const(active_nodes),
-    @Const(nodes_sum)
-)
-    idx = @index(Global)
-    @inbounds if idx <= length(active_nodes)
-        node = active_nodes[idx]
-        if node > 0
-            sibling = node ⊻ 1
-            w_node = nodes_sum[end, node]
-            w_sibling = nodes_sum[end, sibling]
-
-            if w_node < w_sibling || (w_node == w_sibling && node < sibling)
-                pos = Atomix.@atomic build_count[1] += 1
-                build_nodes[pos] = node
-            else
-                pos = Atomix.@atomic subtract_count[1] += 1
-                subtract_nodes[pos] = node
-            end
-        end
+function EvoTrees.split_set!(out, is, x_bin, feat, cond_bin, feattypes, nodes, start, len, backend)
+    plan = _slices(nodes, start, len, SPLIT_ROWS, 5)
+    plan_gpu = _to_device(backend, plan)
+    lefts_gpu = KA.allocate(backend, Int32, size(plan, 2))
+    split_kernel!(backend, SPLIT_ROWS)(out, lefts_gpu, is, x_bin, plan_gpu, feat, cond_bin, feattypes, false; ndrange=SPLIT_ROWS * size(plan, 2))
+    lefts = Array(lefts_gpu)
+    for n in nodes
+        len[2n] = 0
     end
+    for c in axes(plan, 2)
+        len[2plan[1, c]] += lefts[c]
+    end
+    l, r = copy(start), copy(start)
+    for c in axes(plan, 2)
+        n = plan[1, c]
+        plan[4, c], plan[5, c] = l[n], r[n] + len[2n]
+        l[n] += lefts[c]
+        r[n] += plan[3, c] - plan[2, c] - lefts[c]
+    end
+    for n in nodes
+        start[2n], start[2n+1] = start[n], start[n] + len[2n]
+        len[2n+1] = len[n] - len[2n]
+    end
+    split_kernel!(backend, SPLIT_ROWS)(out, lefts_gpu, is, x_bin, _to_device(backend, plan), feat, cond_bin, feattypes, true; ndrange=SPLIT_ROWS * size(plan, 2))
+    return out, is
 end
 
 """
@@ -202,10 +174,8 @@ The 3D ndrange drops the per-element index decode.
     i, jj, nn = @index(Global, NTuple)
     @inbounds begin
         n = nodes[nn]
-        if n > 1
-            j = js[jj]
-            h[i, j, n] = h[i, j, n>>1] - h[i, j, n⊻1]
-        end
+        j = js[jj]
+        h[i, j, n] = h[i, j, n>>1] - h[i, j, n⊻1]
     end
 end
 
@@ -213,35 +183,16 @@ function EvoTrees.subtract_hist!(h∇::GPUArraysCore.AbstractGPUArray{<:Any,4}, 
     backend = get_backend(h∇)
     h = reshape(h∇, :, size(h∇, 3), size(h∇, 4))
     subtract_hist_kernel!(backend)(h, js, nodes; ndrange=(size(h, 1), length(js), length(nodes)))
-    KernelAbstractions.synchronize(backend)
 end
 
-"""
-	compute_nodes_sum_kernel!(nodes_sum, h∇, active_nodes, js, K)
-
-Compute per-node gradient totals by summing histograms across bins.
-Writes into `nodes_sum[:, node]` for each node in `active_nodes`.
-"""
-@kernel function compute_nodes_sum_kernel!(nodes_sum, @Const(h∇), @Const(active_nodes), @Const(js), K::Int)
-    gidx = @index(Global)
-    n_active = length(active_nodes)
-    n_k = 2 * K + 1
-
-    @inbounds if gidx <= n_active * n_k
-        n_idx = (gidx - 1) ÷ n_k + 1
-        k = (gidx - 1) % n_k + 1
-        node = active_nodes[n_idx]
-
-        if node > 0
-            nbins = size(h∇, 2)
-            sum_val = zero(eltype(nodes_sum))
-            feat = js[1]
-            for b in 1:nbins
-                sum_val += h∇[k, b, feat, node]
-            end
-            nodes_sum[k, node] = sum_val
-        end
+# Root totals: every row falls in one bin of each feature, so any one feature's bins sum to the node.
+@kernel function root_sum_kernel!(nodes_sum, @Const(h∇), @Const(js))
+    k = @index(Global)
+    s = zero(eltype(nodes_sum))
+    @inbounds for b in axes(h∇, 2)
+        s += h∇[k, b, js[1], 1]
     end
+    @inbounds nodes_sum[k, 1] = s
 end
 
 """
